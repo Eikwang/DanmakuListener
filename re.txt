@@ -1,0 +1,15 @@
+mitmproxy
+playwright
+pydantic
+pydantic-settings
+loguru
+protobuf
+orjson
+psutil
+pytest
+pytest-asyncio
+pytest-cov
+mypy
+black
+ruff
+isort

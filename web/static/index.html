@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DanmakuListener</title>
+    <link rel=",icon" href="data:,">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- 顶部标题栏 -->
+        <header class="header">
+            <h1>DanmakuListener</h1>
+            <div class="connection-status">
+                <span id="status-indicator" class="status-dot disconnected"></span>
+                <span id="status-text">未连接</span>
+            </div>
+        </header>
+
+        <!-- 主体内容 -->
+        <div class="main-content">
+            <!-- 左侧面板：房间管理 + 代理控制 -->
+            <aside class="left-panel">
+                <!-- 房间管理 -->
+                <section class="room-section">
+                    <h2>房间管理</h2>
+                    <div class="room-add-form">
+                        <input type="text" id="room-input" placeholder="douyin:123456">
+                        <button id="add-room-btn">添加</button>
+                    </div>
+                    <div id="room-error" class="error-msg hidden"></div>
+                    <ul id="room-list" class="room-list"></ul>
+                    <button id="stop-all-btn" class="btn-danger" disabled>全部停止</button>
+                </section>
+
+                <!-- 系统代理控制 -->
+                <section class="proxy-section">
+                    <h2>系统代理</h2>
+                    <div class="proxy-control">
+                        <label class="switch">
+                            <input type="checkbox" id="proxy-toggle">
+                            <span class="slider"></span>
+                        </label>
+                        <span id="proxy-status-text">已禁用</span>
+                        <span id="proxy-address" class="proxy-addr"></span>
+                    </div>
+                </section>
+            </aside>
+
+            <!-- 中间主区域：弹幕显示 -->
+            <main class="danmaku-section">
+                <div class="danmaku-header">
+                    <h2>实时弹幕</h2>
+                    <button id="scroll-toggle-btn">暂停滚动</button>
+                </div>
+                <div id="danmaku-container" class="danmaku-container"></div>
+            </main>
+
+            <!-- 右侧面板：关键词屏蔽 -->
+            <aside class="right-panel">
+                <section class="keyword-section">
+                    <h2>关键词屏蔽</h2>
+                    <div class="keyword-toggle">
+                        <label class="switch">
+                            <input type="checkbox" id="keyword-filter-toggle" checked>
+                            <span class="slider"></span>
+                        </label>
+                        <span>启用过滤</span>
+                    </div>
+                    <div id="keyword-list" class="keyword-list"></div>
+                    <div class="keyword-add-form">
+                        <input type="text" id="keyword-input" placeholder="输入屏蔽关键词">
+                        <button id="add-keyword-btn">添加</button>
+                    </div>
+                </section>
+            </aside>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

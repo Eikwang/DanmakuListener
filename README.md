@@ -1,0 +1,185 @@
+# DanmakuListener
+
+高性能跨平台弹幕监听解决方案，支持代理模式和浏览器模式的混合架构。
+
+## 特性
+
+- **混合架构**：主流平台（抖音）使用高性能代理模式，其他平台使用 Playwright 浏览器模式兜底
+- **多平台支持**：内置抖音、斗鱼、B站适配器，支持自定义扩展
+- **内存稳定**：从根本上解决 Chromium 注入脚本导致的内存泄漏问题
+- **统一格式**：所有平台弹幕转换为标准格式输出
+- **异步非阻塞**：基于 asyncio 的事件驱动架构，支持高并发
+- **断线重连**：智能指数退避重连机制，保障稳定运行
+- **心跳保活**：定期检测页面/连接健康状态，异常时自动恢复
+- **Cookie 持久化**：自动保存和恢复登录状态
+- **性能监控**：内置指标收集器，实时监控消息吞吐量、内存占用等
+- **结构化日志**：支持 JSON 格式输出和敏感信息自动遮蔽
+
+## 支持的平台
+
+| 平台 | 标识 | 引擎模式 | 适配器 |
+|------|------|----------|--------|
+| 抖音 | `douyin` | 代理模式 | `DouyinAdapter` |
+| 斗鱼 | `douyu` | 浏览器模式 | `DouyuAdapter` |
+| B站 | `bilibili` | 浏览器模式 | `BilibiliAdapter` |
+| 其他 | — | 浏览器模式 | `GenericAdapter` |
+
+## 快速开始
+
+### 安装
+
+```bash
+# 使用 Poetry 安装
+poetry install
+
+# 或使用 pip
+pip install -r requirements.txt
+```
+
+### 基本用法
+
+```python
+import asyncio
+from danmaku_listener import DanmakuListener, DanmakuMessage
+
+async def main():
+    # 使用上下文管理器
+    async with DanmakuListener() as listener:
+        # 启动监听（格式：platform:room_id）
+        await listener.start(["douyin:123456"])
+
+        # 注册弹幕事件回调
+        @listener.on_danmaku
+        async def handle_danmaku(message: DanmakuMessage):
+            print(f"[{message.platform}] {message.user_name}: {message.content}")
+
+        # 注册错误回调
+        @listener.on_error
+        async def handle_error(error: Exception):
+            print(f"Error: {error}")
+
+        # 保持运行
+        await asyncio.Future()
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+### 多平台混合监听
+
+```python
+async with DanmakuListener() as listener:
+    # 同时监听多个平台
+    await listener.start([
+        "douyin:123456",   # 代理模式
+        "bilibili:789012", # 浏览器模式
+        "douyu:345678",    # 浏览器模式
+    ])
+```
+
+### 显式控制模式
+
+```python
+listener = DanmakuListener()
+await listener.start(["douyin:123456", "bilibili:789012"])
+
+# ... 运行中
+
+await listener.stop()
+```
+
+## 配置
+
+复制 `.env.example` 为 `.env.local` 并修改配置：
+
+```bash
+cp .env.example .env.local
+```
+
+| 配置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `LOG_LEVEL` | `INFO` | 日志级别 (DEBUG/INFO/WARNING/ERROR) |
+| `PROXY_PORT` | `8827` | 代理服务器端口 |
+| `MAX_ROOMS` | `10` | 同时监听的最大房间数 |
+| `BROWSER_HEADLESS` | `true` | 浏览器是否使用无头模式 |
+| `COOKIE_DIR` | `./cookie` | Cookie 存储目录 |
+| `RECONNECT_MAX_RETRIES` | `3` | 重连最大重试次数 |
+| `RECONNECT_BASE_DELAY` | `1.0` | 重连基础延迟（秒） |
+| `HEARTBEAT_INTERVAL` | `30` | 心跳检测间隔（秒） |
+| `DEDUP_WINDOW_SIZE` | `300` | 去重窗口大小（条消息） |
+
+## 项目结构
+
+```
+danmaku_listener/
+├── __init__.py          # 包入口
+├── listener.py          # DanmakuListener 主类
+├── core.py              # 性能指标收集器
+├── engines/             # 监听引擎层
+│   ├── base.py          # BaseEngine 抽象基类
+│   ├── proxy_engine.py  # 代理模式实现
+│   └── browser_engine.py # 浏览器模式实现
+├── adapters/            # 平台适配器层
+│   ├── base.py          # BaseAdapter 抽象基类
+│   ├── douyin.py        # 抖音适配器
+│   ├── douyu.py         # 斗鱼适配器
+│   ├── bilibili.py      # B站适配器
+│   ├── generic.py       # 通用适配器
+│   └── protocols/       # 协议定义
+│       └── message_types.py
+├── bus/                 # 消息总线层
+│   ├── event_bus.py     # 事件分发中心
+│   ├── message.py       # 数据模型
+│   └── dedup_filter.py  # 去重过滤器
+├── managers/            # 资源管理器
+│   ├── certificate_manager.py
+│   ├── cookie_manager.py
+│   ├── reconnect_manager.py
+│   └── heartbeat_monitor.py
+├── config/              # 配置管理
+│   ├── settings.py      # Pydantic Settings
+│   └── defaults.py      # 默认配置值
+└── utils/               # 工具函数
+    ├── platform_parser.py
+    └── logger.py
+```
+
+## 文档
+
+- [API 文档](docs/api.md) — 详细的 API 参考文档
+- [高级用法指南](docs/advanced.md) — 自定义适配器、脚本扩展、错误处理等
+
+## 开发
+
+### 环境要求
+
+- Python >= 3.10
+- Poetry >= 1.7
+
+### 安装依赖
+
+```bash
+poetry install
+```
+
+### 运行测试
+
+```bash
+pytest tests/
+```
+
+### 代码检查
+
+```bash
+ruff check danmaku_listener/
+mypy danmaku_listener/
+black --check danmaku_listener/
+```
+
+## 许可证
+
+MIT License
+
+## 贡献
+
+欢迎提交 Issue 和 Pull Request！
