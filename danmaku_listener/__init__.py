@@ -21,9 +21,10 @@ _LAZY_EXPORTS = {
 
 
 def __getattr__(name: str) -> Any:
-    mod_path, attr = _LAZY_EXPORTS.get(name), None
-    if mod_path is None:
+    entry = _LAZY_EXPORTS.get(name)
+    if entry is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    mod_path, attr = entry
     import importlib
 
     module = importlib.import_module(mod_path)
