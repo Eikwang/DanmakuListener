@@ -1,5 +1,7 @@
 """虎牙协议测试（阶段 3b）——帧编解码 round-trip + draft 语义 + 引擎生命周期"""
 
+import asyncio
+
 import pytest
 
 from danmaku_listener.engines.protocol import huya_codec as codec
@@ -9,9 +11,9 @@ from danmaku_listener.engines.protocol.huya import HuyaProtocolEngine
 def test_frame_roundtrip():
     payload = b"\x0a\x05hello"
     frame = codec.encode_frame(payload, proto_ver=1, seq=7)
-    total, header_len, ver, seq = struct_unpack(frame[:8])
+    total, header_len, ver, seq = struct_unpack(frame[:12])
     assert total == 8 + len(payload)
-    assert header_len == 8
+    assert header_len == 12
     frames = codec.decode_frames(frame)
     assert frames == [(1, 7, payload)]
 

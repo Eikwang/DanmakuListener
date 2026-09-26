@@ -26,11 +26,11 @@ class HuyaFrameError(ValueError):
 
 
 def encode_frame(payload: bytes, proto_ver: int = 1, seq: int = 0) -> bytes:
-    """编码一帧（大端：4B 总长 + 2B 头长 + 2B 版本 + 4B 序列 + payload）
+    """编码一帧（大端：4B 总长 + 2B 头长(=12) + 2B 版本 + 4B 序列 + payload）
 
     帧细节（头长/版本/序列字段布局）为 draft，以抓包校准为准。
     """
-    header_len = 8
+    header_len = HEADER_SIZE
     total = header_len + len(payload)
     return struct.pack(">IHHI", total, header_len, proto_ver, seq) + payload
 
