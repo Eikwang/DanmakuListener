@@ -30,7 +30,8 @@ class BrowserEngine(BaseEngine):
         _heartbeats: room_id -> HeartbeatMonitor 映射
     """
 
-    def __init__(self, headless: bool = True, cookie_dir: str = "./cookie"):
+    def __init__(self, headless: bool = True, cookie_dir: str = "./cookie",
+                 session_lifetime_seconds: int = 0):
         """初始化浏览器引擎
 
         Args:
@@ -40,6 +41,10 @@ class BrowserEngine(BaseEngine):
         super().__init__()
         self._browser = None
         self._playwright = None
+        # 契约 v1 有界会话（阶段 6）：>0 时单页面生命周期到期触发事件驱动重建，
+        # 替代"全局定时重启"；0=关闭（保持既有行为，默认关闭由兜底开关控制）
+        self._session_lifetime_seconds = session_lifetime_seconds
+        self._session_started_at: dict = {}
         self._contexts: Dict[str, Any] = {}
         self._pages: Dict[str, Any] = {}
         self._cookie_manager = CookieManager(cookie_dir=cookie_dir)
@@ -72,7 +77,19 @@ class BrowserEngine(BaseEngine):
         # 启动心跳监控
         await self._start_heartbeat(room_id)
 
+        # 有界会话起点（契约 v1：事件驱动重建）
+        import time as _time
+        self._session_started_at[room_id] = _time.monotonic()
+
         self._set_status(EngineStatus.RUNNING)
+
+    def session_expired(self, room_id: str) -> bool:
+        """有界会话是否到期（兜底/受控页面的生命周期上限）"""
+        import time as _time
+        started = self._session_started_at.get(room_id)
+        if not started or self._session_lifetime_seconds <= 0:
+            return False
+        return _time.monotonic() - started >= self._session_lifetime_seconds
 
     async def stop(self, room_id: str) -> None:
         """停止对指定房间的浏览器监听
