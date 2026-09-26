@@ -42,11 +42,14 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     listen = sub.add_parser("listen", help="演示模式：监听单房间，标准化 JSON 打印 stdout")
-    listen.add_argument("target", help="平台:房间ID，如 bilibili:23058")
+    listen.add_argument("target", nargs="?", default=None, help="平台:房间ID，如 bilibili:23058（离线回放时省略）")
+    listen.add_argument("--replay", default=None, help="离线回放 fixtures JSONL（无需真实直播间）")
+    listen.add_argument("--speed", type=float, default=1.0, help="回放速度倍率")
     listen.add_argument("--timeout", type=float, default=60.0, help="等待首条消息的超时秒数")
 
-    serve = sub.add_parser("serve", help="常驻服务：全引擎 + WS 推送（阶段 0 骨架）")
+    serve = sub.add_parser("serve", help="常驻服务：WS 推送通道 + 消息源")
     serve.add_argument("--config", default=None, help="TOML 配置文件路径")
+    serve.add_argument("--replay", default=None, help="回放 fixtures JSONL 作为消息源（通道冒烟）")
 
     sub.add_parser("contract", help="打印契约版本信息")
     return parser
@@ -61,9 +64,54 @@ def cmd_contract() -> int:
     return 0
 
 
-async def cmd_listen(target: str, timeout: float) -> int:
-    from danmaku_listener import DanmakuListener
+async def cmd_listen_replay(path: str, speed: float, limit: int = 0) -> int:
+    """离线回放：fixtures JSONL → stdout JSON 流（无需真实直播间，magical moment 载体）"""
+    from danmaku_listener.fixtures.replayer import replay, validate_events
 
+    stats = validate_events(path)
+    if stats["invalid"]:
+        print(
+            json.dumps({
+                "error": "invalid_fixtures",
+                "reason": f"{stats['invalid']}/{stats['total']} 条不符合契约线格式",
+                "fix": "用 scripts/export_contract.py 导出的 Schema 校验 fixtures 生成流程",
+                "docs": "docs/contract/schema.md",
+            }, ensure_ascii=False),
+            file=sys.stderr,
+        )
+        return 3
+
+    _tthw_print(True)
+    first = False
+    count = 0
+
+    async def sink(wire: dict) -> None:
+        nonlocal count
+        count += 1
+        print(json.dumps(wire, ensure_ascii=False), flush=True)
+
+    gen = replay(path, sink, speed=speed)
+    async for _ in gen:
+        if limit and count >= limit:
+            break
+    print(f"[replay] {count} messages from {path}", file=sys.stderr)
+    return 0
+
+
+async def cmd_listen(target: str | None, timeout: float, replay_path: str | None = None, speed: float = 1.0) -> int:
+    if replay_path:
+        return await cmd_listen_replay(replay_path, speed)
+    if not target:
+        print(
+            json.dumps({
+                "error": "missing_target",
+                "reason": "listen 需要 平台:房间ID 或 --replay 文件",
+                "fix": "示例：python -m danmaku_listener listen bilibili:23058 或 --replay docs/contract/examples/demo.jsonl",
+                "docs": "docs/integration/autolive.md",
+            }, ensure_ascii=False),
+            file=sys.stderr,
+        )
+        return 2
     if ":" not in target:
         print(
             json.dumps({
@@ -122,30 +170,50 @@ async def cmd_listen(target: str, timeout: float) -> int:
     return 0
 
 
-async def cmd_serve(config: str | None) -> int:
-    """常驻服务骨架：WS 推送通道 + 引擎生命周期（阶段 0；引擎随阶段 1-5 接入）"""
+async def cmd_serve(config: str | None, replay: str | None = None) -> int:
+    """常驻服务：WS 推送通道 + 消息源（回放演示或引擎注册表，阶段 0 骨架）"""
+    import os
+
     from danmaku_listener.config.settings import get_settings, load_toml_overrides
+    from danmaku_listener.push.ws_server import PushServer, load_token
 
     settings = get_settings()
     overrides = load_toml_overrides(config) if config else {}
     if overrides:
         settings = settings.__class__(**overrides)
 
+    token = load_token(settings.ws_token_file, os.environ.get("DANMAKU_TOKEN"))
+    server = PushServer(host=settings.ws_bind, port=settings.ws_port, token=token)
+    await server.start()
     print(
         json.dumps({
             "service": "danmaku-serve",
             "ws": f"ws://{settings.ws_bind}:{settings.ws_port}/ws",
+            "auth": "token" if token else "loopback-only (未配置 token)",
             "contract_version": CONTRACT_VERSION,
-            "engines_online": [],  # 阶段 1-5 接入后由引擎注册表填充
+            "engines_online": [],
         }, ensure_ascii=False),
         flush=True,
     )
-    # 阶段 0 骨架：WS 推送服务器与引擎注册表在后续单元接入；
-    # 本命令保持存在以固定 CLI 面（DX 回归项）。
-    print(
-        "serve: engines registry lands with phase 1-5; contract channel wiring is next",
-        file=sys.stderr,
-    )
+
+    try:
+        if replay:
+            from danmaku_listener.fixtures.replayer import replay
+
+            async def sink(wire: dict) -> None:
+                await server.broadcast(wire)
+
+            async for _ in replay(replay, sink, speed=5.0, loop=True):
+                pass
+        else:
+            # 引擎注册表随阶段 1-5 接入；阶段 0 服务保持空转（DX 回归项已固定 CLI 面）
+            print(
+                "serve: no message source yet — engines land with phases 1-5 (use --replay to smoke-test the channel)",
+                file=sys.stderr,
+            )
+            await asyncio.Event().wait()
+    finally:
+        await server.stop()
     return 0
 
 
@@ -154,9 +222,9 @@ def main() -> int:
     if args.command == "contract":
         return cmd_contract()
     if args.command == "listen":
-        return asyncio.run(cmd_listen(args.target, args.timeout))
+        return asyncio.run(cmd_listen(args.target, args.timeout, args.replay, args.speed))
     if args.command == "serve":
-        return asyncio.run(cmd_serve(args.config))
+        return asyncio.run(cmd_serve(args.config, getattr(args, "replay", None)))
     return 2
 
 
