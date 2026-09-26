@@ -16,3 +16,6 @@ danmaku-serve = "danmaku_listener.__main__:main"
 
 [tool.setuptools.packages.find]
 include = ["danmaku_listener*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
