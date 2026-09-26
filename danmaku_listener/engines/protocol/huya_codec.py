@@ -16,7 +16,7 @@ import struct
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 PROTOCOL_VERSION = "huya-0-draft"
-HEADER_SIZE = 8
+HEADER_SIZE = 12
 WS_URL = "wss://hws.huya.com/wsc/websocket"
 HEARTBEAT_INTERVAL = 30.0
 
