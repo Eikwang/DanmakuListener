@@ -37,7 +37,7 @@ def test_packet_roundtrip():
     assert msg_type == codec.CLIENT_TYPE
     assert crypt == reserved == 0
     packets = codec.decode_packets(packet)
-    assert packets == [{"type": "heartbeat"}]
+    assert packets == [{"type": "heartbeat", "_packet_type": codec.CLIENT_TYPE}]
 
 
 def test_decode_server_packets_only():
@@ -62,12 +62,12 @@ def test_malformed_frame_rejected():
 
 def test_login_and_join():
     login = codec.build_login(23058)
-    fields = codec.decode_body(login[8:])
+    fields = codec.decode_body(login[12:])
     assert fields["type"] == "loginreq"
-    assert fields["roomid"] == 23058
+    assert fields["roomid"] == "23058"
     join = codec.build_join_group(23058)
-    fields = codec.decode_body(join[8:])
-    assert fields == {"type": "joingroup", "rid": 23058, "gid": -9999}
+    fields = codec.decode_body(join[12:])
+    assert fields == {"type": "joingroup", "rid": "23058", "gid": "-9999", "_packet_type": codec.CLIENT_TYPE}
 
 
 # ---- 映射 ----

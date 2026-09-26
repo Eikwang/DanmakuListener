@@ -66,7 +66,8 @@ def encode_packet(body: bytes, client: bool = True) -> bytes:
 def decode_packets(data: bytes) -> List[Dict[str, Any]]:
     """拆包（可能粘包）：返回 [{fields, "_packet_type"}]
 
-    客户端包（689）与服务器包（690）均解析；``_packet_type`` 标注来源方向。
+    帧布局：[4B msg_len][4B repeat][2B type][1B enc][1B res][body]，
+    ``msg_len = 8 + len(body)``（帧总长 = 4 + msg_len）；``_packet_type`` 标注方向。
 
     Raises:
         DouyuFrameError: 长度字段异常
@@ -74,16 +75,16 @@ def decode_packets(data: bytes) -> List[Dict[str, Any]]:
     packets: List[Dict[str, Any]] = []
     offset = 0
     total_len = len(data)
-    while offset + 8 <= total_len:
+    while offset + 12 <= total_len:
         msg_len, _repeat, msg_type, _crypt, _reserved = PACKET_HEADER.unpack_from(data, offset)
         body_len = msg_len - 8
-        if body_len < 0 or offset + msg_len > total_len:
+        if body_len < 0 or offset + 4 + msg_len > total_len:
             raise DouyuFrameError(f"msg_len={msg_len} 超出缓冲（offset={offset} total={total_len}）")
-        body = data[offset + 8 : offset + msg_len]
+        body = data[offset + 12 : offset + 4 + msg_len]
         fields = decode_body(body)
         fields["_packet_type"] = msg_type
         packets.append(fields)
-        offset += msg_len
+        offset += 4 + msg_len
     return packets
 
 
