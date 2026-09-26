@@ -12,7 +12,7 @@ def test_frame_roundtrip():
     payload = b"\x0a\x05hello"
     frame = codec.encode_frame(payload, proto_ver=1, seq=7)
     total, header_len, ver, seq = struct_unpack(frame[:12])
-    assert total == 8 + len(payload)
+    assert total == 12 + len(payload)
     assert header_len == 12
     frames = codec.decode_frames(frame)
     assert frames == [(1, 7, payload)]
