@@ -287,6 +287,7 @@ class Envelope(BaseModel):
     timestamp: int
     engine: str
     msg_id: Optional[str] = None
+    protocol_version: Optional[str] = None  # 平台协议版本元数据（调试三项：协议变更定位）
 
     @field_validator("seq")
     @classmethod

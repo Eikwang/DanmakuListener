@@ -20,6 +20,7 @@ from loguru import logger
 from danmaku_listener.bus.system_status import SystemStatusFactory
 from danmaku_listener.contract.models import GapReason, UnifiedMessage
 from danmaku_listener.managers.reconnect_manager import ReconnectManager
+from danmaku_listener.persistence.room_state_store import RoomStateStore
 
 
 class EngineStatus(str, Enum):
@@ -55,13 +56,18 @@ class BaseEngine(ABC):
     所有具体的监听引擎（代理模式、浏览器模式）都必须继承此类并实现抽象方法。
     """
 
-    def __init__(self):
-        """初始化引擎"""
+    def __init__(self, state_store: Optional[RoomStateStore] = None):
+        """初始化引擎
+
+        Args:
+            state_store: 每房间状态持久化存储（契约 v1 崩溃恢复）；None=纯内存
+        """
         self._status: EngineStatus = EngineStatus.STOPPED
         self._message_callbacks: List[MessageCallback] = []
         self._error_callbacks: List[ErrorCallback] = []
         self._reconnect_manager: Optional[ReconnectManager] = None
         self._rooms: Dict[str, RoomState] = {}
+        self._state_store = state_store
         self._system_factory = SystemStatusFactory(
             platform=getattr(self, "platform", "unknown"),
             engine=self.engine_id,
@@ -112,15 +118,29 @@ class BaseEngine(ABC):
     def _persist_state(self, room_id: str, state: RoomState) -> None:
         """持久化每房间状态（last-received 序号/时间戳、live 状态与转换时间）。
 
-        契约 v1 要求持久化以支持崩溃后 GAP 补发；默认仅内存（重启即失），
-        子类必须覆盖为磁盘实现。持久化失败不得阻断消息流（fail-open），
-        由调用方以 approx GAP 降级。
+        有 RoomStateStore 时写入 JSON 快照（防抖+fail-open）；
+        无存储实例时为纯内存（子类亦可另行覆盖为自定义实现）。
         """
+        if self._state_store is not None:
+            self._state_store.update(
+                room_id,
+                seq=state.seq,
+                live=state.live,
+                live_changed_at=state.live_changed_at,
+                last_received_ts=state.last_received_ts,
+            )
+            self._state_store.flush()
 
     def _load_persisted_state(self, room_id: str) -> Optional[Dict[str, Any]]:
         """加载上次会话持久化的房间状态；默认无。返回 dict 含
         seq / live / live_changed_at / last_received_ts（均可缺省）。"""
-        return None
+        if self._state_store is None:
+            return None
+        return {
+            k: self._state_store.get(room_id, k)
+            for k in ("seq", "live", "live_changed_at", "last_received_ts")
+            if self._state_store.get(room_id, k) is not None
+        }
 
     # ---- live 状态与 GAP 裁剪 ----
 

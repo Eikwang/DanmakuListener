@@ -17,13 +17,15 @@ class DedupFilter:
     维护并行的 set 用于 O(1) 查重，避免每次从 deque 重建集合。
     """
 
-    def __init__(self, window_size: int = 300):
+    def __init__(self, window_size: int = 300, window_seconds: int = 300):
         """初始化去重过滤器
 
         Args:
-            window_size: 滑动窗口大小（条消息）
+            window_size: 滑动窗口大小（条消息，容量上限）
+            window_seconds: 时间淘汰窗口（秒）——契约 v1 有界结构双参数（时间淘汰+容量上限）
         """
         self.window_size = window_size
+        self.window_seconds = window_seconds
         # room_id -> deque of (msg_id, timestamp)
         self._cache: Dict[str, Deque[tuple[str, float]]] = {}
         # room_id -> set of msg_id（并行索引，O(1) 查重）
@@ -55,8 +57,8 @@ class DedupFilter:
         queue = self._cache[room_id]
         id_set = self._id_sets[room_id]
 
-        # 清理过期记录（超过 5 分钟）
-        while queue and now - queue[0][1] > 300:
+        # 清理过期记录（超过时间窗口）
+        while queue and now - queue[0][1] > self.window_seconds:
             expired_id, _ = queue.popleft()
             id_set.discard(expired_id)
 
