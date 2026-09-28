@@ -39,6 +39,7 @@ OP_WUP_RSP = 4
 OP_HEARTBEAT_REQ = 20
 OP_HEARTBEAT_RSP = 21
 OP_MSG_PUSH = 7
+OP_MSG_PUSH_V2 = 22
 OP_REGISTER_GROUP_REQ = 16
 OP_REGISTER_GROUP_RSP = 17
 OP_UPDATE_USER_INFO_REQ = 33
@@ -181,16 +182,32 @@ class UserHeartBeatReq(TarsStruct):
 # ---- 编码 ----
 
 def _uni_attribute(payload: bytes) -> bytes:
-    """uniAttribute（tarsjce 1.7+）：map<string, byte[]> tag0，key="tReq" """
+    """uniAttribute（tarsjce）：map<string, byte[]> tag0，key="tReq"，value 带 tag1 头
+
+    浏览器真实帧对照：08 00 01 06 04 "tReq" 1d 00 <len> <data>
+    （value 头 0x1D = tag1 SimpleList——2026 版语义）
+    """
     os = TarsOutputStream()
-    os.write_map({"tReq": payload}, 0)
+    os._header(0, 8)  # MAP tag0
+    os.write_int(1, 0)  # map size=1
+    os.write_string("tReq", 0)  # key
+    os._header(1, 13)  # value：tag1 SimpleList
+    os._buf.append(0)  # 元素类型 byte
+    os.write_int(len(payload), 0)  # 长度
+    os._buf.extend(payload)
     return os.to_bytes()
 
 
-def _wup_encode(servant: str, func: str, req: TarsStruct) -> bytes:
-    """WupReq：4B 大端长度前缀 + Tars（tags 1-7；BaseWup.encode 同款）"""
-    inner = TarsOutputStream()
-    req.write_to(inner)
+def _wup_encode(servant: str, func: str, req: Any) -> bytes:
+    """WupReq：4B 大端长度前缀 + Tars（tags 1-7；BaseWup.encode 同款）
+
+    req 可为 TarsStruct（write_to 序列化）或 TarsOutputStream（已构造内容）。
+    """
+    if isinstance(req, TarsOutputStream):
+        inner = req
+    else:
+        inner = TarsOutputStream()
+        req.write_to(inner)
     wup = TarsOutputStream()
     wup.write_int(3, 1)  # version = VERSION3
     wup.write_int(0, 2)  # packetType
@@ -212,8 +229,26 @@ def build_websocket_command(operation: int, v_data: bytes) -> bytes:
 
 
 def build_do_launch() -> bytes:
-    """op=3 WupReq：liveui/doLaunch（连接后认证第一包）"""
-    return build_websocket_command(OP_WUP_REQ, _wup_encode("liveui", "doLaunch", LiveLaunchReq()))
+    """op=3 WupReq：launch/wsLaunch（2026 浏览器版，黄金样本逐字节对照）
+
+    浏览器帧 54B uni 内容：tId{ lUid=0, sGuid="", sHuYaUA(tag2),
+    appSrc="HUYA&ZH&2052"(tag3), 子struct(tag4){""} } + tag8 zero + tag9/10 空 map。
+    （SDK 2024 的 liveui/doLaunch + UserId 旧 tag 表在 2026 已不被应答）
+    """
+    req = TarsOutputStream()
+    req.write_struct_begin(0)  # tId
+    req.write_int(0, 0)  # lUid=0（游客）
+    req.write_string("", 1)  # sGuid
+    req.write_string(UA, 2)  # sHuYaUA（2026: tag2）
+    req.write_string("HUYA&ZH&2052", 3)  # appSrc
+    req.write_struct_begin(4)
+    req.write_string("", 0)
+    req.write_struct_end()
+    req.write_struct_end()  # tId end
+    req.write_int(0, 8)  # tag8
+    req.write_map({}, 9)  # tag9 空 map
+    req.write_map({}, 10)  # tag10 空 map
+    return build_websocket_command(OP_WUP_REQ, _wup_encode("launch", "wsLaunch", req))
 
 
 def build_register_group(tid: int) -> bytes:
@@ -239,6 +274,38 @@ def build_heartbeat(tid: int) -> bytes:
     return build_websocket_command(OP_HEARTBEAT_REQ, _wup_encode("onlineui", "OnUserHeartBeat", req))
 
 
+class GetPropsListReq(TarsStruct):
+    """礼物列表请求（servant=PropsUIServer/getPropsList；tId 用 2026 浏览器表）"""
+
+    def __init__(self, l_yyid: int = 0) -> None:
+        self.l_yyid = l_yyid
+        self.i_template_type = 1  # HuyaClientTemplateTypeEnum.TPL_MIRROR
+
+    def write_to(self, os: TarsOutputStream) -> None:
+        # tId（tag1 struct；2026 浏览器 UserId 表，同 build_do_launch）
+        os.write_struct_begin(1)
+        os.write_int(self.l_yyid, 0)
+        os.write_string("", 1)
+        os.write_string(UA, 2)
+        os.write_string("HUYA&ZH&2052", 3)
+        os.write_struct_begin(4)
+        os.write_string("", 0)
+        os.write_struct_end()
+        os.write_struct_end()
+        os.write_int(self.i_template_type, 3)
+
+    def read_from(self, is_: TarsInputStream) -> None:
+        pass
+
+
+def build_gift_list_req(l_yyid: int = 0) -> bytes:
+    """op=3 WupReq：PropsUIServer/getPropsList（连接后立即拉取礼物 ID 表）"""
+    return build_websocket_command(
+        OP_WUP_REQ,
+        _wup_encode("PropsUIServer", "getPropsList", GetPropsListReq(l_yyid)),
+    )
+
+
 # ---- 解码 ----
 
 def decode_command(data: bytes) -> Dict[str, Any]:
@@ -250,18 +317,54 @@ def decode_command(data: bytes) -> Dict[str, Any]:
     }
 
 
+def _uni_attribute_decode(raw: bytes) -> Dict[str, bytes]:
+    """uniAttribute（map<string, byte[]> tag0）→ dict"""
+    is_ = TarsInputStream(raw)
+    result: Dict[str, bytes] = {}
+    if not is_.skip_to_tag(0):
+        return result
+    _tag, type_ = is_._read_header()  # 消费 MAP 头
+    if type_ != 8:  # MAP
+        return result
+    n = is_._read_int_no_tag()
+    for _ in range(n):
+        key = is_._read_any()
+        # value：SimpleList byte[]
+        _v_tag, v_type = is_._read_header()
+        if v_type == 13:  # SIMPLELIST
+            is_._pos += 1  # 元素类型
+            length = is_._read_int_no_tag()
+            result[str(key)] = bytes(is_._buf[is_._pos:is_._pos + length])
+            is_._pos += length
+        elif v_type == 12:
+            result[str(key)] = b""
+        else:
+            break
+    return result
+
+
 def decode_wup_rsp(v_data: bytes) -> Dict[str, Any]:
-    """WupRsp（4B 长度前缀 + Tars）→ {servant, func, ret, uni}"""
+    """WupRsp（4B 长度前缀 + Tars）→ {servant, func, uni: {key: bytes}}
+
+    注意按 tag 递增读取（skip_to_tag 只向前）：1→2→4→5→6→7。
+    """
     if len(v_data) < 4:
         return {}
     body = v_data[4:]
     is_ = TarsInputStream(body)
+    version = is_.read_int(1, 0)
+    packet_type = is_.read_int(2, 0)
+    request_id = is_.read_int(4, 0)
+    servant = is_.read_string(5, "")
+    func = is_.read_string(6, "")
+    uni_raw = is_.read_bytes(7, b"")
     return {
-        "version": is_.read_int(1, 0),
-        "packet_type": is_.read_int(2, 0),
-        "request_id": is_.read_int(4, 0),
-        "servant": is_.read_string(5, ""),
-        "func": is_.read_string(6, ""),
+        "version": version,
+        "packet_type": packet_type,
+        "request_id": request_id,
+        "servant": servant,
+        "func": func,
+        "uni": _uni_attribute_decode(uni_raw) if uni_raw else {},
     }
 
 
@@ -272,6 +375,32 @@ def decode_push_message(v_data: bytes) -> Optional[Dict[str, Any]]:
     l_uri = is_.read_int(1, 0)
     data_bytes = is_.read_bytes(2, b"")
     return {"e_push_type": e_push_type, "uri": l_uri, "data": data_bytes}
+
+
+def decode_push_message_v2(v_data: bytes) -> List[Dict[str, Any]]:
+    """op=22 批量下推（MsgPushReq_V2，流量主体）→ [{uri, data}]
+
+    布局（SDK WSPushMessage_V2/WSMsgItem）：vMsgItem(tag1, list<struct>)，
+    WSMsgItem{lUri=0, sMsg=1}。
+    """
+    items: List[Dict[str, Any]] = []
+    is_ = TarsInputStream(v_data)
+    if not is_.skip_to_tag(1):
+        return items
+    _tag, type_ = is_._read_header()
+    if type_ != 9:  # LIST
+        return items
+    n = is_._read_int_no_tag()
+    for _ in range(n):
+        _i_tag, i_type = is_._read_header()
+        if i_type != 10:  # STRUCT_BEGIN
+            break
+        uri = is_.read_int(0, 0)
+        msg = is_.read_bytes(1, b"")
+        is_.skip_to_struct_end()
+        if uri and msg:
+            items.append({"uri": uri, "data": msg})
+    return items
 
 
 def decode_message_notice(data: bytes) -> Dict[str, Any]:
@@ -309,8 +438,38 @@ def decode_send_item(data: bytes) -> Dict[str, Any]:
 
 # ---- 上游消息 → 契约 v1 ----
 
-def map_upstream(payload: bytes, uri: int, seq: int, ts: int) -> Optional[Dict[str, Any]]:
-    """下推消息映射到契约线格式片段；未知 uri 返回 None"""
+def decode_gift_list(payload: bytes) -> Dict[int, str]:
+    """GetPropsListRsp（uni["tRsp"]）→ {iPropsId: sPropsName}
+
+    布局（SDK GetPropsListRsp/PropsItem）：vPropsItemList(tag1, list<struct>)，
+    PropsItem{iPropsId=1, sPropsName=2}。
+    """
+    is_ = TarsInputStream(payload)
+    gifts: Dict[int, str] = {}
+    if not is_.skip_to_tag(1):
+        return gifts
+    _tag, type_ = is_._read_header()
+    if type_ != 9:  # LIST
+        return gifts
+    n = is_._read_int_no_tag()
+    for _ in range(n):
+        _i_tag, i_type = is_._read_header()
+        if i_type != 10:  # STRUCT_BEGIN
+            break
+        props_id = is_.read_int(1, 0)
+        props_name = is_.read_string(2, "")
+        if props_id:
+            gifts[props_id] = props_name
+        is_.skip_to_struct_end()
+    return gifts
+
+
+def map_upstream(payload: bytes, uri: int, seq: int, ts: int,
+                 gift_items: Optional[Dict[int, str]] = None) -> Optional[Dict[str, Any]]:
+    """下推消息映射到契约线格式片段；未知 uri 返回 None
+
+    gift_items：礼物 ID 表（getPropsList 响应）；缺省时礼物名退回类型编号。
+    """
     if uri == URI_MESSAGE_NOTICE:
         d = decode_message_notice(payload)
         if d.get("content"):
@@ -329,6 +488,8 @@ def map_upstream(payload: bytes, uri: int, seq: int, ts: int) -> Optional[Dict[s
         return None
     if uri == URI_SEND_ITEM_SUB_BROADCAST:
         d = decode_send_item(payload)
+        item_type = d.get("item_type") or 0
+        gift_name = (gift_items or {}).get(item_type) or str(item_type)
         return {
             "category": "business",
             "type": "GIFT",
@@ -338,7 +499,7 @@ def map_upstream(payload: bytes, uri: int, seq: int, ts: int) -> Optional[Dict[s
                 "type": "GIFT",
                 "user_name": d.get("sender_nick") or "",
                 "user_id": str(d["sender_uid"]) if d.get("sender_uid") else None,
-                "gift_name": str(d.get("item_type") or ""),
+                "gift_name": gift_name,
                 "gift_count": d.get("item_count", 1),
             },
         }

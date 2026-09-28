@@ -159,16 +159,19 @@
 - [ ] **4E.3** 扫码后观察自动恢复（`login recovered` 事件）
 - [ ] **4E.4** 弹幕接口字段与 `FEED_API_PATTERN` 校准记录（如实测不符，记录响应样例反馈）
 
-### 4F 虎牙协议直连（✅ 2026-09-28 实测打通，约 10 分钟）
+### 4F 虎牙协议直连（✅ 2026-09-28 实测通过，约 10 分钟）
 
 > **2026-09 完成 Tars 协议栈**（huya_tars.py 标准编解码 + 浏览器真实帧逐字节
-> 黄金样本验证）：doLaunch → registerGroup(live/chat:{tid}) → updateUserInfo →
-> 心跳（onlineui/OnUserHeartBeat，25s）→ 下推分发（1400 弹幕/6501 礼物/6110 进场）。
+> 黄金样本验证）：doLaunch(launch/wsLaunch) → registerGroup(live/chat:{tid}) →
+> updateUserInfo → 心跳（onlineui/OnUserHeartBeat，25s）→ 下推分发。
+> **op=22 批量下推（MsgPushReq_V2）为主流量通道**——修复后弹幕量从 3 条/45s
+> 提升到 47 条/40s（实测同房间）。
 
 - [ ] **4F.1** 选一个正在直播的虎牙房间（`https://www.huya.com/<房间号>`）
 - [ ] **4F.2** `python tools/protocol_listen.py huya <房间号> --duration 60`
-      [预期] 契约 JSON 流：DANMU（昵称+内容，实测验证）+ GIFT（礼物名暂为
-      类型编号——礼物 ID 表映射为后续增强项），`"protocol_version": "huya-1"`
+      [预期] 契约 JSON 流：DANMU（昵称+内容）+ GIFT（礼物名暂为类型编号——
+      2026 版 cdnws 入口不应答 WupReq，礼物 ID 表需 wsapi 入口 baseinfo 握手，
+      代码路径已就绪见 TODOS），`"protocol_version": "huya-1"`
 - [ ] **4F.3** 观察 45s+ 不中断（心跳首帧 15s 延迟 + 25s 周期）
 
 ---

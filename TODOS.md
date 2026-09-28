@@ -17,3 +17,13 @@
 - **Why**: 契约 v1 承诺 additive-only，无机制防后续 PR 违约。
 - **Effort**: human S / CC S | **Depends on**: 阶段 0 契约 Schema 定稿
 - 来源: /autoplan Eng review T-2（2026-09-27，defer 决策）
+
+## P3: 虎牙礼物名称表（getPropsList 通路）
+- **What**: 虎牙礼物 ID→名称映射。代码路径已就绪（huya_codec.build_gift_list_req /
+  decode_gift_list，引擎自动加载）；2026-09 实测 cdnws.api.huya.com 入口对所有
+  WupReq 不应答（弹幕推送专用入口）——需改连 wsapi.huya.com（浏览器入口，URL
+  带 baseinfo 握手参数，含 base64 Tars 设备信息）后调 PropsUIServer/getPropsList。
+  完成前礼物名退化为类型编号。
+- **Why**: 前端展示礼物名（当前 GIFT.gift_name="4" 可读性差）。
+- **Effort**: human S / CC M（baseinfo 结构逆向 + 实测）| **Depends on**: 无
+- 来源: 虎牙实测（2026-09-28）——SDK 2024 的 cdnws+getPropsList 路线已失效

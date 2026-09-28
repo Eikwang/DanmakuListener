@@ -41,6 +41,7 @@ class HuyaProtocolEngine(BaseEngine):
         super().__init__(state_store=state_store)
         self._room_tasks: Dict[str, asyncio.Task] = {}
         self._stop_flags: Dict[str, bool] = {}
+        self._gift_items: dict = {}  # 礼物 ID 表（getPropsList 响应，引擎级共享）
 
     @property
     def engine_id(self) -> str:
@@ -101,10 +102,11 @@ class HuyaProtocolEngine(BaseEngine):
             try:
                 tid = await self._fetch_tid(room_id)
                 async with websockets.connect(codec.WS_URL, ping_interval=None) as ws:
-                    # 命令流：doLaunch → registerGroup → updateUserInfo
+                    # 命令流：doLaunch → registerGroup → updateUserInfo → 礼物表拉取
                     await ws.send(codec.build_do_launch())
                     await ws.send(codec.build_register_group(tid))
                     await ws.send(codec.build_update_user_info())
+                    await ws.send(codec.build_gift_list_req())
                     logger.info(f"[huya] room {room_id} doLaunch+registerGroup sent (tid={tid})")
                     self._set_status(self.status.__class__.RUNNING)
                     hb_task = asyncio.create_task(self._heartbeat(room_id, ws, tid))
@@ -147,8 +149,24 @@ class HuyaProtocolEngine(BaseEngine):
             op = cmd["operation"]
             v_data = cmd["v_data"]
             if op == codec.OP_WUP_RSP:
-                # doLaunch/心跳 Wup 应答（连接存活确认）
+                # doLaunch 应答 / 礼物表响应
                 self.mark_received(room_id, ts)
+                try:
+                    rsp = codec.decode_wup_rsp(v_data)
+                except Exception as e:  # noqa: BLE001
+                    logger.debug(f"[huya] room {room_id} wup rsp decode error: {e}")
+                    continue
+                if rsp.get("func") == "getPropsList" and not self._gift_items:
+                    t_rsp = (rsp.get("uni") or {}).get("tRsp") or b""
+                    if t_rsp:
+                        try:
+                            self._gift_items = codec.decode_gift_list(t_rsp)
+                            logger.info(
+                                f"[huya] room {room_id} gift list loaded "
+                                f"({len(self._gift_items)} items)"
+                            )
+                        except Exception as e:  # noqa: BLE001
+                            logger.warning(f"[huya] room {room_id} gift list parse error: {e}")
                 continue
             if op in (codec.OP_REGISTER_GROUP_RSP, codec.OP_UPDATE_USER_INFO_RSP,
                       codec.OP_HEARTBEAT_RSP):
@@ -156,26 +174,50 @@ class HuyaProtocolEngine(BaseEngine):
                 continue
             if op == codec.OP_MSG_PUSH:
                 self.mark_received(room_id, ts)
+                pushes: list = []
                 try:
-                    push = codec.decode_push_message(v_data)
+                    single = codec.decode_push_message(v_data)
+                    if single:
+                        pushes.append(single)
                 except Exception as e:  # noqa: BLE001
                     logger.warning(f"[huya] room {room_id} push decode error: {e}")
+                for push in pushes:
+                    mapped = codec.map_upstream(
+                        push["data"], push["uri"], self.next_seq(room_id), ts,
+                        gift_items=self._gift_items,
+                    )
+                    if mapped:
+                        await self._emit_message(self._envelope(room_id, mapped))
+                continue
+            if op == codec.OP_MSG_PUSH_V2:
+                # 批量下推（流量主体；每条 WSMsgItem 同 op=7 分发）
+                self.mark_received(room_id, ts)
+                try:
+                    items = codec.decode_push_message_v2(v_data)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(f"[huya] room {room_id} push v2 decode error: {e}")
                     continue
-                if not push:
-                    continue
-                mapped = codec.map_upstream(
-                    push["data"], push["uri"], self.next_seq(room_id), ts
-                )
-                if mapped:
-                    await self._emit_message({
-                        "contract_version": "1.0.0",
-                        "category": mapped["category"],
-                        "type": mapped["type"],
-                        "platform": "huya",
-                        "room_id": room_id,
-                        "seq": mapped["seq"],
-                        "timestamp": mapped["timestamp"],
-                        "engine": self.engine_id,
-                        "protocol_version": PROTOCOL_VERSION,
-                        "payload": mapped["payload"],
-                    })
+                for item in items:
+                    mapped = codec.map_upstream(
+                        item["data"], item["uri"], self.next_seq(room_id), ts,
+                        gift_items=self._gift_items,
+                    )
+                    if mapped:
+                        await self._emit_message(self._envelope(room_id, mapped))
+                continue
+
+    @staticmethod
+    def _envelope(room_id: str, mapped: dict) -> dict:
+        """契约信封包装"""
+        return {
+            "contract_version": "1.0.0",
+            "category": mapped["category"],
+            "type": mapped["type"],
+            "platform": "huya",
+            "room_id": room_id,
+            "seq": mapped["seq"],
+            "timestamp": mapped["timestamp"],
+            "engine": "protocol:huya",
+            "protocol_version": PROTOCOL_VERSION,
+            "payload": mapped["payload"],
+        }

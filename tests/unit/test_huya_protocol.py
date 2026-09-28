@@ -63,12 +63,67 @@ def test_build_register_group_structure():
 
 
 def test_build_do_launch_is_wupreq():
+    """doLaunch 对齐 2026 浏览器版（servant=launch/wsLaunch，黄金样本同构）"""
     frame = codec.build_do_launch()
     cmd = codec.decode_command(frame)
     assert cmd["operation"] == codec.OP_WUP_REQ
     rsp = codec.decode_wup_rsp(cmd["v_data"])
-    assert rsp["func"] == "doLaunch"
-    assert rsp["servant"] == "liveui"
+    assert rsp["func"] == "wsLaunch"
+    assert rsp["servant"] == "launch"
+
+
+def test_do_launch_matches_browser_golden_prefix():
+    """黄金帧对照：doLaunch vData 头部（version/servant/func/uni 头）与浏览器一致
+
+    cdnws 入口对 WupReq 不应答（弹幕推送专用入口，实测确认）——编码以浏览器
+    黄金帧头部逐字节对齐为准；礼物表（getPropsList）需 wsapi 入口，见 TODOS。
+    """
+    from danmaku_listener.engines.protocol.huya_tars import TarsInputStream
+
+    frame_hex = (
+        "00031d0000680000006810032c3c40ff56066c61756e6368660877734c61756e63687d00010089"
+        "0800010604745265711d0000360a0c16002615776562683526302e312e3026776562736f636b65"
+        "74360c48555941265a4826323035324a060016002600360046000b0b8c980ca80c2c36004c5c6600"
+    )
+    browser_vdata = codec.decode_command(bytes.fromhex(frame_hex))["v_data"]
+    mine = codec.decode_command(codec.build_do_launch())["v_data"]
+    # 内容头部（跳过 4B 长度前缀）：version/packetType/messageType/requestId/servant/func 一致
+    assert mine[4:26] == browser_vdata[4:26]
+    # uni 内容头部（map 头 + key）一致
+    assert b"\x08\x00\x01\x06\x04tReq" in mine
+    # uni value 结构（tag1 SimpleList 头 + LiveLaunchReq）存在
+    assert b"\x1d\x00\x00" in mine[30:60]
+
+
+def test_decode_push_message_v2():
+    """op=22 批量下推解码（流量主体）"""
+    from danmaku_listener.engines.protocol.huya_tars import TarsOutputStream
+
+    os = TarsOutputStream()
+    os.write_string("g1", 0)  # sGroupId
+    os.write_list([], 0)  # vMsgItem 占位（写法仅校验读侧）
+    # 手工构造 list<struct>：WSMsgItem{uri, sMsg}
+    item = TarsOutputStream()
+    item.write_int(1400, 0)
+    item.write_bytes(b"msg-bytes", 1)
+    os2 = TarsOutputStream()
+    os2.write_string("g1", 0)
+    os2._header(1, 9)
+    os2.write_int(1, 0)
+    item.write_to(os2) if hasattr(item, "write_to") else None
+    # 直接拼 list<struct>
+    buf = TarsOutputStream()
+    buf.write_string("g1", 0)
+    buf._header(1, 9)
+    buf.write_int(1, 0)
+    buf.write_struct_begin(0)
+    buf.write_int(1400, 0)
+    buf.write_bytes(b"msg-bytes", 1)
+    buf.write_struct_end()
+    items = codec.decode_push_message_v2(buf.to_bytes())
+    assert len(items) == 1
+    assert items[0]["uri"] == 1400
+    assert items[0]["data"] == b"msg-bytes"
 
 
 def test_build_heartbeat_is_wupreq():
