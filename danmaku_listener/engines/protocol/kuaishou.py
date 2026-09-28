@@ -13,9 +13,9 @@ token 获取（2026-09-28 实测校准，对齐 barrage-fly KuaishouApis）：
 
 import asyncio
 import random
+import re
 import time
 from typing import Any, Dict
-from urllib.parse import parse_qs, urlparse
 
 import websockets
 from loguru import logger
@@ -29,6 +29,10 @@ HEARTBEAT_INTERVAL = 20.0  # 快手心跳口径较短
 LIVE_DETAIL_URL = "https://live.kuaishou.com/live_api/liveroom/livedetail?principalId={room_id}"
 LIVE_ROOM_URL = "https://live.kuaishou.com/u/{room_id}"
 _BROWSER_TOKEN_TIMEOUT = 30.0
+
+#: liveroom XHR 响应体中提取 liveStream.id（2026-09 URL 不再携带该参数）
+_LIVE_STREAM_ID_RE = re.compile(r'"liveStream":\s*\{"id":\s*"([A-Za-z0-9_-]{8,24})"')
+
 _HTTP_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                   "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
@@ -122,6 +126,12 @@ class KuaishouProtocolEngine(BaseEngine):
 
         快手 web 直播间已强制游客登录（2026-09 实测），登录态由 kuaishou_login
         登录闭环提供（storage_state）。浏览器仅承担 token 获取，协议连接直连。
+
+        2026-09 接口校准（SDK 2024 字段已变）：
+        - websocketinfo 响应：webSocketAddresses → **websocketUrls**
+          （地址带 path，如 wss://livejs-ws.kuaishou.cn/group10）
+        - URL 不再携带 liveStreamId——从 liveroom XHR 响应或页面
+          __INITIAL_STATE__.liveroom.playList 取
         """
         from playwright.async_api import async_playwright
 
@@ -143,21 +153,26 @@ class KuaishouProtocolEngine(BaseEngine):
                 page = await context.new_page()
 
                 async def on_response(resp) -> None:
-                    if "websocketinfo" not in resp.url or "token" in result:
-                        return
-                    try:
-                        query = parse_qs(urlparse(resp.url).query)
-                        data = (await resp.json()).get("data") or {}
-                        if data.get("token"):
-                            result["token"] = data["token"]
-                            result["ws_urls"] = [
-                                str(u) for u in (data.get("webSocketAddresses") or []) if u
-                            ]
-                            result["live_stream_id"] = (
-                                query.get("liveStreamId") or [""]
-                            )[0]
-                    except Exception:  # noqa: BLE001
-                        pass
+                    url = resp.url
+                    if "websocketinfo" in url and "token" not in result:
+                        try:
+                            data = (await resp.json()).get("data") or {}
+                            if data.get("token"):
+                                result["token"] = data["token"]
+                                # 2026-09: websocketUrls（带 path）；兼容旧 webSocketAddresses
+                                urls = (data.get("websocketUrls")
+                                        or data.get("webSocketAddresses") or [])
+                                result["ws_urls"] = [str(u) for u in urls if u]
+                        except Exception:  # noqa: BLE001
+                            pass
+                    elif ("liveroom" in url) and "live_stream_id" not in result:
+                        try:
+                            body = await resp.text()
+                            m = _LIVE_STREAM_ID_RE.search(body)
+                            if m:
+                                result["live_stream_id"] = m.group(1)
+                        except Exception:  # noqa: BLE001
+                            pass
 
                 page.on("response", on_response)
                 await page.goto(
@@ -165,7 +180,23 @@ class KuaishouProtocolEngine(BaseEngine):
                     wait_until="domcontentloaded",
                 )
                 deadline = time.monotonic() + _BROWSER_TOKEN_TIMEOUT
-                while "token" not in result and time.monotonic() < deadline:
+                while time.monotonic() < deadline:
+                    if "token" in result and "live_stream_id" in result:
+                        break
+                    if "live_stream_id" not in result:
+                        # 页面 store 兜底（__INITIAL_STATE__.liveroom.playList）
+                        try:
+                            live_stream_id = await page.evaluate(
+                                "() => { const s = window.__INITIAL_STATE__ || {};"
+                                " const pl = (s.liveroom || {}).playList || [];"
+                                " for (const it of pl) {"
+                                "  const id = (it.liveStream || {}).id;"
+                                "  if (id) return id; } return ''; }"
+                            )
+                            if live_stream_id:
+                                result["live_stream_id"] = str(live_stream_id)
+                        except Exception:  # noqa: BLE001
+                            pass
                     await asyncio.sleep(1)
                 # 顺带续期 storage_state（登录态刷新）
                 try:
@@ -176,9 +207,10 @@ class KuaishouProtocolEngine(BaseEngine):
             finally:
                 await browser.close()
 
-        if "token" not in result:
+        if "token" not in result or not result.get("live_stream_id"):
+            missing = "token" if "token" not in result else "liveStreamId"
             raise ValueError(
-                "websocketinfo 未捕获 token（未登录/房间未开播/页面限流）——"
+                f"websocketinfo 未捕获 {missing}（未登录/房间未开播/页面限流）——"
                 "登录闭环见 bridge NEEDS_LOGIN 流程"
             )
         return result

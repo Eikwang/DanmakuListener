@@ -47,27 +47,46 @@ def decompress_payload(compression: int, payload: bytes) -> bytes:
 
 
 def build_heartbeat(ts_ms: Optional[int] = None) -> bytes:
-    """CS_HEARTBEAT 帧（payloadType 标识心跳，timestamp 在嵌套 Payload 中可选）"""
-    hb = ks_pb2.CSWebHeartbeat()
-    hb.payloadType = ks_pb2.PayloadType.CS_HEARTBEAT
-    return encode_socket_message(ks_pb2.PayloadType.CS_HEARTBEAT, hb.SerializeToString())
+    """CS_HEARTBEAT 帧（2026-09 扁平结构：payload = field1 varint 时间戳，SDK 同款）"""
+    ts = ts_ms if ts_ms is not None else int(time.time() * 1000)
+    body = bytes([0x08]) + _pb_varint(ts)  # field1 (varint) = timestamp
+    return encode_socket_message(ks_pb2.PayloadType.CS_HEARTBEAT, body)
+
+
+# ---- CSWebEnterRoom 手工扁平编码（2026-09 协议校准）----
+# 页面真实帧对照：enter payload 内 field1=token（string 直接开始），
+# 旧 proto 的 Payload 嵌套（payload=field3）已废弃——嵌套形式被服务器
+# 以 SC_ERROR code=60 拒绝。SocketMessage 外层结构未变（ptype/comp/payload）。
+
+def _pb_varint(n: int) -> bytes:
+    out = bytearray()
+    while True:
+        b = n & 0x7F
+        n >>= 7
+        if n:
+            out.append(b | 0x80)
+        else:
+            out.append(b)
+            break
+    return bytes(out)
+
+
+def _pb_field_str(field_no: int, value: str) -> bytes:
+    data = value.encode("utf-8")
+    return bytes([(field_no << 3) | 2]) + _pb_varint(len(data)) + data
 
 
 def build_enter_room(token: str, live_stream_id: str, page_id: str = "") -> bytes:
-    """CS_ENTER_ROOM 帧（对齐 barrage-fly KuaishouConnectionHandler.sendAuthRequest）
+    """CS_ENTER_ROOM 帧（2026-09 扁平结构，页面真实帧对照校准）
 
-    - token：livedetail 接口的 websocketInfo.token（游客可用）
-    - live_stream_id：livedetail 接口的 liveStream.id（**不是房间号**）
-    - page_id：随机 16 字符 + 毫秒时间戳（SDK 同款；固定值可能被服务端去重）
+    - field1 = token（websocketinfo 接口，游客/登录态均由此获取）
+    - field2 = liveStreamId（liveroom XHR / __INITIAL_STATE__，非房间号）
+    - field7 = pageId（随机 16 字符 + 毫秒时间戳）
     """
-    enter = ks_pb2.CSWebEnterRoom()
-    enter.payloadType = ks_pb2.PayloadType.CS_ENTER_ROOM
-    enter.payload.token = token
-    enter.payload.liveStreamId = str(live_stream_id)
-    enter.payload.pageId = page_id or (
-        uuid.uuid4().hex[:16] + str(int(time.time() * 1000))
-    )
-    return encode_socket_message(ks_pb2.PayloadType.CS_ENTER_ROOM, enter.SerializeToString())
+    body = _pb_field_str(1, token) + _pb_field_str(2, str(live_stream_id))
+    if page_id:
+        body += _pb_field_str(7, page_id)
+    return encode_socket_message(ks_pb2.PayloadType.CS_ENTER_ROOM, body)
 
 
 # ---- SC_FEED_PUSH → 契约 v1 ----

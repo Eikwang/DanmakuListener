@@ -76,21 +76,23 @@ def test_seq_monotonic_in_batch():
 
 
 def test_heartbeat_frame():
-    frame = codec.build_heartbeat()
+    frame = codec.build_heartbeat(1700000000000)
     payload_type, compression, payload = codec.decode_socket_message(frame)
     assert payload_type == ks_pb2.PayloadType.CS_HEARTBEAT
+    # 2026-09 扁平结构：payload = field1 varint 时间戳
+    assert payload == b"\x08" + codec._pb_varint(1700000000000)
 
 
 def test_enter_room_frame():
-    frame = codec.build_enter_room("test-token", "23058")
+    frame = codec.build_enter_room("test-token", "23058", page_id="abc123")
     payload_type, compression, payload = codec.decode_socket_message(frame)
     assert payload_type == ks_pb2.PayloadType.CS_ENTER_ROOM
-    enter = ks_pb2.CSWebEnterRoom()
-    enter.ParseFromString(payload)
-    assert enter.payload.token == "test-token"
-    # liveStreamId 来自 livedetail 接口（非房间号）；pageId 随机生成（非固定值）
-    assert enter.payload.liveStreamId == "23058"
-    assert enter.payload.pageId and enter.payload.pageId != "1"
+    # 2026-09 扁平结构：field1=token, field2=liveStreamId, field7=pageId
+    assert codec._pb_field_str(1, "test-token") in payload
+    assert codec._pb_field_str(2, "23058") in payload
+    assert codec._pb_field_str(7, "abc123") in payload
+    # token 必须是 payload 首字段（页面真实帧对照——嵌套形式被 SC_ERROR code=60 拒绝）
+    assert payload.startswith(b"\x0a")
 
 
 def test_aes_unsupported_flagged():
