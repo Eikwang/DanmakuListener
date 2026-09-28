@@ -137,11 +137,12 @@ class BilibiliProtocolEngine(BaseEngine):
         state_store=None,
         reconnect_manager: Optional[ReconnectManager] = None,
         danmu_info_fetcher: Optional[Callable[[int], Dict[str, Any]]] = None,
+        cookie_file: Optional[str] = None,
     ):
         super().__init__(state_store=state_store)
         if reconnect_manager:
             self.set_reconnect_manager(reconnect_manager)
-        self._danmu_info = danmu_info_fetcher or DanmuInfoFetcher()
+        self._danmu_info = danmu_info_fetcher or DanmuInfoFetcher(cookie_file=cookie_file)
         self._room_tasks: Dict[str, asyncio.Task] = {}
         self._room_ws: Dict[str, Any] = {}
         self._heartbeats: Dict[str, asyncio.Task] = {}
