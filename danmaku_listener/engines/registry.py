@@ -31,7 +31,7 @@ PLATFORM_ENGINES = {
 #: 引擎可用性 warnings（CEO-2：加房间响应透出，前端可见）
 PLATFORM_WARNINGS = {
     "huya": "虎牙协议为 draft（huya-0-draft），payload 解析待抓包校准——连接可用但暂无消息输出",
-    "kuaishou": "快手需要游客 token（token_provider 未配置时连接失败）——获取方式为重点验证项",
+    "kuaishou": "快手 web 直播间已强制游客登录（2026-09 实测）——首次添加弹登录窗口，登录后自动监听",
     "wechat_channels": "后台页面/接口结构待实测校准（微信更新可能变更）",
 }
 
@@ -52,6 +52,13 @@ def build_engine(platform: str, state_store: Optional[RoomStateStore] = None, **
         try:
             from danmaku_listener.config.settings import get_settings
             kwargs.setdefault("cookie_file", get_settings().bilibili_cookie_file)
+        except Exception:
+            pass
+    if platform == "kuaishou":
+        # 登录态 storage_state（token 获取走登录态浏览器；登录闭环见 bridge）
+        try:
+            from danmaku_listener.engines.kuaishou_login import DEFAULT_STATE_PATH
+            kwargs.setdefault("cookie_file", DEFAULT_STATE_PATH)
         except Exception:
             pass
     return PLATFORM_ENGINES[platform](state_store=state_store, **kwargs)

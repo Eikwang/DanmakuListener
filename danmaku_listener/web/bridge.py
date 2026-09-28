@@ -100,6 +100,38 @@ class DanmakuBridge:
             logger.error(f"[bilibili] start after login failed: {e}")
             await self._broadcast_system_status(room_key, f"登录成功但启动失败: {e}")
 
+    async def _kuaishou_login_then_start(self, room_key: str, room_id: str, engine: Any, state_path: str) -> None:
+        """kuaishou 受控登录闭环：弹窗口→用户扫码→cookie 保存→自动开始监听
+
+        快手 web 直播间已强制游客登录（2026-09 实测）；登录态浏览器承担
+        token 获取（engine._fetch_context_via_browser），协议连接保持直连。
+        """
+        from danmaku_listener.engines.kuaishou_login import run_login_flow
+
+        async def status_cb(status: str) -> None:
+            await self._broadcast_system_status(room_key, f"kuaishou 登录流程: {status}")
+
+        await self._broadcast_system_status(room_key, "登录窗口已打开，请在浏览器中登录快手账号")
+        result = await run_login_flow(
+            room_id=room_id, state_path=state_path, headless=False,
+            on_status=lambda s: status_cb(s),
+        )
+        # 引擎 cookie_file 指向新登录态（token 获取走登录态浏览器）
+        engine._cookie_file = state_path
+
+        if result.get("status") != "ok":
+            await self._broadcast_system_status(room_key, "登录未完成——快手监听需要登录态，请重试")
+            self._rooms[room_key]["status"] = "login_failed"
+            return
+
+        await self._broadcast_system_status(room_key, "登录成功——开始监听")
+        try:
+            await engine.start(room_id)
+            self._rooms[room_key]["status"] = "running"
+        except Exception as e:
+            logger.error(f"[kuaishou] start after login failed: {e}")
+            await self._broadcast_system_status(room_key, f"登录成功但启动失败: {e}")
+
     async def _broadcast_system_status(self, room_key: str, detail: str) -> None:
         """ENGINE_STATUS 快捷广播（平台/房间从 room_key 解析）"""
         import time as _time
@@ -427,7 +459,8 @@ class DanmakuBridge:
             engine.on_message(self._on_engine_message)
             self._engine_instances[spec.platform] = engine
 
-        # 4.5 bilibili 独立分发自动登录（用户裁定：cookie 获取自动化）
+        # 4.5 平台自动登录闭环（用户裁定：cookie 获取自动化）
+        # bilibili：游客被限流，完整弹幕流需登录态
         if spec.platform == "bilibili":
             from danmaku_listener.config.settings import get_settings as _gs
             from danmaku_listener.engines.bilibili_login import has_login_cookie
@@ -447,6 +480,28 @@ class DanmakuBridge:
                     "status": "login_required",
                     "room": self._rooms[room_key],
                     "message": "需要登录 B站账号（完整弹幕流）：登录窗口已打开，"
+                               "请在弹出的浏览器中扫码/登录；登录后自动开始监听",
+                }
+
+        # kuaishou：游客已被强制登录（2026-09 实测），登录态浏览器承担 token 获取
+        if spec.platform == "kuaishou":
+            from danmaku_listener.engines.kuaishou_login import has_login_cookie
+            state_path = getattr(engine, "_cookie_file", None) or \
+                "cookie/kuaishou_storage_state.json"
+            if not has_login_cookie(state_path):
+                self._rooms[room_key] = {
+                    "platform": spec.platform,
+                    "room_id": spec.room_id,
+                    "status": "login_required",
+                    "engine_type": "protocol:kuaishou",
+                }
+                asyncio.create_task(self._kuaishou_login_then_start(
+                    room_key, spec.room_id, engine, state_path))
+                return {
+                    "success": True,
+                    "status": "login_required",
+                    "room": self._rooms[room_key],
+                    "message": "需要登录快手账号（web 直播间已强制登录）：登录窗口已打开，"
                                "请在弹出的浏览器中扫码/登录；登录后自动开始监听",
                 }
 

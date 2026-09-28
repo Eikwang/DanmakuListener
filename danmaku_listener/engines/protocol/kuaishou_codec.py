@@ -11,6 +11,7 @@
 
 import gzip
 import time
+import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
 from danmaku_listener.engines.protocol import ks_pb2
@@ -52,13 +53,20 @@ def build_heartbeat(ts_ms: Optional[int] = None) -> bytes:
     return encode_socket_message(ks_pb2.PayloadType.CS_HEARTBEAT, hb.SerializeToString())
 
 
-def build_enter_room(room_id: str, token: str) -> bytes:
-    """CS_ENTER_ROOM 帧（token 来自页面接口获取，见合规清单游客态策略）"""
+def build_enter_room(token: str, live_stream_id: str, page_id: str = "") -> bytes:
+    """CS_ENTER_ROOM 帧（对齐 barrage-fly KuaishouConnectionHandler.sendAuthRequest）
+
+    - token：livedetail 接口的 websocketInfo.token（游客可用）
+    - live_stream_id：livedetail 接口的 liveStream.id（**不是房间号**）
+    - page_id：随机 16 字符 + 毫秒时间戳（SDK 同款；固定值可能被服务端去重）
+    """
     enter = ks_pb2.CSWebEnterRoom()
     enter.payloadType = ks_pb2.PayloadType.CS_ENTER_ROOM
     enter.payload.token = token
-    enter.payload.liveStreamId = str(room_id)
-    enter.payload.pageId = "1"
+    enter.payload.liveStreamId = str(live_stream_id)
+    enter.payload.pageId = page_id or (
+        uuid.uuid4().hex[:16] + str(int(time.time() * 1000))
+    )
     return encode_socket_message(ks_pb2.PayloadType.CS_ENTER_ROOM, enter.SerializeToString())
 
 

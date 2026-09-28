@@ -82,13 +82,15 @@ def test_heartbeat_frame():
 
 
 def test_enter_room_frame():
-    frame = codec.build_enter_room("23058", "test-token")
+    frame = codec.build_enter_room("test-token", "23058")
     payload_type, compression, payload = codec.decode_socket_message(frame)
     assert payload_type == ks_pb2.PayloadType.CS_ENTER_ROOM
     enter = ks_pb2.CSWebEnterRoom()
     enter.ParseFromString(payload)
     assert enter.payload.token == "test-token"
+    # liveStreamId 来自 livedetail 接口（非房间号）；pageId 随机生成（非固定值）
     assert enter.payload.liveStreamId == "23058"
+    assert enter.payload.pageId and enter.payload.pageId != "1"
 
 
 def test_aes_unsupported_flagged():

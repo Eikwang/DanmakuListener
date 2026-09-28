@@ -129,17 +129,22 @@
       [预期] 代理注册 + JSON 流（protobuf 解析路径）
 - [ ] **4C.4** 异常路径：错误房间号执行，确认三段式错误而非栈崩溃
 
-### 4D 快手协议直连（⚠️ 重点验证项）
+### 4D 快手协议直连（✅ 2026-09-28 校准，约 15 分钟）
 
-- [ ] **4D.1** 确认游客 token 获取方式（**本项未验证**：签名接口见计划 Open Questions）。
-      已知 token 后用注入方式测试：
-      ```python
-      # tools 或 REPL 中：
-      from danmaku_listener.engines.protocol.kuaishou import KuaishouProtocolEngine
-      engine = KuaishouProtocolEngine(token_provider=lambda rid: "<你的token>")  # 需 async
-      ```
-- [ ] **4D.2** 未获取 token 前执行 `protocol_listen` 类测试会得到明确报错：
-      `快手需要游客 token（token_provider 未配置...）`——确认该报错清晰（这本身是测试点）
+> **2026-09 实测**：快手 web 直播间已**强制游客登录**（页面自动弹登录二维码框，
+> 机械请求被"请求过快"风控拦截）——SDK 2024 年的游客 livedetail 路线作为
+> 快速路径保留，主路线为登录态浏览器 token 获取（对齐 B站登录闭环模式）。
+
+- [ ] **4D.1** 自动登录闭环：web 控制台添加 kuaishou 房间 → 系统检测无登录态
+      自动弹出浏览器窗口（直播间页面 + 登录二维码）→ 扫码/登录 → 窗口自动
+      关闭、storage_state 保存（`cookie/kuaishou_storage_state.json`）→ 监听自动开始
+      [预期] 前端进度：`需要登录快手账号…` → `登录成功——开始监听`
+- [ ] **4D.2** 选一个**正在直播**的快手房间（`https://live.kuaishou.com/u/<主播ID>`，
+      页面能看到直播画面与弹幕滚动；未开播/轮播房零输出是预期）
+- [ ] **4D.3** token 获取验证：stderr 出现 `enter_room sent to wss://...`
+      （token 来自登录态浏览器拦截 websocketinfo；协议连接保持直连）
+- [ ] **4D.4** 契约流：DANMU/ENTER_ROOM/GIFT/ROOM_STATS（displayWatchingCount）
+      `"protocol_version": "kuaishou-1"`
 
 ### 4E 视频号受控后台（⚠️ 需实测校准）
 
