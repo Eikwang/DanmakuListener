@@ -8,6 +8,7 @@ import asyncio
 import json
 import os
 import time
+import uuid
 from typing import Any, Callable, Dict, List, Optional
 
 import websockets
@@ -20,6 +21,22 @@ from danmaku_listener.managers.reconnect_manager import ReconnectManager
 
 HEARTBEAT_INTERVAL = 30.0
 PROTOCOL_VERSION = "bilibili-1"  # 协议版本元数据（调试三项）
+
+#: WS 握手头（对齐 barrage-fly BilibiliLiveChatClient.initConnectionHandler）：
+#: 裸 Python UA 的连接会被 B站降级推送（事件流稀疏、弹幕被哑）——实测确认
+WS_HANDSHAKE_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                  "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    "Origin": "https://live.bilibili.com",
+    "Pragma": "no-cache",
+}
+
+#: websockets>=14 改名 additional_headers（10-13 为 extra_headers）
+_WS_HEADER_KWARG = (
+    "additional_headers"
+    if tuple(int(x) for x in websockets.__version__.split(".")[:2]) >= (14, 0)
+    else "extra_headers"
+)
 
 
 class DanmuInfoFetcher:
@@ -43,22 +60,36 @@ class DanmuInfoFetcher:
         self._session = None  # requests.Session 惰性创建（cookie 复用）
 
     def _apply_login_cookies(self, session) -> None:
-        """把用户提供的登录 cookie 合并进 session（专用小号 → 完整弹幕流）"""
-        raw = self._cookie_str
+        """把登录 cookie 合并进 session（专用小号 → 完整弹幕流）
+
+        支持三种来源格式：
+        - Playwright storage_state（{"cookies": [{name, value, domain}...]}）
+        - 浏览器复制字符串（"SESSDATA=xxx; buvid3=xxx; ..."）
+        - 简单 JSON dict（{"SESSDATA": "xxx"}）
+        """
+        raw: Optional[str] = self._cookie_str
         if not raw and self._cookie_file and os.path.exists(self._cookie_file):
             raw = open(self._cookie_file, encoding="utf-8").read().strip()
         if not raw:
             return
-        # 支持 "k=v; k2=v2" 浏览器复制格式与 JSON 格式
-        raw_stripped = raw.strip()
-        if raw_stripped.startswith("{"):
+        stripped = raw.strip()
+        if stripped.startswith("{"):
             try:
-                for k, v in json.loads(raw_stripped).items():
+                data = json.loads(stripped)
+                if isinstance(data.get("cookies"), list):
+                    # Playwright storage_state 格式
+                    for c in data["cookies"]:
+                        if c.get("value"):
+                            session.cookies.set(
+                                c["name"], c["value"],
+                                domain=c.get("domain") or ".bilibili.com")
+                    return
+                for k, v in data.items():
                     session.cookies.set(k, str(v), domain=".bilibili.com")
                 return
             except json.JSONDecodeError:
                 pass
-        for pair in raw_stripped.split(";"):
+        for pair in stripped.split(";"):
             pair = pair.strip()
             if "=" in pair:
                 k, _, v = pair.partition("=")
@@ -123,6 +154,111 @@ class DanmuInfoFetcher:
 
         return await asyncio.get_running_loop().run_in_executor(None, _sync)
 
+    # ---- 连接上下文（对齐 barrage-fly SDK roomInit，2026-09-28 限流修复）----
+
+    #: finger/spi：游客生成 buvid3/buvid4（barrage-fly BilibiliApis.roomInit 同款）
+    FINGER_SPI_URL = "https://api.bilibili.com/x/frontend/finger/spi"
+    ROOM_PLAY_INFO_URL = (
+        "https://api.live.bilibili.com/xlive/web-room/v2/index/getRoomPlayInfo"
+    )
+
+    @staticmethod
+    def _cookie_value(session, name: str) -> Optional[str]:
+        """从 session cookiejar 提取 cookie 值（跨 domain 变体取第一个非空）"""
+        for c in session.cookies:
+            if c.name == name and c.value:
+                return c.value
+        return None
+
+    def _build_connect_context(self, room_id: int) -> Dict[str, Any]:
+        """同步：roomInit 完整预备——cookie 上下文 + 真实房间号 + token
+
+        对齐 barrage-fly BilibiliApis.roomInit（登录/游客双路径）：
+        1. 预热直播间页面
+        2. 登录态：uid=DedeUserID、buvid=cookie 里的 buvid3（缺一被服务端踢/限流）
+           游客：finger/spi 生成 buvid3/buvid4 并带入后续请求
+        3. getRoomPlayInfo 拿真实房间号（短号/活动号归一）
+        4. nav wbi 签名 → getDanmuInfo（Referer 用 blanc 页面格式）
+        """
+        s = self._get_session()
+
+        # 1. 预热（cookie 种子）
+        try:
+            s.get(f"https://live.bilibili.com/{room_id}", timeout=10)
+        except Exception:
+            pass
+
+        # 2. cookie 上下文：登录 uid / 游客 buvid
+        uid = 0
+        buvid3 = self._cookie_value(s, "buvid3")
+        if self._cookie_value(s, "SESSDATA"):
+            uid = int(self._cookie_value(s, "DedeUserID") or 0)
+        else:
+            # 游客：生成 buvid（B站按 buvid 判设备可信度——游客限流根因之一）
+            try:
+                resp = s.get(self.FINGER_SPI_URL, timeout=10)
+                data = (resp.json() or {}).get("data") or {}
+                b3, b4 = data.get("b_3"), data.get("b_4")
+                if b3:
+                    s.cookies.set("buvid3", b3, domain=".bilibili.com")
+                    buvid3 = b3
+                if b4:
+                    s.cookies.set("buvid4", b4, domain=".bilibili.com")
+            except Exception:
+                pass  # 生成失败退回现有 cookie（后续 wbi 签名仍是主防线）
+
+        # 3. 真实房间号（auth 包 roomid 必须真实号，SDK 注释明确）
+        real_room_id = room_id
+        try:
+            resp = s.get(
+                self.ROOM_PLAY_INFO_URL,
+                params={"room_id": room_id, "no_playurl": 1},
+                timeout=10,
+            )
+            data_room = (resp.json() or {}).get("data") or {}
+            real_room_id = int(data_room.get("room_id") or room_id)
+        except Exception:
+            pass  # 失败退回输入号（多数场景输入号即真实号）
+
+        # 4. wbi 签名 → getDanmuInfo
+        nav_data = s.get("https://api.bilibili.com/x/web-interface/nav", timeout=10).json()
+        img_key, sub_key = codec.extract_wbi_keys(nav_data)
+        mixin = codec.get_mixin_key(img_key + sub_key)
+        params = codec.wbi_sign_params({"id": real_room_id, "type": 0}, mixin)
+        resp = s.get(
+            codec.DANMU_INFO_URL.split("?")[0],
+            params=params,
+            timeout=10,
+            headers={
+                "Referer": f"https://live.bilibili.com/blanc/{room_id}"
+                           "?liteVersion=true&live_from=62001",
+            },
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        code = body.get("code")
+        if code != 0:
+            raise ValueError(
+                f"getDanmuInfo code={code} message={body.get('message', '')!r}（B站风控/风控升级）"
+            )
+        data = body.get("data") or {}
+        return {
+            "token": str(data.get("token", "")),
+            "host_list": data.get("host_list") or [],
+            "uid": uid,
+            "buvid": buvid3 or "",
+            "real_room_id": real_room_id,
+        }
+
+    async def connect_context(self, room_id: int) -> Dict[str, Any]:
+        """WS 连接全上下文：token/host_list/uid/buvid/real_room_id
+
+        auth 包必需（buvid 2023-08 起必须字段；登录 uid 必须与 token 配对）。
+        """
+        return await asyncio.get_running_loop().run_in_executor(
+            None, self._build_connect_context, room_id
+        )
+
 
 class BilibiliProtocolEngine(BaseEngine):
     """B站协议直连引擎
@@ -138,10 +274,13 @@ class BilibiliProtocolEngine(BaseEngine):
         reconnect_manager: Optional[ReconnectManager] = None,
         danmu_info_fetcher: Optional[Callable[[int], Dict[str, Any]]] = None,
         cookie_file: Optional[str] = None,
+        login_flow: Optional[Any] = None,
     ):
         super().__init__(state_store=state_store)
         if reconnect_manager:
             self.set_reconnect_manager(reconnect_manager)
+        self._cookie_file = cookie_file
+        self._login_flow = login_flow  # 登录流程注入（测试用）；默认 bilibili_login.run_login_flow
         self._danmu_info = danmu_info_fetcher or DanmuInfoFetcher(cookie_file=cookie_file)
         self._room_tasks: Dict[str, asyncio.Task] = {}
         self._room_ws: Dict[str, Any] = {}
@@ -187,20 +326,35 @@ class BilibiliProtocolEngine(BaseEngine):
         logger.info(f"[bilibili] room {room_id} connecting")
         while True:
             try:
-                info = await self._danmu_info.fetch(room_id_int)
-                data = info.get("data") or {}
-                token = str(data.get("token", ""))
-                if not token:
-                    raise ValueError(
-                        f"getDanmuInfo 未返回 token（code={info.get('code')} "
-                        f"message={info.get('message', '')!r}——房间号错误、风控或需登录）"
-                    )
+                # 连接上下文：token + 登录 uid/buvid + 真实房间号（barrage-fly 对齐）；
+                # fetcher 注入（测试）无 connect_context 时回退游客语义 fetch()
+                connect_ctx = getattr(self._danmu_info, "connect_context", None)
+                if connect_ctx is not None:
+                    ctx = await connect_ctx(room_id_int)
+                    token = ctx["token"]
+                    if not token:
+                        raise ValueError("getDanmuInfo 未返回 token（房间号错误或风控）")
+                    host_list = ctx["host_list"]
+                else:
+                    info = await self._danmu_info.fetch(room_id_int)
+                    data = info.get("data") or {}
+                    token = str(data.get("token", ""))
+                    if not token:
+                        raise ValueError(
+                            f"getDanmuInfo 未返回 token（code={info.get('code')} "
+                            f"message={info.get('message', '')!r}——房间号错误、风控或需登录）"
+                        )
+                    host_list = data.get("host_list") or []
+                    ctx = {
+                        "token": token, "host_list": host_list,
+                        "uid": 0, "buvid": "", "real_room_id": room_id_int,
+                    }
 
                 # 弹幕服务器地址从 host_list 动态取（wss 端口优先）；
                 # 硬编码域名已过期（连接被重置）。broadcastlv 为经典兜底。
                 ws_urls = [
                     f"wss://{h['host']}:{h['wss_port']}/sub"
-                    for h in (data.get("host_list") or [])
+                    for h in host_list
                     if h.get("host") and h.get("wss_port")
                 ] or [codec.WS_URL]
                 logger.debug(f"[bilibili] room {room_id} hosts: {ws_urls}")
@@ -209,7 +363,7 @@ class BilibiliProtocolEngine(BaseEngine):
                 connected = False
                 for ws_url in ws_urls:
                     try:
-                        await self._serve_room(room_id, ws_url, token)
+                        await self._serve_room(room_id, ws_url, ctx)
                         connected = True
                         break
                     except asyncio.CancelledError:
@@ -242,19 +396,28 @@ class BilibiliProtocolEngine(BaseEngine):
                         await self._emit_system(gap)
                     self._set_status(self.status.__class__.RUNNING)
 
-    async def _serve_room(self, room_id: str, ws_url: str, token: str) -> None:
+    async def _serve_room(self, room_id: str, ws_url: str, ctx: Dict[str, Any]) -> None:
         """单地址连接 + 认证 + 心跳 + 读循环（host_list 逐地址调用）
 
         连接失败/读循环异常向上抛出，由 _run_room 尝试下一地址。
+        auth 包字段对齐 barrage-fly：真实房间号 + 登录 uid + buvid（必须字段）。
         """
         async with websockets.connect(
                 ws_url, ping_interval=None, ping_timeout=None,
                 open_timeout=15, close_timeout=5,
+                **{_WS_HEADER_KWARG: WS_HANDSHAKE_HEADERS},
             ) as ws:
             self._room_ws[room_id] = ws
-            await ws.send(codec.encode_packet(
-                codec.OP_AUTH, codec.build_auth_body(int(room_id), token)))
-            logger.info(f"[bilibili] room {room_id} auth sent to {ws_url}")
+            auth_body = codec.build_auth_body(
+                int(ctx.get("real_room_id") or room_id),
+                ctx["token"],
+                uid=int(ctx.get("uid") or 0),
+                buvid=str(ctx.get("buvid") or ""),
+                queue_uuid=uuid.uuid4().hex[:8],
+            )
+            await ws.send(codec.encode_packet(codec.OP_AUTH, auth_body))
+            logger.info(f"[bilibili] room {room_id} auth sent to {ws_url} "
+                        f"(uid={ctx.get('uid', 0)} buvid={'yes' if ctx.get('buvid') else 'no'})")
 
             hb_task = asyncio.create_task(self._heartbeat(room_id, ws))
             self._heartbeats[room_id] = hb_task

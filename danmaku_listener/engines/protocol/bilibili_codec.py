@@ -104,16 +104,34 @@ def decompress(proto: int, body: bytes) -> List[Tuple[int, bytes]]:
     return [(op, b) for _, op, b in decode_packets(raw)]
 
 
-def build_auth_body(room_id: int, token: str, uid: int = 0, protover: int = 3) -> bytes:
-    """构造认证包 body"""
-    auth = {
+def build_auth_body(
+    room_id: int,
+    token: str,
+    uid: int = 0,
+    protover: int = 3,
+    buvid: str = "",
+    queue_uuid: str = "",
+) -> bytes:
+    """构造认证包 body（字段对齐 barrage-fly SDK UserAuthenticationMsg）
+
+    - buvid：必须字段（2023-08-19 起，缺省被服务端限流/踢线）
+    - uid：登录态必须与 token 配对（DedeUserID），恒 0 会触发踢线/限流
+    - support_ack/scene/queue_uuid：2025-07-19 起新增字段
+    """
+    auth: Dict[str, Any] = {
         "uid": uid,
         "roomid": room_id,
         "protover": protover,
         "platform": "web",
         "type": 2,
         "key": token,
+        "support_ack": True,
+        "scene": "room",
     }
+    if buvid:
+        auth["buvid"] = buvid
+    if queue_uuid:
+        auth["queue_uuid"] = queue_uuid
     return json.dumps(auth, separators=(",", ":")).encode("utf-8")
 
 

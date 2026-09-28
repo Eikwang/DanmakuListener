@@ -24,22 +24,33 @@ from danmaku_listener.engines.protocol import bilibili_codec as codec
 from danmaku_listener.engines.protocol.bilibili import DanmuInfoFetcher
 
 
-async def main(room_id: int, duration: float) -> None:
+async def main(room_id: int, duration: float, cookie_file: str = "") -> None:
     logger.remove()
     logger.add(sys.stderr, level="WARNING")
 
-    info = await DanmuInfoFetcher().fetch(room_id)
-    data = info.get("data") or {}
-    token = data.get("token", "")
-    hosts = [h for h in (data.get("host_list") or []) if h.get("wss_port")]
+    fetcher = DanmuInfoFetcher(cookie_file=cookie_file or None)
+    ctx = await fetcher.connect_context(room_id)
+    token = ctx.get("token", "")
+    hosts = [h for h in (ctx.get("host_list") or []) if h.get("wss_port")]
     assert token and hosts, "token/host_list 获取失败"
+    print(f"ctx: uid={ctx.get('uid')} buvid={'set' if ctx.get('buvid') else 'MISSING'} "
+          f"real_room_id={ctx.get('real_room_id')}", file=sys.stderr)
     url = f"wss://{hosts[0]['host']}:{hosts[0]['wss_port']}/sub"
 
     stats = {"frames": 0, "proto": {}, "cmds": {}, "danmu_ok": 0, "danmu_fail": 0,
              "danmu_fail_samples": [], "decompress_err": 0, "json_err": 0}
 
-    async with websockets.connect(url, ping_interval=None) as ws:
-        await ws.send(codec.encode_packet(codec.OP_AUTH, codec.build_auth_body(room_id, token)))
+    ws_headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                      "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+        "Origin": "https://live.bilibili.com",
+        "Pragma": "no-cache",
+    }
+    async with websockets.connect(url, ping_interval=None, additional_headers=ws_headers) as ws:
+        await ws.send(codec.encode_packet(codec.OP_AUTH, codec.build_auth_body(
+            ctx.get("real_room_id", room_id), token,
+            uid=ctx.get("uid", 0), buvid=ctx.get("buvid", ""),
+            queue_uuid=uuid.uuid4().hex[:8])))
         print(f"auth sent to {url}", file=sys.stderr)
         end = asyncio.get_event_loop().time() + duration
         last_hb = asyncio.get_event_loop().time()
@@ -100,8 +111,11 @@ async def main(room_id: int, duration: float) -> None:
 
 if __name__ == "__main__":
     import argparse
+    import uuid
+
     parser = argparse.ArgumentParser()
     parser.add_argument("room_id", type=int)
     parser.add_argument("--duration", type=float, default=60.0)
+    parser.add_argument("--cookie", default="", help="登录 cookie 文件（storage_state/字符串），完整弹幕流验证")
     a = parser.parse_args()
-    asyncio.run(main(a.room_id, a.duration))
+    asyncio.run(main(a.room_id, a.duration, a.cookie))
