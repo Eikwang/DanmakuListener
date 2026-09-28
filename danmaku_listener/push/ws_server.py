@@ -63,6 +63,10 @@ class PushServer:
         if self._runner:
             await self._runner.cleanup()
 
+    async def ws_handler(self, request):
+        """公开的 WS 连接处理器（供外部 aiohttp app 挂载，单源客户端管理）"""
+        return await self._handler(request)
+
     async def broadcast(self, wire: dict) -> None:
         """向全部已连接客户端广播一条统一消息（线格式）"""
         if not self._clients:

@@ -4,10 +4,15 @@
 """
 
 import json
-from typing import Any, Dict, List, Set
+import time
+from typing import Any, Dict, List, Optional, Set
 
 from aiohttp import web
 from loguru import logger
+
+from danmaku_listener.contract import Category, SystemType
+from danmaku_listener.contract.legacy import legacy_to_unified
+from danmaku_listener.contract.models import Envelope, FailureInfo, RouteFailedPayload, UnifiedMessage
 
 
 class RoomError(Exception):
@@ -46,8 +51,24 @@ class DanmakuBridge:
         self._keyword_filter_enabled: bool = True
         self._load_blocked_keywords()
 
+        # 契约 v1（阶段 W1）：广播单源——PushServer 实例由 app 注入；
+        # 客户端管理与广播全部委托 push（web /ws 与 PushServer 共用实现）
+        self._push: Optional[Any] = None
+
+        # 每房间契约 seq 计数器与消息计数（/api/status 快照数据源）
+        self._room_seq: Dict[str, int] = {}
+        self._message_count = 0
+
         # 设置回调
         self._setup_callbacks()
+
+    def set_push_server(self, push: Any) -> None:
+        """注入 PushServer（广播单源；客户端管理委托给它）"""
+        self._push = push
+
+    def _next_seq(self, room_key: str) -> int:
+        self._room_seq[room_key] = self._room_seq.get(room_key, 0) + 1
+        return self._room_seq[room_key]
 
     def _setup_callbacks(self) -> None:
         """注册 DanmakuListener 事件回调
@@ -82,19 +103,22 @@ class DanmakuBridge:
         logger.debug(f"WS client removed, total: {len(self._ws_clients)}")
 
     async def _broadcast(self, message: dict) -> None:
-        """广播消息到所有 WebSocket 客户端
+        """广播消息到所有 WebSocket 客户端（单源：委托 PushServer.broadcast）
 
-        发送失败的客户端会被自动移除。
+        message 必须已是契约 v1 线格式（各 handler 负责构造）。
+        无 push 注入时退回本地客户端集合（兼容旧测试）。
         """
+        if self._push is not None:
+            await self._push.broadcast(message)
+            return
+
         msg_str = json.dumps(message, ensure_ascii=False)
         dead_clients: Set[web.WebSocketResponse] = set()
-
         for client in self._ws_clients:
             try:
                 await client.send_str(msg_str)
             except Exception:
                 dead_clients.add(client)
-
         if dead_clients:
             self._ws_clients -= dead_clients
             logger.debug(f"Removed {len(dead_clients)} dead WS clients")
@@ -177,10 +201,14 @@ class DanmakuBridge:
         return {"success": True, "enabled": self._keyword_filter_enabled}
 
     def get_status(self) -> dict:
-        """获取系统整体状态"""
+        """获取系统整体状态（含引擎快照——数据源为 bridge 实际实例）"""
         return {
             "backend_connected": True,
             "rooms_count": len(self._rooms),
+            "rooms": dict(self._rooms),
+            "room_seq": dict(self._room_seq),
+            "message_count": self._message_count,
+            "push_clients": len(self._push._clients) if self._push is not None else len(self._ws_clients),
             "proxy": self._get_proxy_status(),
             "keyword_filter": {
                 "enabled": self._keyword_filter_enabled,
@@ -381,59 +409,67 @@ class DanmakuBridge:
         }
 
     async def _on_danmaku_handler(self, msg: Any) -> None:
-        """弹幕事件回调处理器
+        """弹幕事件回调（契约 v1：旧 DanmakuMessage → UnifiedMessage 线格式）
 
-        接收 DanmakuMessage，执行关键词过滤后广播到前端。
-        → AC-005, AC-007, AC-014, AC-015, BR-005
+        关键词过滤（仅普通弹幕）→ BR-005 保持。
         """
-        # 关键词过滤（仅普通弹幕）→ BR-005
         if self._keyword_filter_enabled and msg.message_type == "normal":
             if any(kw in msg.content for kw in self._blocked_keywords):
                 logger.debug(f"Danmaku filtered by keyword: {msg.content[:30]}")
                 return
 
-        # 转换为前端格式并广播
-        await self._broadcast({"type": "danmaku", "data": msg.to_dict()})
+        room_key = f"{msg.platform}:{msg.room_id}"
+        unified = legacy_to_unified(msg, seq=self._next_seq(room_key), engine=f"legacy:{msg.platform}")
+        self._message_count += 1
+        await self._broadcast(unified.to_wire())
 
     async def _on_error_handler(self, error: Exception) -> None:
-        """错误事件回调处理器
-
-        广播错误消息到所有 WS 客户端。
-        """
-        await self._broadcast({
-            "type": "error",
-            "data": {"message": str(error)},
-        })
+        """错误事件（契约 v1：ROUTE_FAILED 三段式）"""
+        room_key = next(iter(self._rooms), "unknown:0")
+        platform, room_id = room_key.split(":", 1)
+        msg = UnifiedMessage(
+            envelope=Envelope(
+                category=Category.SYSTEM, type=SystemType.ROUTE_FAILED.value,
+                platform=platform, room_id=room_id,
+                seq=self._next_seq(room_key), timestamp=int(time.time()), engine="bridge",
+            ),
+            payload=RouteFailedPayload(failure=FailureInfo(
+                reason_code="internal.error",
+                fix_hint=(str(error)[:200] or "查看服务日志"),
+                docs_anchor="docs/ops/compliance-review.md",
+            )),
+        )
+        await self._broadcast(msg.to_wire())
 
     async def _on_reconnect_handler(self, room_id: str) -> None:
-        """重连事件回调处理器
-
-        广播重连状态到所有 WS 客户端。→ AC-012
-        """
-        await self._broadcast({
-            "type": "reconnect",
-            "data": {"room_id": room_id, "status": "reconnecting"},
-        })
+        """重连事件（契约 v1：ENGINE_STATUS/detail=reconnecting）→ AC-012"""
+        room_key = next((k for k in self._rooms if k.endswith(f":{room_id}")), f"unknown:{room_id}")
+        platform = room_key.split(":")[0]
+        msg = UnifiedMessage(
+            envelope=Envelope(
+                category=Category.SYSTEM, type=SystemType.ENGINE_STATUS.value,
+                platform=platform, room_id=room_id,
+                seq=self._next_seq(room_key), timestamp=int(time.time()), engine="bridge",
+            ),
+            payload={"type": "ENGINE_STATUS", "engine": "bridge", "detail": "reconnecting"},
+        )
+        await self._broadcast(msg.to_wire())
 
     async def _on_status_change_handler(self, room_id: str, status: str) -> None:
-        """状态变化回调处理器
-
-        更新房间状态并广播到前端。
-        """
-        room_key = f"douyin:{room_id}"  # 默认平台为 douyin
-        # 尝试匹配已记录的房间
-        for key in self._rooms:
-            if key.endswith(f":{room_id}"):
-                room_key = key
-                break
-
+        """状态变化（契约 v1：ENGINE_STATUS/detail 房间状态）"""
+        room_key = next((k for k in self._rooms if k.endswith(f":{room_id}")), f"douyin:{room_id}")
+        platform = room_key.split(":")[0]
         if room_key in self._rooms:
             self._rooms[room_key]["status"] = status
-
-        await self._broadcast({
-            "type": "status_change",
-            "data": {"room_id": room_id, "status": status},
-        })
+        msg = UnifiedMessage(
+            envelope=Envelope(
+                category=Category.SYSTEM, type=SystemType.ENGINE_STATUS.value,
+                platform=platform, room_id=room_id,
+                seq=self._next_seq(room_key), timestamp=int(time.time()), engine="bridge",
+            ),
+            payload={"type": "ENGINE_STATUS", "engine": "bridge", "detail": f"room {room_id}: {status}"},
+        )
+        await self._broadcast(msg.to_wire())
 
     async def shutdown(self) -> None:
         """关闭桥接器，释放资源"""
@@ -444,6 +480,7 @@ class DanmakuBridge:
                 logger.error(f"Error stopping listener: {e}")
             self._listener = None
 
+        self._push = None
         # 关闭所有 WebSocket 客户端
         for client in list(self._ws_clients):
             try:

@@ -40,8 +40,9 @@ def _make_bridge_with_mocked_listener():
 
 
 def _make_danmaku_message(**overrides):
-    """构造 DanmakuMessage dict（模拟 to_dict() 输出）"""
-    msg = {
+    """构造真实 DanmakuMessage（契约 v1 桥接输入）"""
+    from danmaku_listener.bus.message import DanmakuMessage
+    data = {
         "platform": "douyin",
         "room_id": "123456",
         "user_name": "测试用户",
@@ -50,33 +51,51 @@ def _make_danmaku_message(**overrides):
         "message_type": "normal",
         "gift_info": None,
     }
-    msg.update(overrides)
-    return msg
+    data.update(overrides)
+    return DanmakuMessage(**data)
+
+
+def _make_system_message(**overrides):
+    """构造真实系统类 DanmakuMessage"""
+    from danmaku_listener.bus.message import DanmakuMessage
+    data = {
+        "platform": "douyin",
+        "room_id": "123456",
+        "user_name": "",
+        "content": "房间状态更新",
+        "timestamp": 1722000000,
+        "message_type": "system",
+        "gift_info": None,
+    }
+    data.update(overrides)
+    return DanmakuMessage(**data)
 
 
 def _make_gift_message(**overrides):
-    """构造礼物消息 dict"""
-    msg = {
+    """构造真实礼物 DanmakuMessage"""
+    from danmaku_listener.bus.message import DanmakuMessage, GiftInfo
+    data = {
         "platform": "douyin",
         "room_id": "123456",
         "user_name": "送礼者",
         "content": "送出了 火箭 x2",
         "timestamp": 1722000000,
         "message_type": "gift",
-        "gift_info": {
-            "user_name": "送礼者",
-            "gift_name": "火箭",
-            "gift_count": 2,
-            "gift_value": 100,
-        },
+        "gift_info": GiftInfo(
+            user_name="送礼者",
+            gift_name="火箭",
+            gift_count=2,
+            gift_value=100,
+        ),
     }
-    msg.update(overrides)
-    return msg
+    data.update(overrides)
+    return DanmakuMessage(**data)
 
 
-def _make_system_message(**overrides):
-    """构造系统消息 dict"""
-    msg = {
+def _make_enter_message(**overrides):
+    """构造真实进房 DanmakuMessage"""
+    from danmaku_listener.bus.message import DanmakuMessage
+    data = {
         "platform": "douyin",
         "room_id": "123456",
         "user_name": "用户A",
@@ -85,8 +104,8 @@ def _make_system_message(**overrides):
         "message_type": "system",
         "gift_info": None,
     }
-    msg.update(overrides)
-    return msg
+    data.update(overrides)
+    return DanmakuMessage(**data)
 
 
 # ── 测试类 ──────────────────────────────────────────────
@@ -105,12 +124,7 @@ class TestOnDanmakuHandler:
         await bridge.add_ws_client(ws1)
         await bridge.add_ws_client(ws2)
 
-        # 模拟 DanmakuMessage 对象
-        msg = MagicMock()
-        msg.to_dict.return_value = _make_danmaku_message()
-        msg.message_type = "normal"
-        msg.content = "你好"
-
+        msg = _make_danmaku_message()
         await bridge._on_danmaku_handler(msg)
 
         # 验证两个客户端都收到消息
@@ -118,10 +132,11 @@ class TestOnDanmakuHandler:
         assert ws2.send_str.call_count == 1
 
         sent1 = json.loads(ws1.send_str.call_args[0][0])
-        assert sent1["type"] == "danmaku"
-        assert sent1["data"]["platform"] == "douyin"
-        assert sent1["data"]["user_name"] == "测试用户"
-        assert sent1["data"]["content"] == "你好"
+        assert sent1["category"] == "business"
+        assert sent1["type"] == "DANMU"
+        assert sent1["platform"] == "douyin"
+        assert sent1["payload"]["user_name"] == "测试用户"
+        assert sent1["payload"]["content"] == "你好"
 
     @pytest.mark.asyncio
     async def test_danmaku_data_contains_all_required_fields(self):
@@ -130,18 +145,14 @@ class TestOnDanmakuHandler:
         ws = AsyncMock()
         await bridge.add_ws_client(ws)
 
-        msg = MagicMock()
-        msg.to_dict.return_value = _make_danmaku_message()
-        msg.message_type = "normal"
-        msg.content = "你好"
-
+        msg = _make_danmaku_message()
         await bridge._on_danmaku_handler(msg)
 
         sent = json.loads(ws.send_str.call_args[0][0])
-        data = sent["data"]
-        required_fields = ["platform", "room_id", "user_name", "content", "timestamp", "message_type"]
-        for field in required_fields:
-            assert field in data, f"Missing field: {field}"
+        for field in ["platform", "room_id", "seq", "timestamp", "engine", "payload"]:
+            assert field in sent, f"Missing envelope field: {field}"
+        for field in ["user_name", "content"]:
+            assert field in sent["payload"], f"Missing payload field: {field}"
 
     @pytest.mark.asyncio
     async def test_gift_message_includes_gift_info(self):
@@ -150,18 +161,13 @@ class TestOnDanmakuHandler:
         ws = AsyncMock()
         await bridge.add_ws_client(ws)
 
-        msg = MagicMock()
-        msg.to_dict.return_value = _make_gift_message()
-        msg.message_type = "gift"
-        msg.content = "送出了 火箭 x2"
-
+        msg = _make_gift_message()
         await bridge._on_danmaku_handler(msg)
 
         sent = json.loads(ws.send_str.call_args[0][0])
-        assert sent["data"]["message_type"] == "gift"
-        assert sent["data"]["gift_info"] is not None
-        assert sent["data"]["gift_info"]["gift_name"] == "火箭"
-        assert sent["data"]["gift_info"]["gift_count"] == 2
+        assert sent["type"] == "GIFT"
+        assert sent["payload"]["gift_name"] == "火箭"
+        assert sent["payload"]["gift_count"] == 2
 
 
 class TestKeywordFilter:
@@ -177,9 +183,7 @@ class TestKeywordFilter:
         ws = AsyncMock()
         await bridge.add_ws_client(ws)
 
-        msg = MagicMock()
-        msg.to_dict.return_value = _make_danmaku_message(content="这是广告内容")
-        msg.message_type = "normal"
+        msg = _make_danmaku_message(content="这是广告内容")
         msg.content = "这是广告内容"
 
         await bridge._on_danmaku_handler(msg)
@@ -197,11 +201,7 @@ class TestKeywordFilter:
         ws = AsyncMock()
         await bridge.add_ws_client(ws)
 
-        msg = MagicMock()
-        msg.to_dict.return_value = _make_gift_message()
-        msg.message_type = "gift"
-        msg.content = "送出了 火箭 x2"
-
+        msg = _make_gift_message()
         await bridge._on_danmaku_handler(msg)
 
         # 礼物消息应推送
@@ -217,9 +217,7 @@ class TestKeywordFilter:
         ws = AsyncMock()
         await bridge.add_ws_client(ws)
 
-        msg = MagicMock()
-        msg.to_dict.return_value = _make_system_message()
-        msg.message_type = "system"
+        msg = _make_system_message()
         msg.content = "进入了直播间"
 
         await bridge._on_danmaku_handler(msg)
@@ -237,9 +235,7 @@ class TestKeywordFilter:
         ws = AsyncMock()
         await bridge.add_ws_client(ws)
 
-        msg = MagicMock()
-        msg.to_dict.return_value = _make_danmaku_message(content="这是广告内容")
-        msg.message_type = "normal"
+        msg = _make_danmaku_message(content="这是广告内容")
         msg.content = "这是广告内容"
 
         await bridge._on_danmaku_handler(msg)
@@ -262,8 +258,8 @@ class TestOnErrorHandler:
         await bridge._on_error_handler(error)
 
         sent = json.loads(ws.send_str.call_args[0][0])
-        assert sent["type"] == "error"
-        assert "连接超时" in sent["data"]["message"]
+        assert sent["type"] == "ROUTE_FAILED"
+        assert "连接超时" in sent["payload"]["failure"]["fix_hint"]
 
 
 class TestOnReconnectHandler:
@@ -279,9 +275,9 @@ class TestOnReconnectHandler:
         await bridge._on_reconnect_handler("123456")
 
         sent = json.loads(ws.send_str.call_args[0][0])
-        assert sent["type"] == "reconnect"
-        assert sent["data"]["room_id"] == "123456"
-        assert sent["data"]["status"] == "reconnecting"
+        assert sent["type"] == "ENGINE_STATUS"
+        assert sent["room_id"] == "123456"
+        assert sent["payload"]["detail"] == "reconnecting"
 
 
 class TestCallbackRegistration:
@@ -316,20 +312,10 @@ class TestMultiRoomDanmaku:
         await bridge.add_ws_client(ws)
 
         # 房间1的弹幕（时间戳较早）
-        msg1 = MagicMock()
-        msg1.to_dict.return_value = _make_danmaku_message(
-            room_id="111", content="房间1消息", timestamp=100
-        )
-        msg1.message_type = "normal"
-        msg1.content = "房间1消息"
+        msg1 = _make_danmaku_message(room_id="111", content="房间1消息", timestamp=100)
 
         # 房间2的弹幕（时间戳较晚）
-        msg2 = MagicMock()
-        msg2.to_dict.return_value = _make_danmaku_message(
-            room_id="222", content="房间2消息", timestamp=200
-        )
-        msg2.message_type = "normal"
-        msg2.content = "房间2消息"
+        msg2 = _make_danmaku_message(room_id="222", content="房间2消息", timestamp=200)
 
         await bridge._on_danmaku_handler(msg1)
         await bridge._on_danmaku_handler(msg2)
@@ -338,8 +324,8 @@ class TestMultiRoomDanmaku:
         assert ws.send_str.call_count == 2
         first = json.loads(ws.send_str.call_args_list[0][0][0])
         second = json.loads(ws.send_str.call_args_list[1][0][0])
-        assert first["data"]["room_id"] == "111"
-        assert second["data"]["room_id"] == "222"
+        assert first["room_id"] == "111"
+        assert second["room_id"] == "222"
 
 
 class TestWSInitialStatus:

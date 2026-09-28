@@ -74,6 +74,7 @@ class Settings(BaseSettings):
     ws_port: int = 8765                    # 本机 WS 推送端口
     ws_bind: str = "127.0.0.1"             # 默认仅本机（边界由 bind 保证）
     ws_token_file: Optional[str] = None    # 预共享 token 文件（受限权限）；或环境变量 DANMAKU_TOKEN
+    web_port: int = 8080                   # 测试控制台端口（与 ws_port 8765 隔离，不得占用）
     credential_dir: str = "./cookie"       # 登录态凭据目录（引擎写、AUTOlive 只读）
 
     # ===== 契约 v1 新增：消息总线与背压（有界参数，DX-B / Eng M/P） =====
