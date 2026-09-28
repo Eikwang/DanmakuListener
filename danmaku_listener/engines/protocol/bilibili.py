@@ -164,22 +164,39 @@ class BilibiliProtocolEngine(BaseEngine):
                         f"message={info.get('message', '')!r}——房间号错误、风控或需登录）"
                     )
 
-                async with websockets.connect(codec.WS_URL) as ws:
-                    self._room_ws[room_id] = ws
-                    await ws.send(codec.encode_packet(codec.OP_AUTH, codec.build_auth_body(room_id_int, token)))
-                    logger.info(f"[bilibili] room {room_id} auth sent")
+                # 弹幕服务器地址从 host_list 动态取（wss 端口优先）；
+                # 硬编码域名已过期（连接被重置）。broadcastlv 为经典兜底。
+                ws_urls = [
+                    f"wss://{h['host']}:{h['wss_port']}/sub"
+                    for h in (data.get("host_list") or [])
+                    if h.get("host") and h.get("wss_port")
+                ] or [codec.WS_URL]
+                logger.debug(f"[bilibili] room {room_id} hosts: {ws_urls}")
 
-                    hb_task = asyncio.create_task(self._heartbeat(room_id, ws))
-                    self._heartbeats[room_id] = hb_task
-                    self._set_status(self.status.__class__.RUNNING)
+                last_err: Optional[Exception] = None
+                connected = False
+                for ws_url in ws_urls:
                     try:
-                        await self._read_loop(room_id, ws)
-                    finally:
-                        hb_task.cancel()
+                        await self._serve_room(room_id, ws_url, token)
+                        connected = True
+                        break
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as e:
+                        last_err = e
+                        logger.warning(
+                            f"[bilibili] room {room_id} ws {ws_url} failed: "
+                            f"{type(e).__name__}: {e}"
+                        )
+                if not connected:
+                    raise last_err or RuntimeError("全部弹幕服务器连接失败")
+
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                logger.warning(f"[bilibili] room {room_id} error: {e}")
+                logger.warning(
+                    f"[bilibili] room {room_id} error: {type(e).__name__}: {e}"
+                )
                 self._set_status(self.status.__class__.ERROR)
                 self.mark_gap_start(room_id)
                 handled = await self._handle_error_with_reconnect(room_id, e)
@@ -192,6 +209,27 @@ class BilibiliProtocolEngine(BaseEngine):
                     if gap:
                         await self._emit_system(gap)
                     self._set_status(self.status.__class__.RUNNING)
+
+    async def _serve_room(self, room_id: str, ws_url: str, token: str) -> None:
+        """单地址连接 + 认证 + 心跳 + 读循环（host_list 逐地址调用）
+
+        连接失败/读循环异常向上抛出，由 _run_room 尝试下一地址。
+        """
+        async with websockets.connect(ws_url) as ws:
+            self._room_ws[room_id] = ws
+            await ws.send(codec.encode_packet(
+                codec.OP_AUTH, codec.build_auth_body(int(room_id), token)))
+            logger.info(f"[bilibili] room {room_id} auth sent to {ws_url}")
+
+            hb_task = asyncio.create_task(self._heartbeat(room_id, ws))
+            self._heartbeats[room_id] = hb_task
+            self._set_status(self.status.__class__.RUNNING)
+            try:
+                await self._read_loop(room_id, ws)
+            finally:
+                hb_task.cancel()
+                self._room_ws.pop(room_id, None)
+                self._heartbeats.pop(room_id, None)
 
     async def _heartbeat(self, room_id: str, ws) -> None:
         """平台连接心跳（30s，与引擎存活心跳独立）"""
@@ -217,9 +255,9 @@ class BilibiliProtocolEngine(BaseEngine):
                     if popularity is not None:
                         self._emit_stats(room_id, popularity)
                     continue
-                if op == 8:  # 服务器关闭帧
-                    logger.info(f"[bilibili] room {room_id} closed by server")
-                    return
+                if op == 8:  # AUTH_REPLY：认证成功应答（body 含 code=0）
+                    logger.info(f"[bilibili] room {room_id} auth accepted")
+                    continue
                 if op != codec.OP_SEND_MSG_REPLY:
                     continue
                 # proto 2/3 为压缩嵌套包；0/1 为裸 JSON
