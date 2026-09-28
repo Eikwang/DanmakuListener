@@ -1,61 +1,348 @@
-"""虎牙直播弹幕协议编解码器（阶段 3b）
+"""虎牙直播弹幕协议编解码器（标准 Tars over WebSocket，2026-09 实测校准）
 
-**协议状态：draft（huya-0-draft）**——帧结构与嵌入式 protobuf 消息细节
-需抓包实测校准（计划 Open Questions 已列）。当前实现覆盖社区已知的
-帧布局与生命周期，消息解析留接口（parse_payload 钩子）。
+协议要点（barrage-fly SDK 1.5.8 对照 + 浏览器真实帧逐字节验证）：
+- WS: wss://cdnws.api.huya.com:443（SDK 端点；浏览器用 wsapi.huya.com / *.va.huya.com）
+- 帧 = 纯 Tars WebSocketCommand 序列化（无帧头）：
+  operation(tag0) + vData(tag1, SimpleList) + lRequestId(2) + traceId(3) + ...
+- opcode：3=WupReq 4=WupRsp 5/20=心跳 21=心跳应答 7=下推 MsgPushReq
+  16=RegisterGroupReq 17=Rsp 33=UpdateUserInfoReq
+- WupReq（vData 内容）：4B 大端长度前缀 + Tars：
+  version(1)=3, packetType(2), messageType(3), requestId(4), servantName(5),
+  functionName(6), uniAttribute(7, SimpleList) —— uniAttribute = map<string, byte[]>
+  （tarsjce 1.7+ 单层 map，key="tReq"）
+- 下推（op=7）→ WSPushMessage{ePushType=0, lUri=1, dataBytes=2}：
+  uri 1400=MessageNotice（弹幕）、6501=SendItemSubBroadcastPacket（礼物）、
+  6110=VipEnterBanner（进场横幅）
 
-社区已知帧布局（大端）：
-- 4B 总长 + 2B 头长(=8?) + 2B 版本 + 4B 序列 + ... + 嵌入式 protobuf payload
-- WS: wss://hws.huya.com/wsc/websocket
-
-引擎生命周期（连接/心跳/重连/GAP）与其它协议引擎同构；payload 解析
-经 ``parse_payload`` 钩子注入——实测后以 huya proto 定义替换。
+映射表见 docs/contract/mapping.md。
 """
 
 import struct
-from typing import Any, Callable, Dict, List, Optional, Tuple
+import time
+from typing import Any, Callable, Dict, List, Optional
 
-PROTOCOL_VERSION = "huya-0-draft"
-HEADER_SIZE = 12
-WS_URL = "wss://hws.huya.com/wsc/websocket"
-HEARTBEAT_INTERVAL = 30.0
+from danmaku_listener.engines.protocol.huya_tars import (
+    TarsError,
+    TarsInputStream,
+    TarsOutputStream,
+    TarsStruct,
+)
+
+PROTOCOL_VERSION = "huya-1"
+
+WS_URL = "wss://cdnws.api.huya.com:443"
+HEARTBEAT_INTERVAL = 25.0  # SDK 默认周期（首帧 15s 延迟在引擎侧）
+
+# opcode（HuyaOperationEnum）
+OP_WUP_REQ = 3
+OP_WUP_RSP = 4
+OP_HEARTBEAT_REQ = 20
+OP_HEARTBEAT_RSP = 21
+OP_MSG_PUSH = 7
+OP_REGISTER_GROUP_REQ = 16
+OP_REGISTER_GROUP_RSP = 17
+OP_UPDATE_USER_INFO_REQ = 33
+OP_UPDATE_USER_INFO_RSP = 34
+
+# 下推 uri（HuyaCmdEnum）
+URI_MESSAGE_NOTICE = 1400
+URI_VIP_ENTER_BANNER = 6110
+URI_SEND_ITEM_SUB_BROADCAST = 6501
+
+VER = "0.1.0"
+UA = f"webh5&{VER}&websocket"
 
 
 class HuyaFrameError(ValueError):
     """帧解析失败"""
 
 
-def encode_frame(payload: bytes, proto_ver: int = 1, seq: int = 0) -> bytes:
-    """编码一帧（大端：4B 总长 + 2B 头长(=12) + 2B 版本 + 4B 序列 + payload）
+# ---- 结构体 ----
 
-    帧细节（头长/版本/序列字段布局）为 draft，以抓包校准为准。
+class UserId(TarsStruct):
+    """UserId（SDK UserId.java）"""
+
+    def __init__(self) -> None:
+        self.l_uid = 0
+        self.s_guid = ""
+        self.s_token = ""
+        self.s_huya_ua = UA
+        self.s_cookie = ""
+        self.i_token_type = 0
+        self.s_device_info = "chrome"
+
+    def write_to(self, os: TarsOutputStream) -> None:
+        os.write_int(self.l_uid, 0)
+        os.write_string(self.s_guid, 1)
+        os.write_string(self.s_token, 2)
+        os.write_string(self.s_huya_ua, 3)
+        os.write_string(self.s_cookie, 4)
+        os.write_int(self.i_token_type, 5)
+        os.write_string(self.s_device_info, 6)
+
+    def read_from(self, is_: TarsInputStream) -> None:
+        self.l_uid = is_.read_int(0, 0)
+        self.s_guid = is_.read_string(1, "")
+
+
+class SenderInfo(TarsStruct):
+    """SenderInfo（MessageNotice.tUserInfo；SDK SenderInfo.java）"""
+
+    def __init__(self) -> None:
+        self.l_uid = 0
+        self.l_imid = 0
+        self.s_nick_name = ""
+        self.s_avatar_url = ""
+
+    def write_to(self, os: TarsOutputStream) -> None:
+        os.write_int(self.l_uid, 0)
+
+    def read_from(self, is_: TarsInputStream) -> None:
+        self.l_uid = is_.read_int(0, 0)
+        self.l_imid = is_.read_int(1, 0)
+        self.s_nick_name = is_.read_string(2, "")
+        self.s_avatar_url = is_.read_string(4, "")
+
+
+class LiveLaunchReq(TarsStruct):
+    """LiveLaunchReq（doLaunch 请求；SDK 同名类）"""
+
+    def __init__(self) -> None:
+        self.t_id = UserId()
+        self.e_source = 3  # HuyaLiveSource.WEB_HUYA
+        self.b_support_domain = True
+
+    def write_to(self, os: TarsOutputStream) -> None:
+        os.write_struct_begin(0)
+        self.t_id.write_to(os)
+        os.write_struct_end()
+        # tLiveUB(tag1) 仅 eSource(tag1) 字段
+        os.write_struct_begin(1)
+        os.write_int(self.e_source, 1)
+        os.write_struct_end()
+        os.write_bool(self.b_support_domain, 2)
+
+    def read_from(self, is_: TarsInputStream) -> None:
+        pass
+
+
+class WSRegisterGroupReq(TarsStruct):
+    """registerGroup 请求（SDK 同名类）"""
+
+    def __init__(self, group_ids: Optional[List[str]] = None) -> None:
+        self.v_group_ids = group_ids or []
+
+    def write_to(self, os: TarsOutputStream) -> None:
+        # list<string>（_write_any 逐元素 string）
+        os.write_list(self.v_group_ids, 0)
+
+    def read_from(self, is_: TarsInputStream) -> None:
+        pass
+
+
+class WSUpdateUserInfoReq(TarsStruct):
+    """updateUserInfo 请求（SDK 同名类；仅必需字段）"""
+
+    def __init__(self) -> None:
+        self.s_app_src = "HUYA&ZH&2052"
+
+    def write_to(self, os: TarsOutputStream) -> None:
+        os.write_string(self.s_app_src, 0)
+
+    def read_from(self, is_: TarsInputStream) -> None:
+        pass
+
+
+class UserHeartBeatReq(TarsStruct):
+    """心跳请求（SDK 同名类）"""
+
+    def __init__(self) -> None:
+        self.t_id = UserId()
+        self.l_tid = 0
+        self.l_sid = 0
+        self.l_pid = 0
+        self.b_watch_video = True
+        self.e_line_type = -1
+
+    def write_to(self, os: TarsOutputStream) -> None:
+        os.write_struct_begin(0)
+        self.t_id.write_to(os)
+        os.write_struct_end()
+        os.write_int(self.l_tid, 1)
+        os.write_int(self.l_sid, 2)
+        os.write_int(self.l_pid, 4)
+        os.write_bool(self.b_watch_video, 5)
+        os.write_int(self.e_line_type, 6)
+
+    def read_from(self, is_: TarsInputStream) -> None:
+        pass
+
+
+# ---- 编码 ----
+
+def _uni_attribute(payload: bytes) -> bytes:
+    """uniAttribute（tarsjce 1.7+）：map<string, byte[]> tag0，key="tReq" """
+    os = TarsOutputStream()
+    os.write_map({"tReq": payload}, 0)
+    return os.to_bytes()
+
+
+def _wup_encode(servant: str, func: str, req: TarsStruct) -> bytes:
+    """WupReq：4B 大端长度前缀 + Tars（tags 1-7；BaseWup.encode 同款）"""
+    inner = TarsOutputStream()
+    req.write_to(inner)
+    wup = TarsOutputStream()
+    wup.write_int(3, 1)  # version = VERSION3
+    wup.write_int(0, 2)  # packetType
+    wup.write_int(0, 3)  # messageType
+    wup.write_int(-1, 4)  # requestId
+    wup.write_string(servant, 5)
+    wup.write_string(func, 6)
+    wup.write_bytes(_uni_attribute(inner.to_bytes()), 7)
+    body = wup.to_bytes()
+    return struct.pack(">I", 4 + len(body)) + body
+
+
+def build_websocket_command(operation: int, v_data: bytes) -> bytes:
+    """WebSocketCommand：纯 Tars（浏览器真实帧同款）"""
+    cmd = TarsOutputStream()
+    cmd.write_int(operation, 0)
+    cmd.write_bytes(v_data, 1)
+    return cmd.to_bytes()
+
+
+def build_do_launch() -> bytes:
+    """op=3 WupReq：liveui/doLaunch（连接后认证第一包）"""
+    return build_websocket_command(OP_WUP_REQ, _wup_encode("liveui", "doLaunch", LiveLaunchReq()))
+
+
+def build_register_group(tid: int) -> bytes:
+    """op=16：注册房间组（live:{tid} + chat:{tid}）"""
+    req = WSRegisterGroupReq([f"live:{tid}", f"chat:{tid}"])
+    inner = TarsOutputStream()
+    req.write_to(inner)
+    return build_websocket_command(OP_REGISTER_GROUP_REQ, inner.to_bytes())
+
+
+def build_update_user_info() -> bytes:
+    """op=33：更新用户信息（开启 ack 统计）"""
+    req = WSUpdateUserInfoReq()
+    inner = TarsOutputStream()
+    req.write_to(inner)
+    return build_websocket_command(OP_UPDATE_USER_INFO_REQ, inner.to_bytes())
+
+
+def build_heartbeat(tid: int) -> bytes:
+    """op=20 WupReq：onlineui/OnUserHeartBeat"""
+    req = UserHeartBeatReq()
+    req.l_pid = tid
+    return build_websocket_command(OP_HEARTBEAT_REQ, _wup_encode("onlineui", "OnUserHeartBeat", req))
+
+
+# ---- 解码 ----
+
+def decode_command(data: bytes) -> Dict[str, Any]:
+    """WebSocketCommand 反序列化 → {operation, v_data}"""
+    is_ = TarsInputStream(data)
+    return {
+        "operation": is_.read_int(0, 0),
+        "v_data": is_.read_bytes(1, b""),
+    }
+
+
+def decode_wup_rsp(v_data: bytes) -> Dict[str, Any]:
+    """WupRsp（4B 长度前缀 + Tars）→ {servant, func, ret, uni}"""
+    if len(v_data) < 4:
+        return {}
+    body = v_data[4:]
+    is_ = TarsInputStream(body)
+    return {
+        "version": is_.read_int(1, 0),
+        "packet_type": is_.read_int(2, 0),
+        "request_id": is_.read_int(4, 0),
+        "servant": is_.read_string(5, ""),
+        "func": is_.read_string(6, ""),
+    }
+
+
+def decode_push_message(v_data: bytes) -> Optional[Dict[str, Any]]:
+    """op=7 下推 → WSPushMessage{ePushType, lUri, dataBytes}"""
+    is_ = TarsInputStream(v_data)
+    e_push_type = is_.read_int(0, 0)
+    l_uri = is_.read_int(1, 0)
+    data_bytes = is_.read_bytes(2, b"")
+    return {"e_push_type": e_push_type, "uri": l_uri, "data": data_bytes}
+
+
+def decode_message_notice(data: bytes) -> Dict[str, Any]:
+    """MessageNotice（uri 1400）→ 弹幕/进场字段
+
+    布局（浏览器真实帧验证）：tag0=tUserInfo(SenderInfo struct)、
+    tag1=lTid、tag2=lSid、tag3=sContent。
     """
-    header_len = HEADER_SIZE
-    total = header_len + len(payload)
-    return struct.pack(">IHHI", total, header_len, proto_ver, seq) + payload
+    is_ = TarsInputStream(data)
+    user = SenderInfo()
+    if is_.skip_to_tag(0) and is_.enter_struct():
+        user.read_from(is_)
+        is_.skip_to_struct_end()  # 部分读取后对齐 struct 末尾
+    content = is_.read_string(3, "")
+    return {
+        "user_name": user.s_nick_name,
+        "user_id": str(user.l_uid) if user.l_uid else None,
+        "content": content,
+    }
 
 
-def decode_frames(data: bytes) -> List[Tuple[int, int, bytes]]:
-    """解码粘包流：返回 [(proto_ver, seq, payload)]"""
-    frames: List[Tuple[int, int, bytes]] = []
-    offset = 0
-    total_len = len(data)
-    while offset + HEADER_SIZE <= total_len:
-        total, header_len, proto_ver, seq = struct.unpack(">IHHI", data[offset : offset + HEADER_SIZE])
-        if total < header_len or offset + total > total_len:
-            raise HuyaFrameError(f"total={total} 超出缓冲（offset={offset} total={total_len}）")
-        payload = data[offset + header_len : offset + total]
-        frames.append((proto_ver, seq, payload))
-        offset += total
-    return frames
+def decode_send_item(data: bytes) -> Dict[str, Any]:
+    """SendItemSubBroadcastPacket（uri 6501）→ 礼物字段"""
+    is_ = TarsInputStream(data)
+    return {
+        "item_type": is_.read_int(0, 0),
+        "item_count": is_.read_int(2, 0),
+        "presenter_uid": is_.read_int(3, 0),
+        "sender_uid": is_.read_int(4, 0),
+        "presenter_nick": is_.read_string(5, ""),
+        "sender_nick": is_.read_string(6, ""),
+        "send_content": is_.read_string(7, ""),
+    }
 
 
-def map_payload(payload: bytes, seq: int, ts: int, parse_hook: Optional[Callable] = None) -> List[Dict[str, Any]]:
-    """payload → 契约线格式片段
+# ---- 上游消息 → 契约 v1 ----
 
-    实测校准前默认返回空（未知结构不猜测）；注入 parse_hook（实测后实现）
-    可在不改引擎的情况下接入真实解析。
-    """
-    if parse_hook is None:
-        return []
-    return parse_hook(payload, seq, ts)
+def map_upstream(payload: bytes, uri: int, seq: int, ts: int) -> Optional[Dict[str, Any]]:
+    """下推消息映射到契约线格式片段；未知 uri 返回 None"""
+    if uri == URI_MESSAGE_NOTICE:
+        d = decode_message_notice(payload)
+        if d.get("content"):
+            return {
+                "category": "business",
+                "type": "DANMU",
+                "seq": seq,
+                "timestamp": ts,
+                "payload": {
+                    "type": "DANMU",
+                    "user_name": d.get("user_name") or "",
+                    "content": d.get("content", ""),
+                    "user_id": d.get("user_id"),
+                },
+            }
+        return None
+    if uri == URI_SEND_ITEM_SUB_BROADCAST:
+        d = decode_send_item(payload)
+        return {
+            "category": "business",
+            "type": "GIFT",
+            "seq": seq,
+            "timestamp": ts,
+            "payload": {
+                "type": "GIFT",
+                "user_name": d.get("sender_nick") or "",
+                "user_id": str(d["sender_uid"]) if d.get("sender_uid") else None,
+                "gift_name": str(d.get("item_type") or ""),
+                "gift_count": d.get("item_count", 1),
+            },
+        }
+    if uri == URI_VIP_ENTER_BANNER:
+        # VipEnterBanner 结构未移植（进场横幅，可选映射）——v1 暂略
+        return None
+    return None

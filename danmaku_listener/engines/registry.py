@@ -30,7 +30,7 @@ PLATFORM_ENGINES = {
 
 #: 引擎可用性 warnings（CEO-2：加房间响应透出，前端可见）
 PLATFORM_WARNINGS = {
-    "huya": "虎牙协议为 draft（huya-0-draft），payload 解析待抓包校准——连接可用但暂无消息输出",
+    "huya": "虎牙 Tars 协议直连（2026-09-28 实测打通：DANMU/GIFT）；礼物名暂为类型编号",
     "kuaishou": "快手 web 直播间已强制游客登录（2026-09 实测）——首次添加弹登录窗口，登录后自动监听",
     "wechat_channels": "后台页面/接口结构待实测校准（微信更新可能变更）",
 }

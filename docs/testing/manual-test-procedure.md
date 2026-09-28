@@ -129,7 +129,7 @@
       [预期] 代理注册 + JSON 流（protobuf 解析路径）
 - [ ] **4C.4** 异常路径：错误房间号执行，确认三段式错误而非栈崩溃
 
-### 4D 快手协议直连（✅ 2026-09-28 校准，约 15 分钟）
+### 4D 快手协议直连（✅ 2026-09-28 实测通过，约 15 分钟）
 
 > **2026-09 实测**：快手 web 直播间已**强制游客登录**（页面自动弹登录二维码框，
 > 机械请求被"请求过快"风控拦截）——SDK 2024 年的游客 livedetail 路线作为
@@ -159,10 +159,17 @@
 - [ ] **4E.3** 扫码后观察自动恢复（`login recovered` 事件）
 - [ ] **4E.4** 弹幕接口字段与 `FEED_API_PATTERN` 校准记录（如实测不符，记录响应样例反馈）
 
-### 4F 虎牙（❌ 暂不承诺）
+### 4F 虎牙协议直连（✅ 2026-09-28 实测打通，约 10 分钟）
 
-协议 draft（huya-0-draft）：连接/生命周期可跑，但 **payload 不解析**（无消息输出为预期）。
-仅验证引擎启动与重连循环：`python -m pytest tests/unit/test_huya_protocol.py -q`（已覆盖）。
+> **2026-09 完成 Tars 协议栈**（huya_tars.py 标准编解码 + 浏览器真实帧逐字节
+> 黄金样本验证）：doLaunch → registerGroup(live/chat:{tid}) → updateUserInfo →
+> 心跳（onlineui/OnUserHeartBeat，25s）→ 下推分发（1400 弹幕/6501 礼物/6110 进场）。
+
+- [ ] **4F.1** 选一个正在直播的虎牙房间（`https://www.huya.com/<房间号>`）
+- [ ] **4F.2** `python tools/protocol_listen.py huya <房间号> --duration 60`
+      [预期] 契约 JSON 流：DANMU（昵称+内容，实测验证）+ GIFT（礼物名暂为
+      类型编号——礼物 ID 表映射为后续增强项），`"protocol_version": "huya-1"`
+- [ ] **4F.3** 观察 45s+ 不中断（心跳首帧 15s 延迟 + 25s 周期）
 
 ---
 
