@@ -6,6 +6,7 @@
 
 import asyncio
 import json
+import os
 import time
 from typing import Any, Callable, Dict, List, Optional
 
@@ -29,10 +30,39 @@ class DanmuInfoFetcher:
     2. nav 接口拿 wbi img_key/sub_key（游客可访问）
     3. wbi 签名（w_rid+wts）后请求 getDanmuInfo
     注入替代实现便于测试。
+
+    **弹幕限流**（实测确认）：游客连接只收到零星弹幕样本——完整弹幕流
+    需要登录 cookie（SESSDATA 等，专用小号）。cookie 来源：
+    - cookie_file: 浏览器导出的 cookie 字符串文件（"SESSDATA=xxx; buvid3=xxx; ..."）
+    - 写入 cookie/bilibili_cookies.txt 即自动加载
     """
 
-    def __init__(self):
+    def __init__(self, cookie_file: Optional[str] = None, cookie_str: Optional[str] = None):
+        self._cookie_file = cookie_file
+        self._cookie_str = cookie_str
         self._session = None  # requests.Session 惰性创建（cookie 复用）
+
+    def _apply_login_cookies(self, session) -> None:
+        """把用户提供的登录 cookie 合并进 session（专用小号 → 完整弹幕流）"""
+        raw = self._cookie_str
+        if not raw and self._cookie_file and os.path.exists(self._cookie_file):
+            raw = open(self._cookie_file, encoding="utf-8").read().strip()
+        if not raw:
+            return
+        # 支持 "k=v; k2=v2" 浏览器复制格式与 JSON 格式
+        raw_stripped = raw.strip()
+        if raw_stripped.startswith("{"):
+            try:
+                for k, v in json.loads(raw_stripped).items():
+                    session.cookies.set(k, str(v), domain=".bilibili.com")
+                return
+            except json.JSONDecodeError:
+                pass
+        for pair in raw_stripped.split(";"):
+            pair = pair.strip()
+            if "=" in pair:
+                k, _, v = pair.partition("=")
+                session.cookies.set(k.strip(), v.strip(), domain=".bilibili.com")
 
     def _get_session(self):
         import requests
@@ -45,6 +75,7 @@ class DanmuInfoFetcher:
                 "Referer": "https://live.bilibili.com/",
                 "Origin": "https://live.bilibili.com",
             })
+            self._apply_login_cookies(self._session)
         return self._session
 
     async def fetch_wbi_keys(self) -> str:

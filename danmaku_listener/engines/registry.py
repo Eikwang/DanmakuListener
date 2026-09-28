@@ -37,7 +37,7 @@ PLATFORM_WARNINGS = {
 
 
 def build_engine(platform: str, state_store: Optional[RoomStateStore] = None, **kwargs) -> BaseEngine:
-    """按平台构造引擎实例
+    """按平台构造引擎实例（自动注入平台特有配置，如 B站登录 cookie）
 
     Raises:
         KeyError: 平台未注册（长尾平台走兜底注入引擎，见 NOT in scope 与兜底开关）
@@ -47,4 +47,11 @@ def build_engine(platform: str, state_store: Optional[RoomStateStore] = None, **
             f"平台 {platform!r} 未注册（已注册：{sorted(PLATFORM_ENGINES)}）；"
             "长尾平台使用兜底注入引擎（配置人工开关，默认关闭）"
         )
+    # 平台特有配置注入（Settings 单源）
+    if platform == "bilibili":
+        try:
+            from danmaku_listener.config.settings import get_settings
+            kwargs.setdefault("cookie_file", get_settings().bilibili_cookie_file)
+        except Exception:
+            pass
     return PLATFORM_ENGINES[platform](state_store=state_store, **kwargs)
