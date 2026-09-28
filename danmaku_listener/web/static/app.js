@@ -378,7 +378,13 @@ class DanmakuApp {
     const errEl = document.getElementById("room-error");
     errEl.classList.add("hidden");
     try {
-      await this.api("/api/rooms", "POST", { room: input.value });
+      const data = await this.api("/api/rooms", "POST", { room: input.value });
+      if (data.status === "login_required") {
+        errEl.textContent = data.message || "需要登录：请在弹出的浏览器窗口中登录账号";
+        errEl.classList.remove("hidden");
+        errEl.classList.add("login-hint");
+        return; // 登录完成后引擎自动开始监听
+      }
       input.value = "";
       this.loadRooms();
     } catch (e) {

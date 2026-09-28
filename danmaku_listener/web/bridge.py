@@ -3,6 +3,7 @@
 持有 DanmakuListener 实例，桥接 EventBus 事件到 WebSocket 客户端。
 """
 
+import asyncio
 import json
 import time
 from typing import Any, Dict, List, Optional, Set
@@ -68,6 +69,54 @@ class DanmakuBridge:
     def set_push_server(self, push: Any) -> None:
         """注入 PushServer（广播单源；客户端管理委托给它）"""
         self._push = push
+
+    async def _bilibili_login_then_start(self, room_key: str, room_id: str, engine: Any, state_path: str) -> None:
+        """bilibili 受控登录闭环：弹窗口→用户登录→cookie 保存→自动开始监听
+
+        进度经 SYSTEM_STATUS 推送（前端可见）；登录超时/关闭则降级游客模式。
+        """
+        from danmaku_listener.engines.bilibili_login import run_login_flow
+
+        async def status_cb(status: str) -> None:
+            await self._broadcast_system_status(room_key, f"bilibili 登录流程: {status}")
+
+        await self._broadcast_system_status(room_key, "登录窗口已打开，请在浏览器中登录 B站账号")
+        result = await run_login_flow(
+            state_path=state_path, headless=False,
+            on_status=lambda s: status_cb(s),
+        )
+        # 重建 fetcher（带新登录 cookie）
+        engine._danmu_info = type(engine._danmu_info)(cookie_file=state_path)
+
+        if result.get("status") != "ok":
+            await self._broadcast_system_status(room_key, "登录未完成——已降级游客模式（弹幕受限）")
+            return
+
+        await self._broadcast_system_status(room_key, "登录成功——开始监听")
+        try:
+            await engine.start(room_id)
+            self._rooms[room_key]["status"] = "running"
+        except Exception as e:
+            logger.error(f"[bilibili] start after login failed: {e}")
+            await self._broadcast_system_status(room_key, f"登录成功但启动失败: {e}")
+
+    async def _broadcast_system_status(self, room_key: str, detail: str) -> None:
+        """ENGINE_STATUS 快捷广播（平台/房间从 room_key 解析）"""
+        import time as _time
+
+        from danmaku_listener.contract.models import Envelope, UnifiedMessage
+
+        platform, _, room_id = room_key.partition(":")
+        seq = self._next_seq(room_key)
+        msg = UnifiedMessage(
+            envelope=Envelope(
+                category=Category.SYSTEM, type=SystemType.ENGINE_STATUS.value,
+                platform=platform, room_id=room_id,
+                seq=seq, timestamp=int(_time.time()), engine="bridge",
+            ),
+            payload={"type": "ENGINE_STATUS", "engine": "bridge", "detail": detail},
+        )
+        await self._broadcast(msg.to_wire())
 
     async def _on_engine_message(self, wire: dict) -> None:
         """registry 引擎消息回调（直通归一：仅 to_wire() 形状直通，S1.4）
@@ -377,6 +426,29 @@ class DanmakuBridge:
             engine = build_engine(spec.platform)
             engine.on_message(self._on_engine_message)
             self._engine_instances[spec.platform] = engine
+
+        # 4.5 bilibili 独立分发自动登录（用户裁定：cookie 获取自动化）
+        if spec.platform == "bilibili":
+            from danmaku_listener.config.settings import get_settings as _gs
+            from danmaku_listener.engines.bilibili_login import has_login_cookie
+            state_path = _gs().bilibili_cookie_file.replace(
+                "bilibili_cookies.txt", "bilibili_storage_state.json")
+            if not has_login_cookie(state_path):
+                self._rooms[room_key] = {
+                    "platform": spec.platform,
+                    "room_id": spec.room_id,
+                    "status": "login_required",
+                    "engine_type": "protocol:bilibili",
+                }
+                asyncio.create_task(self._bilibili_login_then_start(
+                    room_key, spec.room_id, engine, state_path))
+                return {
+                    "success": True,
+                    "status": "login_required",
+                    "room": self._rooms[room_key],
+                    "message": "需要登录 B站账号（完整弹幕流）：登录窗口已打开，"
+                               "请在弹出的浏览器中扫码/登录；登录后自动开始监听",
+                }
 
         # 5. 启动该房间
         try:

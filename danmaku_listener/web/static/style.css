@@ -561,3 +561,11 @@ button:disabled {
 .settings-msg { font-size: 12px; padding: 4px 0; }
 .settings-msg.ok { color: var(--warn-ok); }
 .settings-msg.err { color: var(--warn-route); }
+
+/* 登录提示（B站自动登录闭环） */
+.login-hint {
+    color: var(--warn-login);
+    border: 1px solid var(--warn-login);
+    border-radius: 3px;
+    padding: 4px 8px;
+}
