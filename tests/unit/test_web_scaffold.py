@@ -13,7 +13,7 @@ from aiohttp.test_utils import TestClient, TestServer
 
 # 项目根目录
 PROJECT_ROOT = Path(__file__).parent.parent.parent
-WEB_DIR = PROJECT_ROOT / "web"
+WEB_DIR = PROJECT_ROOT / "danmaku_listener/web"
 
 
 class TestWebDirectoryStructure:
@@ -65,13 +65,13 @@ class TestWebAppCreation:
 
     def test_create_app(self):
         """web.create_app() 返回 aiohttp Application"""
-        from web.app import create_app
+        from danmaku_listener.web.app import create_app
         app = create_app()
         assert isinstance(app, web.Application)
 
     def test_app_has_routes(self):
         """Application 至少有路由注册"""
-        from web.app import create_app
+        from danmaku_listener.web.app import create_app
         app = create_app()
         assert len(app.router.routes()) > 0
 
@@ -82,7 +82,7 @@ class TestStaticFileServing:
     @pytest.mark.asyncio
     async def test_index_page_returns_200(self):
         """GET / 返回 200，内容为 HTML"""
-        from web.app import create_app
+        from danmaku_listener.web.app import create_app
         app = create_app()
         async with TestClient(TestServer(app)) as client:
             resp = await client.get("/")
@@ -93,7 +93,7 @@ class TestStaticFileServing:
     @pytest.mark.asyncio
     async def test_style_css_returns_200(self):
         """GET /static/style.css 返回 200"""
-        from web.app import create_app
+        from danmaku_listener.web.app import create_app
         app = create_app()
         async with TestClient(TestServer(app)) as client:
             resp = await client.get("/static/style.css")
@@ -102,7 +102,7 @@ class TestStaticFileServing:
     @pytest.mark.asyncio
     async def test_app_js_returns_200(self):
         """GET /static/app.js 返回 200"""
-        from web.app import create_app
+        from danmaku_listener.web.app import create_app
         app = create_app()
         async with TestClient(TestServer(app)) as client:
             resp = await client.get("/static/app.js")
@@ -114,5 +114,5 @@ class TestWebAppModuleEntry:
 
     def test_main_function_exists(self):
         """web.app 模块有 main 函数"""
-        from web.app import main
+        from danmaku_listener.web.app import main
         assert callable(main)

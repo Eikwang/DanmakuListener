@@ -26,15 +26,46 @@
 
 ## 快速开始
 
-### 安装
+### 安装（独立分发）
 
 ```bash
-# 使用 Poetry 安装
-poetry install
+# 核心安装（B站/斗鱼/虎牙/快手/视频号引擎 + Web 控制台）
+pip install .
 
-# 或使用 pip
-pip install -r requirements.txt
+# 可选平台依赖
+pip install ".[douyin]"    # 抖音代理引擎（mitmproxy）
+pip install ".[wechat]"    # 视频号受控后台（playwright）
+pip install ".[all]"       # 全部
 ```
+
+### 一键启动（Web 测试控制台 / 独立系统主界面）
+
+```bash
+danmaku-serve --web
+# 浏览器打开 http://localhost:8080 —— 添加房间（如 bilibili:23058）即可看到契约 v1 弹幕流
+```
+
+### 库用法（AUTOlive 集成）
+
+```python
+import asyncio
+from danmaku_listener import DanmakuListener, DanmakuMessage
+
+async def main():
+    async with DanmakuListener() as listener:
+        await listener.start(["douyin:123456"])
+        @listener.on_danmaku
+        async def handle(msg: DanmakuMessage):
+            print(f"[{msg.platform}] {msg.user_name}: {msg.content}")
+        await asyncio.Future()
+
+asyncio.run(main())
+```
+
+### 抖音例外说明
+
+抖音引擎（proxy:douyin）按 ADR-001 需独立代理进程；Web 单进程模式添加
+`douyin:` 房间一律返回 501。双进程运维见 docs/ops/。
 
 ### 基本用法
 

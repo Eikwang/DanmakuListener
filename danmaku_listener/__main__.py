@@ -193,11 +193,11 @@ async def cmd_serve(config: str | None, replay: str | None = None, with_web: boo
     token = load_token(settings.ws_token_file, os.environ.get("DANMAKU_TOKEN"))
     server = PushServer(host=settings.ws_bind, port=settings.ws_port, token=token)
     await server.start()
-    app["config_path"] = config_path
+    config_source = config_path
 
     if with_web:
         sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        from web.app import create_app as _create_web_app
+        from danmaku_listener.web.app import create_app as _create_web_app
         from aiohttp import web as _web
         webapp = _create_web_app()
         web_runner = _web.AppRunner(webapp)
@@ -238,7 +238,15 @@ async def cmd_serve(config: str | None, replay: str | None = None, with_web: boo
 
 
 def main() -> int:
-    args = _build_parser().parse_args()
+    # exe 名即子命令：danmaku-serve.exe → 自动注入 "serve"（分发可用性，S3）
+    argv = sys.argv[1:]
+    exe_name = os.path.basename(sys.argv[0] or "").lower()
+    if exe_name.startswith("danmaku-serve") and (not argv or argv[0] not in ("listen", "serve", "contract")):
+        argv = ["serve"] + argv
+    elif exe_name.startswith("danmaku-listen") and (not argv or argv[0] not in ("listen", "serve", "contract")):
+        argv = ["listen"] + argv
+
+    args = _build_parser().parse_args(argv)
     if args.command == "contract":
         return cmd_contract()
     if args.command == "listen":

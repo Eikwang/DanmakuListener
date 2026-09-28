@@ -18,8 +18,8 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from web.bridge import DanmakuBridge
-from web.app import create_app
+from danmaku_listener.web.bridge import DanmakuBridge
+from danmaku_listener.web.app import create_app
 
 
 # ── 辅助工具 ──────────────────────────────────────────────

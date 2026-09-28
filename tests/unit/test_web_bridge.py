@@ -7,7 +7,7 @@ import json
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from web.bridge import DanmakuBridge
+from danmaku_listener.web.bridge import DanmakuBridge
 
 
 class TestDanmakuBridgeInitialization:

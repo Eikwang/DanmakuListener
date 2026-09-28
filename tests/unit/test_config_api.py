@@ -6,8 +6,8 @@ import pytest
 from aiohttp.test_utils import TestClient, TestServer
 from unittest.mock import AsyncMock, MagicMock
 
-from web.app import create_app
-from web.bridge import DanmakuBridge
+from danmaku_listener.web.app import create_app
+from danmaku_listener.web.bridge import DanmakuBridge
 
 
 @pytest.fixture()

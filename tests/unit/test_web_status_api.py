@@ -12,7 +12,7 @@ from aiohttp.test_utils import TestClient, TestServer
 
 def _create_app_with_bridge(bridge=None):
     """创建带桥接器的测试 app"""
-    from web.app import create_app
+    from danmaku_listener.web.app import create_app
     app = create_app()
     if bridge is not None:
         app["bridge"] = bridge
@@ -74,7 +74,7 @@ class TestGetApiStatus:
     @pytest.mark.asyncio
     async def test_status_rooms_count_after_adding_room(self):
         """添加房间后 rooms_count 增加"""
-        from web.bridge import DanmakuBridge
+        from danmaku_listener.web.bridge import DanmakuBridge
         bridge = DanmakuBridge()
         # 模拟添加房间
         bridge._rooms["douyin:123456"] = {
@@ -123,7 +123,7 @@ class TestGetProxyStatus:
     @pytest.mark.asyncio
     async def test_proxy_status_enabled_when_registry_set(self):
         """系统代理已开启时，返回 enabled: true"""
-        from web.bridge import DanmakuBridge
+        from danmaku_listener.web.bridge import DanmakuBridge
         bridge = DanmakuBridge()
         # mock _get_proxy_status 返回启用状态
         bridge._get_proxy_status = lambda: {

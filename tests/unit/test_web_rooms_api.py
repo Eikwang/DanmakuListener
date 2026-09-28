@@ -10,12 +10,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from web.bridge import DanmakuBridge
+from danmaku_listener.web.bridge import DanmakuBridge
 
 
 def _create_app_with_bridge(bridge):
     """创建带桥接器的测试 app"""
-    from web.app import create_app
+    from danmaku_listener.web.app import create_app
     app = create_app()
     app["bridge"] = bridge
     return app

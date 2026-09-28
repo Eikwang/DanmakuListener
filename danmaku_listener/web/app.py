@@ -13,7 +13,7 @@ from aiohttp import web
 from aiohttp_cors import setup as cors_setup, ResourceOptions
 from loguru import logger
 
-from web.bridge import DanmakuBridge
+from danmaku_listener.web.bridge import DanmakuBridge
 
 
 # 全局桥接器实例（单例）
@@ -74,7 +74,7 @@ async def api_add_room(request: web.Request) -> web.Response:
         result = await bridge.add_room(room)
         return web.json_response(result)
     except Exception as e:
-        from web.bridge import RoomError
+        from danmaku_listener.web.bridge import RoomError
         if isinstance(e, RoomError):
             return web.json_response({"success": False, "error": e.message}, status=e.status)
         return web.json_response({"success": False, "error": str(e)}, status=500)
@@ -90,7 +90,7 @@ async def api_remove_room(request: web.Request) -> web.Response:
         result = await bridge.remove_room(platform, room_id)
         return web.json_response(result)
     except Exception as e:
-        from web.bridge import RoomError
+        from danmaku_listener.web.bridge import RoomError
         if isinstance(e, RoomError):
             return web.json_response({"success": False, "error": e.message}, status=e.status)
         return web.json_response({"success": False, "error": str(e)}, status=500)
