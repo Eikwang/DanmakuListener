@@ -10,7 +10,7 @@ from typing import Optional, Tuple
 PlatformType = str  # 使用字符串字面量联合类型更灵活
 
 # 已知平台列表
-SUPPORTED_PLATFORMS = ["douyin", "douyu", "bilibili", "kuaishou", "taobao", "weixin"]
+SUPPORTED_PLATFORMS = ["douyin", "douyu", "bilibili", "kuaishou", "huya", "wechat_channels"]
 
 
 @dataclass(frozen=True)

@@ -11,6 +11,7 @@ serve 与 AUTOlive 集成的统一入口：按平台构造契约 v1 引擎。
 from typing import Dict, Optional
 
 from danmaku_listener.engines.base import BaseEngine
+from danmaku_listener.engines.douyin_proxy import DouyinProxyEngine
 from danmaku_listener.engines.protocol.bilibili import BilibiliProtocolEngine
 from danmaku_listener.engines.protocol.douyu import DouyuProtocolEngine
 from danmaku_listener.engines.protocol.huya import HuyaProtocolEngine
@@ -24,6 +25,14 @@ PLATFORM_ENGINES = {
     "huya": HuyaProtocolEngine,
     "kuaishou": KuaishouProtocolEngine,
     "wechat_channels": WechatChannelsEngine,
+    "douyin": DouyinProxyEngine,  # 桥接层（ADR-001：代理独立进程；web 单进程 add_room 一律 501）
+}
+
+#: 引擎可用性 warnings（CEO-2：加房间响应透出，前端可见）
+PLATFORM_WARNINGS = {
+    "huya": "虎牙协议为 draft（huya-0-draft），payload 解析待抓包校准——连接可用但暂无消息输出",
+    "kuaishou": "快手需要游客 token（token_provider 未配置时连接失败）——获取方式为重点验证项",
+    "wechat_channels": "后台页面/接口结构待实测校准（微信更新可能变更）",
 }
 
 

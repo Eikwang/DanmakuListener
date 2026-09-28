@@ -21,13 +21,26 @@ def _create_app_with_bridge(bridge):
     return app
 
 
+def _make_mock_engine():
+    """构造 mock registry 引擎（start/stop/restart/engine_id）"""
+    engine = MagicMock()
+    engine.start = AsyncMock()
+    engine.stop = AsyncMock()
+    engine.restart = AsyncMock()
+    engine.engine_id = "mock:engine"
+    return engine
+
+
 def _make_bridge_with_mocked_engines():
-    """创建桥接器，mock 掉 listener 和 engines"""
+    """创建桥接器，mock registry.build_engine（每平台 mock 引擎）"""
     bridge = DanmakuBridge()
-    # mock listener 的 start/stop
     bridge._listener = MagicMock()
     bridge._listener.start = AsyncMock()
     bridge._listener.stop = AsyncMock()
+    engine = _make_mock_engine()
+    with patch("danmaku_listener.engines.registry.build_engine", return_value=engine):
+        pass  # add_room 内部延迟导入，patch 在测试内按需打
+    bridge._mock_engine = engine
     return bridge
 
 
@@ -36,19 +49,20 @@ class TestAddRoom:
 
     @pytest.mark.asyncio
     async def test_add_room_success(self):
-        """添加 douyin:123456 → 200, success, status=running → AC-002, AC-003"""
+        """添加 bilibili:23058 → 200, success, status=running（registry 引擎路由）→ AC-002, AC-003"""
         bridge = _make_bridge_with_mocked_engines()
         app = _create_app_with_bridge(bridge)
-        async with TestClient(TestServer(app)) as client:
-            resp = await client.post("/api/rooms", json={"room": "douyin:123456"})
-            assert resp.status == 200
-            data = await resp.json()
-            assert data["success"] is True
-            assert data["room"]["platform"] == "douyin"
-            assert data["room"]["room_id"] == "123456"
-            assert data["room"]["status"] == "running"
-            # listener.start 应被调用
-            bridge._listener.start.assert_called_once_with(["douyin:123456"])
+        with patch("danmaku_listener.engines.registry.build_engine", return_value=bridge._mock_engine):
+            async with TestClient(TestServer(app)) as client:
+                resp = await client.post("/api/rooms", json={"room": "bilibili:23058"})
+                assert resp.status == 200
+                data = await resp.json()
+                assert data["success"] is True
+                assert data["room"]["platform"] == "bilibili"
+                assert data["room"]["room_id"] == "23058"
+                assert data["room"]["status"] == "running"
+                # registry 引擎 start 应被调用
+                bridge._mock_engine.start.assert_called_once_with("23058")
 
     @pytest.mark.asyncio
     async def test_add_room_invalid_format(self):
@@ -87,8 +101,9 @@ class TestAddRoom:
         bridge = _make_bridge_with_mocked_engines()
         app = _create_app_with_bridge(bridge)
         async with TestClient(TestServer(app)) as client:
-            await client.post("/api/rooms", json={"room": "douyin:123456"})
-            resp = await client.post("/api/rooms", json={"room": "douyin:123456"})
+            with patch("danmaku_listener.engines.registry.build_engine", return_value=bridge._mock_engine):
+                await client.post("/api/rooms", json={"room": "bilibili:23058"})
+                resp = await client.post("/api/rooms", json={"room": "bilibili:23058"})
             assert resp.status == 409
             data = await resp.json()
             assert "already exists" in data["error"].lower()
@@ -108,8 +123,9 @@ class TestAddRoom:
         bridge = _make_bridge_with_mocked_engines()
         app = _create_app_with_bridge(bridge)
         async with TestClient(TestServer(app)) as client:
-            await client.post("/api/rooms", json={"room": "douyin:123456"})
-            resp = await client.post("/api/rooms", json={"room": "douyin:123456"})
+            with patch("danmaku_listener.engines.registry.build_engine", return_value=bridge._mock_engine):
+                await client.post("/api/rooms", json={"room": "bilibili:23058"})
+                resp = await client.post("/api/rooms", json={"room": "bilibili:23058"})
             # 重复添加返回 409，前端据此提示"已在监听中"
             assert resp.status == 409
 
@@ -134,12 +150,13 @@ class TestGetRooms:
         bridge = _make_bridge_with_mocked_engines()
         app = _create_app_with_bridge(bridge)
         async with TestClient(TestServer(app)) as client:
-            await client.post("/api/rooms", json={"room": "douyin:123456"})
+            with patch("danmaku_listener.engines.registry.build_engine", return_value=bridge._mock_engine):
+                await client.post("/api/rooms", json={"room": "bilibili:23058"})
             resp = await client.get("/api/rooms")
             data = await resp.json()
             assert len(data["rooms"]) == 1
-            assert data["rooms"][0]["platform"] == "douyin"
-            assert data["rooms"][0]["room_id"] == "123456"
+            assert data["rooms"][0]["platform"] == "bilibili"
+            assert data["rooms"][0]["room_id"] == "23058"
 
 
 class TestRemoveRoom:
@@ -151,16 +168,17 @@ class TestRemoveRoom:
         bridge = _make_bridge_with_mocked_engines()
         app = _create_app_with_bridge(bridge)
         async with TestClient(TestServer(app)) as client:
-            await client.post("/api/rooms", json={"room": "douyin:123456"})
-            resp = await client.delete("/api/rooms/douyin/123456")
+            with patch("danmaku_listener.engines.registry.build_engine", return_value=bridge._mock_engine):
+                await client.post("/api/rooms", json={"room": "bilibili:23058"})
+            resp = await client.delete("/api/rooms/bilibili/23058")
             assert resp.status == 200
             data = await resp.json()
             assert data["success"] is True
             # 房间应从列表移除
             resp2 = await client.get("/api/rooms")
             assert len((await resp2.json())["rooms"]) == 0
-            # listener.stop 应被调用
-            bridge._listener.stop.assert_called_once()
+            # registry 引擎 stop 应被调用
+            bridge._mock_engine.stop.assert_called_once_with("23058")
 
     @pytest.mark.asyncio
     async def test_remove_nonexistent_room(self):
@@ -168,7 +186,7 @@ class TestRemoveRoom:
         bridge = _make_bridge_with_mocked_engines()
         app = _create_app_with_bridge(bridge)
         async with TestClient(TestServer(app)) as client:
-            resp = await client.delete("/api/rooms/douyin/999999")
+            resp = await client.delete("/api/rooms/bilibili/999999")
             assert resp.status == 404
 
 
@@ -181,8 +199,9 @@ class TestStopAll:
         bridge = _make_bridge_with_mocked_engines()
         app = _create_app_with_bridge(bridge)
         async with TestClient(TestServer(app)) as client:
-            await client.post("/api/rooms", json={"room": "douyin:111"})
-            await client.post("/api/rooms", json={"room": "douyin:222"})
+            with patch("danmaku_listener.engines.registry.build_engine", return_value=bridge._mock_engine):
+                await client.post("/api/rooms", json={"room": "bilibili:111"})
+                await client.post("/api/rooms", json={"room": "bilibili:222"})
             resp = await client.post("/api/rooms/stop-all")
             assert resp.status == 200
             data = await resp.json()
@@ -190,8 +209,8 @@ class TestStopAll:
             # 所有房间应被清空
             resp2 = await client.get("/api/rooms")
             assert len((await resp2.json())["rooms"]) == 0
-            # listener.stop 应被调用
-            bridge._listener.stop.assert_called_once()
+            # registry 引擎 stop 应被调用（每房间一次）
+            assert bridge._mock_engine.stop.call_count == 2
 
     @pytest.mark.asyncio
     async def test_stop_all_restores_proxy(self):
@@ -207,46 +226,42 @@ class TestStopAll:
         bridge._get_proxy_status = track_proxy
         app = _create_app_with_bridge(bridge)
         async with TestClient(TestServer(app)) as client:
-            await client.post("/api/rooms", json={"room": "douyin:111"})
-            await client.post("/api/rooms/stop-all")
-            # stop_all 应调用 listener.stop，触发系统代理恢复逻辑
-            bridge._listener.stop.assert_called_once()
+            with patch("danmaku_listener.engines.registry.build_engine", return_value=bridge._mock_engine):
+                await client.post("/api/rooms", json={"room": "bilibili:111"})
+                await client.post("/api/rooms/stop-all")
+            # stop_all 应调用 registry 引擎 stop（系统代理恢复逻辑由引擎侧承接）
+            bridge._mock_engine.stop.assert_called_once_with("111")
 
 
 class TestProxyStartError:
-    """验证端口冲突处理 → AC-017"""
+    """验证引擎启动失败处理 → AC-017（registry 路由：引擎 start 异常 → 500）"""
 
     @pytest.mark.asyncio
     async def test_add_room_port_conflict(self):
-        """ProxyStartError → 500, error 含 port → AC-017"""
-        from danmaku_listener.engines.proxy_engine import ProxyStartError
+        """引擎 start 抛异常 → 500, error 含 port"""
         bridge = _make_bridge_with_mocked_engines()
-        # mock listener.start 抛出 ProxyStartError
-        bridge._listener.start = AsyncMock(side_effect=ProxyStartError("port 8827 in use"))
+        failing = _make_mock_engine()
+        failing.start = AsyncMock(side_effect=RuntimeError("port 8827 in use"))
         app = _create_app_with_bridge(bridge)
-        async with TestClient(TestServer(app)) as client:
-            resp = await client.post("/api/rooms", json={"room": "douyin:123456"})
-            assert resp.status == 500
-            data = await resp.json()
-            assert "port" in data["error"].lower()
+        with patch("danmaku_listener.engines.registry.build_engine", return_value=failing):
+            async with TestClient(TestServer(app)) as client:
+                resp = await client.post("/api/rooms", json={"room": "bilibili:23058"})
+                assert resp.status == 500
+                data = await resp.json()
+                assert "port" in data["error"].lower()
 
 
 class TestSharedProxyEngine:
-    """验证多个 douyin 房间共享 ProxyEngine"""
+    """douyin web 单进程模式一律 501（round3 N-1 一致化）"""
 
     @pytest.mark.asyncio
-    async def test_two_douyin_rooms_share_engine(self):
-        """douyin:111 + douyin:222 共享同一 ProxyEngine"""
+    async def test_two_douyin_rooms_both_501(self):
+        """douyin:111 + douyin:222 均返回 501（无消息通路，桥接预留）"""
         bridge = _make_bridge_with_mocked_engines()
         app = _create_app_with_bridge(bridge)
         async with TestClient(TestServer(app)) as client:
-            await client.post("/api/rooms", json={"room": "douyin:111"})
-            await client.post("/api/rooms", json={"room": "douyin:222"})
-
-            # listener.start 被调用两次，但实际 ProxyEngine 是单例
-            # 这里验证 start 被分别调用
-            assert bridge._listener.start.call_count == 2
-            # 两个房间应都存在
+            r1 = await client.post("/api/rooms", json={"room": "douyin:111"})
+            r2 = await client.post("/api/rooms", json={"room": "douyin:222"})
+            assert r1.status == 501 and r2.status == 501
             resp = await client.get("/api/rooms")
-            rooms = (await resp.json())["rooms"]
-            assert len(rooms) == 2
+            assert len((await resp.json())["rooms"]) == 0

@@ -69,3 +69,4 @@ Thumbs.db
 # Build outputs
 static/Release/*.exe
 static/Release/*.dll
+config.local.toml

@@ -1,0 +1,32 @@
+version: 2
+updates:
+# Fetch and update latest `npm` packages
+- package-ecosystem: npm
+  directory: 'barrage-fly-ui/'
+  schedule:
+    interval: daily
+    time: '00:00'
+  open-pull-requests-limit: 10
+  reviewers:
+    - '1962247851'
+  assignees:
+    - '1962247851'
+  commit-message:
+    prefix: fix
+    prefix-development: chore
+    include: scope
+
+- package-ecosystem: gradle
+  directory: 'barrage-fly/'
+  schedule:
+    interval: daily
+    time: '00:00'
+  open-pull-requests-limit: 10
+  reviewers:
+    - '1962247851'
+  assignees:
+    - '1962247851'
+  commit-message:
+    prefix: fix
+    prefix-development: chore
+    include: scope

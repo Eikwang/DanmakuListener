@@ -67,7 +67,7 @@ def test_login_and_join():
     assert fields["roomid"] == "23058"
     join = codec.build_join_group(23058)
     fields = codec.decode_body(join[12:])
-    assert fields == {"type": "joingroup", "rid": "23058", "gid": "-9999", "_packet_type": codec.CLIENT_TYPE}
+    assert fields == {"type": "joingroup", "rid": "23058", "gid": "-9999"}
 
 
 # ---- 映射 ----

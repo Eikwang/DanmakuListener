@@ -1,0 +1,76 @@
+{
+  "appName": "Barrage Fly",
+  "barrageFlyTask": {
+    "actions": {
+      "copyTaskId": "Copy task ID",
+      "create": "New Task",
+      "delete": "Delete Task",
+      "deleteHint": "Are you sure to delete {0} ?",
+      "detail": "Detail",
+      "edit": "Edit Task",
+      "fullScreenRealTimeBarrage": "Full screen real-time barrage",
+      "start": "Start",
+      "stop": "Stop",
+      "stopHint": "Are you sure to terminate {0} ?",
+      "taskNotExistHint": "The task is not exist"
+    },
+    "cookie": "Cookie",
+    "detail": {
+      "realTimeBarrage": "Real-Time Barrage"
+    },
+    "msgFilterExpress": "Message filtering rule engine script",
+    "msgPostMapExpress": "Message post-processing rule engine script",
+    "msgPreMapExpress": "Message pre-processing rule engine script",
+    "platform": "Platform",
+    "roomId": "Room Id",
+    "remark": "Remark",
+    "status": "Status",
+    "startWhenFinished": "Start When Finished"
+  },
+  "barrageFlyUser": {
+    "actions": {
+      "login": "Login",
+      "logout": "Logout",
+      "logoutHint": "Confirm to logout ？",
+      "pleaseLoginHint": "Please login first",
+      "remember": "Remember Me"
+    },
+    "messages": {
+      "noRsaPublicKeyError": "Fetch configuration failed, please check the backend service status"
+    },
+    "password": "Password",
+    "username": "Username"
+  },
+  "document": "文档",
+  "feedback": "Feedback",
+  "howToConnect": {
+    "actions": {
+      "copied": "Copied",
+      "copy": "Copy"
+    },
+    "title": "How To Connect ?"
+  },
+  "myStats": {
+    "app": {
+      "heapMemory": "Heap Memory Statuses",
+      "thread": "Thread Statuses",
+      "title": "Application Stats"
+    },
+    "clientsCount": "Connected Clients Count",
+    "task": {
+      "clients": "Task Clients",
+      "statuses": "Task Statuses",
+      "title": "Task Stats"
+    },
+    "tasksCount": "Tasks Total Count",
+    "title": "Stats"
+  },
+  "other": "Other",
+  "themeTitles": {
+    "dark": "Dark",
+    "hunk": "Hunk",
+    "hunkDark": "Dark Hunk",
+    "light": "Light",
+    "system": "System"
+  }
+}

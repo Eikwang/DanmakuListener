@@ -59,12 +59,52 @@ class DanmakuBridge:
         self._room_seq: Dict[str, int] = {}
         self._message_count = 0
 
+        # registry 引擎实例缓存（S1：协议每平台一实例；视频号每房间一实例）
+        self._engine_instances: Dict[str, Any] = {}
+
         # 设置回调
         self._setup_callbacks()
 
     def set_push_server(self, push: Any) -> None:
         """注入 PushServer（广播单源；客户端管理委托给它）"""
         self._push = push
+
+    async def _on_engine_message(self, wire: dict) -> None:
+        """registry 引擎消息回调（直通归一：仅 to_wire() 形状直通，S1.4）
+
+        - 关键词过滤作用于 DANMU 载荷（行为保持，AC-007/BR-005）
+        - 不含完整信封形状的 ad-hoc dict 包装为 ENGINE_STATUS（防畸形污染）
+        """
+        is_contract = (
+            isinstance(wire, dict)
+            and "category" in wire and "type" in wire and "payload" in wire
+            and "platform" in wire and "room_id" in wire and "seq" in wire
+        )
+        if is_contract:
+            if (
+                self._keyword_filter_enabled
+                and wire.get("type") == "DANMU"
+                and any(kw in (wire["payload"].get("content") or "") for kw in self._blocked_keywords)
+            ):
+                logger.debug(f"Danmaku filtered by keyword: {wire['payload'].get('content', '')[:30]}")
+                return
+            self._message_count += 1
+            await self._broadcast(wire)
+            return
+
+        # ad-hoc/畸形 dict → ENGINE_STATUS 包装（round3 L-2：免检直通不存在）
+        room_key = next(iter(self._rooms), "unknown:0")
+        platform = room_key.split(":")[0]
+        msg = UnifiedMessage(
+            envelope=Envelope(
+                category=Category.SYSTEM, type=SystemType.ENGINE_STATUS.value,
+                platform=platform, room_id=room_key.split(":")[-1],
+                seq=self._next_seq(room_key), timestamp=int(time.time()), engine="bridge",
+            ),
+            payload={"type": "ENGINE_STATUS", "engine": "bridge",
+                     "detail": json.dumps(wire, ensure_ascii=False, default=str)[:300]},
+        )
+        await self._broadcast(msg.to_wire())
 
     def _next_seq(self, room_key: str) -> int:
         self._room_seq[room_key] = self._room_seq.get(room_key, 0) + 1
@@ -300,19 +340,17 @@ class DanmakuBridge:
             return {"success": False, "error": "Failed to disable system proxy"}
 
     async def add_room(self, room_spec: str) -> dict:
-        """添加房间并启动监听
-
-        Args:
-            room_spec: 房间规格，格式为 "platform:room_id"
+        """添加房间并启动监听（契约 v1：registry 引擎路由全切换）
 
         Returns:
-            操作结果字典，包含 room 信息
+            操作结果字典，包含 room 信息与引擎可用性 warnings
 
         Raises:
-            RoomError: 格式错误(400)、平台不支持(400)、重复(409)、启动失败(500)
+            RoomError: 格式错误(400)、平台不支持(400)、重复(409)、
+                       douyin 单进程 501、启动失败(500)
         """
-        from danmaku_listener.utils.platform_parser import parse_room_spec, get_default_engine
-        from danmaku_listener.engines.proxy_engine import ProxyStartError
+        from danmaku_listener.utils.platform_parser import parse_room_spec
+        from danmaku_listener.engines.registry import build_engine, PLATFORM_WARNINGS
 
         # 1. 校验格式
         try:
@@ -325,29 +363,43 @@ class DanmakuBridge:
         if room_key in self._rooms:
             raise RoomError(f"Room already exists: {room_key}", status=409)
 
-        # 3. 启动监听
-        try:
-            await self.listener.start([room_spec])
-        except ProxyStartError as e:
-            raise RoomError(str(e), status=500)
-        except ValueError as e:
-            raise RoomError(str(e), status=400)
+        # 3. douyin 单进程语义（round3 N-1/L3）：一律 501（桥接预留，无消息通路）
+        if spec.platform == "douyin":
+            raise RoomError(
+                "抖音需独立代理进程（ADR-001）；web 单进程模式暂不支持——"
+                "双进程运维见 docs/ops/ 与 README 例外说明",
+                status=501,
+            )
 
-        # 4. 记录房间状态
-        engine_type = get_default_engine(spec.platform)
+        # 4. 构造/复用 registry 引擎实例（粒度：协议每平台一实例；视频号每房间一实例）
+        engine = self._engine_instances.get(spec.platform)
+        if engine is None or spec.platform == "wechat_channels":
+            engine = build_engine(spec.platform)
+            engine.on_message(self._on_engine_message)
+            self._engine_instances[spec.platform] = engine
+
+        # 5. 启动该房间
+        try:
+            await engine.start(spec.room_id)
+        except RoomError:
+            raise
+        except Exception as e:
+            raise RoomError(str(e), status=500)
+
+        # 6. 记录房间状态
         self._rooms[room_key] = {
             "platform": spec.platform,
             "room_id": spec.room_id,
             "status": "running",
-            "engine_type": engine_type,
+            "engine_type": engine.engine_id,
         }
 
-        logger.info(f"*Room added: {room_key} ({engine_type})")
+        logger.info(f"*Room added: {room_key} ({engine.engine_id})")
 
-        return {
-            "success": True,
-            "room": self._rooms[room_key],
-        }
+        result = {"success": True, "room": self._rooms[room_key]}
+        if spec.platform in PLATFORM_WARNINGS:
+            result["warnings"] = [PLATFORM_WARNINGS[spec.platform]]
+        return result
 
     async def remove_room(self, platform: str, room_id: str) -> dict:
         """停止并移除房间
@@ -370,11 +422,15 @@ class DanmakuBridge:
         # 从状态中移除
         self._rooms.pop(room_key)
 
-        # 停止监听
+        # 停止对应 registry 引擎实例的该房间（视频号随房间销毁实例）
+        engine = self._engine_instances.get(platform)
         try:
-            await self.listener.stop()
+            if engine is not None:
+                await engine.stop(room_id)
+            if platform == "wechat_channels":
+                self._engine_instances.pop(platform, None)
         except Exception as e:
-            logger.error(f"Error stopping listener for {room_key}: {e}")
+            logger.error(f"Error stopping engine for {room_key}: {e}")
 
         logger.info(f"Room removed: {room_key}")
 
@@ -393,15 +449,22 @@ class DanmakuBridge:
             return {"success": True, "message": "No rooms to stop"}
 
         room_count = len(self._rooms)
+        rooms_snapshot = dict(self._rooms)
         self._rooms.clear()
 
-        # 停止所有监听（DanmakuListener.stop 会处理引擎停止和系统代理恢复）
-        try:
-            await self.listener.stop()
-        except Exception as e:
-            logger.error(f"Error stopping all rooms: {e}")
+        # 停止全部 registry 引擎实例的对应房间（视频号随房间销毁实例）
+        for room_key in rooms_snapshot:
+            platform, _, room_id = room_key.partition(":")
+            engine = self._engine_instances.get(platform)
+            try:
+                if engine is not None:
+                    await engine.stop(room_id)
+                if platform == "wechat_channels":
+                    self._engine_instances.pop(platform, None)
+            except Exception as e:
+                logger.error(f"Error stopping {room_key}: {e}")
 
-        logger.info(f"All rooms stopped ({room_count}), proxy restored")
+        logger.info(f"All rooms stopped ({room_count})")
 
         return {
             "success": True,
