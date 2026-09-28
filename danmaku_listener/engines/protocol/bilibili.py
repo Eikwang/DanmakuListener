@@ -254,9 +254,8 @@ class BilibiliProtocolEngine(BaseEngine):
                 continue
             for proto, op, body in packets:
                 if op == codec.OP_HEARTBEAT_REPLY:
-                    popularity = codec.parse_heartbeat_reply(body)
-                    if popularity is not None:
-                        self._emit_stats(room_id, popularity)
+                    # 心跳人气值已混淆（直读常为 1），不再映射 ROOM_STATS——
+                    # 观看数以 ONLINE_RANK_COUNT 为准（真实在线数）
                     continue
                 if op == 8:  # AUTH_REPLY：认证成功应答（body 含 code=0）
                     logger.info(f"[bilibili] room {room_id} auth accepted")
