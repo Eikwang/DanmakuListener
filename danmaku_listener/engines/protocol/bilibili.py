@@ -261,6 +261,7 @@ class BilibiliProtocolEngine(BaseEngine):
                 if op != codec.OP_SEND_MSG_REPLY:
                     continue
                 # proto 2/3 为压缩嵌套包；0/1 为裸 JSON
+                # decompress 统一返回 [(op, body)] 二元组（round3 消费端对齐）
                 if proto in (codec.PROTOCOL_ZLIB, codec.PROTOCOL_BROTLI):
                     try:
                         inner_packets = codec.decompress(proto, body)
@@ -268,8 +269,8 @@ class BilibiliProtocolEngine(BaseEngine):
                         logger.warning(f"[bilibili] room {room_id} decompress error: {e}")
                         continue
                 else:
-                    inner_packets = [(proto, body)]
-                for _ip, _iop, inner_body in inner_packets:
+                    inner_packets = [(op, body)]
+                for _iop, inner_body in inner_packets:
                     if _iop != codec.OP_SEND_MSG_REPLY:
                         continue
                     try:

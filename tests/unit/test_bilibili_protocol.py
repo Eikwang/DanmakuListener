@@ -167,3 +167,22 @@ async def test_engine_gap_on_reconnect():
     engine.mark_live_change("23058", live=False, ts=1700000030)
     engine.mark_gap_start("23058", ts=1700000040)
     assert engine.build_gap_message("23058", GapReason.NETWORK, window_end=1700000050) is None
+
+
+def test_decompress_consumer_alignment():
+    """消费端对齐回归：decompress 输出经 _read_loop 同路径解包不崩（round3 修复）"""
+    doc = {"cmd": "DANMU_MSG", "info": [[], "弹幕内容", [7, "测试用户"], []]}
+    inner = codec.encode_packet(codec.OP_SEND_MSG_REPLY, json.dumps(doc, ensure_ascii=False).encode(), proto=0)
+    compressed = zlib.compress(inner)
+    import struct
+    frame = struct.pack("!IHHII", codec.HEADER_SIZE + len(compressed), codec.HEADER_SIZE,
+                        codec.PROTOCOL_ZLIB, codec.OP_SEND_MSG_REPLY, 1) + compressed
+    # 模拟 _read_loop 的消费路径
+    packets = codec.decode_packets(frame)
+    for proto, op, body in packets:
+        inner_packets = codec.decompress(proto, body)
+        for _iop, inner_body in inner_packets:
+            assert _iop == codec.OP_SEND_MSG_REPLY
+            results = codec.parse_text_message(inner_body.decode("utf-8"), 1, 1700000000)
+            assert len(results) == 1
+            assert results[0]["payload"]["content"] == "弹幕内容"
