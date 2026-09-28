@@ -215,7 +215,10 @@ class BilibiliProtocolEngine(BaseEngine):
 
         连接失败/读循环异常向上抛出，由 _run_room 尝试下一地址。
         """
-        async with websockets.connect(ws_url) as ws:
+        async with websockets.connect(
+                ws_url, ping_interval=None, ping_timeout=None,
+                open_timeout=15, close_timeout=5,
+            ) as ws:
             self._room_ws[room_id] = ws
             await ws.send(codec.encode_packet(
                 codec.OP_AUTH, codec.build_auth_body(int(room_id), token)))
