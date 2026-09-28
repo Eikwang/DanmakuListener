@@ -119,15 +119,30 @@
       （实测 71415 首包约 1s）
 - [ ] **4B.3** 观察 45s+ 运行不中断（心跳首帧 15s 延迟、周期 45s，验证心跳维持连接）
 
-### 4C 抖音代理模式（⚠️ 需环境前置）
+### 4C 抖音 BarrageGrab 桥接（✅ 2026-09-28 通道就绪，需环境前置）
 
-- [ ] **4C.1** 部署前置检测：`python scripts/preflight.py --platforms douyin`
-      [预期] JSON 报告含人工确认项（根 CA 安装、直播伴侣版本、hook 知情确认）
-- [ ] **4C.2** 按合规清单（docs/ops/compliance-review.md §4）完成证书安装与伴侣版本核对
-- [ ] **4C.3** 打开抖音直播间（浏览器或直播伴侣），验证代理捕获：
-      现有链路 `python -m danmaku_listener listen douyin:<房间号> --timeout 30`
-      [预期] 代理注册 + JSON 流（protobuf 解析路径）
-- [ ] **4C.4** 异常路径：错误房间号执行，确认三段式错误而非栈崩溃
+> **技术路线**（ADR-001：独立代理进程 + WS IPC）：采用 DouyinBarrageGrab 同款
+> 代理抓包路线——BarrageGrab（编译版）作独立代理进程拦截本机弹幕源（直播伴侣/
+> 浏览器/抖音客户端），本系统经其内置 WS 服务（ws://127.0.0.1:8888）接收 JSON
+> 并转契约 v1。参考项目 barrage-fly 的替代路线（Web 端 WS + 签名对抗）未采用
+> ——签名风控维护成本高，代理路线更稳。
+
+**环境整备（首次，管理员操作）**：
+1. 安装 BarrageGrab 根证书（首次管理员启动 BarrageGrab 时自动提示安装）
+2. 管理员启动 BarrageGrab（`DouyinBarrageGrab/BarrageGrab/` 下编译版 exe），
+   挂后台不关闭；控制台标题显示 ws 连接地址（默认 ws://127.0.0.1:8888）
+3. 打开任意直播间页面或直播伴侣，确认 BarrageGrab 控制台有弹幕滚动
+
+- [ ] **4C.1** 环境就绪后重启本系统服务，web 控制台添加 `douyin:<房间号>`
+      （房间号 = 直播间页 URL 中的号；BarrageGrab 抓全本机源，多房间共享一条
+      WS 连接，消息按房间号分发）
+      [预期] 前端 warnings 显示 BarrageGrab 前置提示；未启动 BarrageGrab 时
+      引擎每 15s 自动重试不崩溃
+- [ ] **4C.2** 契约流验证：DANMU/LIKE/ENTER_ROOM/SOCIAL(follow/粉丝团/分享)/
+      GIFT（礼物名+数量+抖币价值）/ROOM_STATS，`"protocol_version": "douyin-1"`
+- [ ] **4C.3** 下播验证：LIVE_STATUS_CHANGE live=false（Type 9）
+- [ ] **4C.4** 合规核对：docs/ops/compliance-review.md §4（根 CA 安装告知、
+      只监听不发送）
 
 ### 4D 快手协议直连（✅ 2026-09-28 实测通过，约 15 分钟）
 

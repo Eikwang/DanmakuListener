@@ -11,7 +11,7 @@ serve 与 AUTOlive 集成的统一入口：按平台构造契约 v1 引擎。
 from typing import Dict, Optional
 
 from danmaku_listener.engines.base import BaseEngine
-from danmaku_listener.engines.douyin_proxy import DouyinProxyEngine
+from danmaku_listener.engines.douyin_grab import DouyinBarrageGrabEngine
 from danmaku_listener.engines.protocol.bilibili import BilibiliProtocolEngine
 from danmaku_listener.engines.protocol.douyu import DouyuProtocolEngine
 from danmaku_listener.engines.protocol.huya import HuyaProtocolEngine
@@ -25,7 +25,8 @@ PLATFORM_ENGINES = {
     "huya": HuyaProtocolEngine,
     "kuaishou": KuaishouProtocolEngine,
     "wechat_channels": WechatChannelsEngine,
-    "douyin": DouyinProxyEngine,  # 桥接层（ADR-001：代理独立进程；web 单进程 add_room 一律 501）
+    # ADR-001：独立代理进程（DouyinBarrageGrab）+ WS IPC——本引擎为其桥接层
+    "douyin": DouyinBarrageGrabEngine,
 }
 
 #: 引擎可用性 warnings（CEO-2：加房间响应透出，前端可见）
@@ -33,6 +34,8 @@ PLATFORM_WARNINGS = {
     "huya": "虎牙 Tars 协议直连（2026-09-28 实测打通：DANMU/GIFT）；礼物名暂为类型编号",
     "kuaishou": "快手 web 直播间已强制游客登录（2026-09 实测）——首次添加弹登录窗口，登录后自动监听",
     "wechat_channels": "后台页面/接口结构待实测校准（微信更新可能变更）",
+    "douyin": "需前置：安装 BarrageGrab 根证书 → 管理员启动 BarrageGrab（系统代理模式，"
+              "内置 WS 服务默认 ws://127.0.0.1:8888）→ 再添加房间；未启动时连接会自动重试",
 }
 
 

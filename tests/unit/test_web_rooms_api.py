@@ -252,16 +252,27 @@ class TestProxyStartError:
 
 
 class TestSharedProxyEngine:
-    """douyin web 单进程模式一律 501（round3 N-1 一致化）"""
+    """douyin 走 BarrageGrab WS 桥接引擎（ADR-001：独立代理进程 + WS IPC）
+
+    2026-09-28 起 douyin add_room 不再 501——由 DouyinBarrageGrabEngine 桥接
+    BarrageGrab 内置 WS 服务（前置：证书 + BarrageGrab 启动，PLATFORM_WARNINGS 透出）。
+    """
 
     @pytest.mark.asyncio
-    async def test_two_douyin_rooms_both_501(self):
-        """douyin:111 + douyin:222 均返回 501（无消息通路，桥接预留）"""
+    async def test_two_douyin_rooms_shared_engine(self):
+        """douyin:111 + douyin:222 复用同一桥接引擎实例（单 WS 连接多房间）"""
         bridge = _make_bridge_with_mocked_engines()
         app = _create_app_with_bridge(bridge)
-        async with TestClient(TestServer(app)) as client:
-            r1 = await client.post("/api/rooms", json={"room": "douyin:111"})
-            r2 = await client.post("/api/rooms", json={"room": "douyin:222"})
-            assert r1.status == 501 and r2.status == 501
-            resp = await client.get("/api/rooms")
-            assert len((await resp.json())["rooms"]) == 0
+        with patch("danmaku_listener.engines.registry.build_engine",
+                   return_value=bridge._mock_engine) as mock_build:
+            async with TestClient(TestServer(app)) as client:
+                r1 = await client.post("/api/rooms", json={"room": "douyin:111"})
+                r2 = await client.post("/api/rooms", json={"room": "douyin:222"})
+                assert r1.status == 200 and r2.status == 200
+                # 两个房间共享同一引擎实例（build_engine 仅调用一次）
+                assert mock_build.call_count == 1
+                resp = await client.get("/api/rooms")
+                rooms = (await resp.json())["rooms"]
+                assert len(rooms) == 2
+                # engine.start 被调用两次（每个房间登记一次）
+                assert bridge._mock_engine.start.call_count == 2
