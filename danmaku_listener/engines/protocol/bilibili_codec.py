@@ -10,8 +10,10 @@
 映射表见 docs/contract/mapping.md。
 """
 
+import hashlib
 import json
 import struct
+import time
 import zlib
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -282,3 +284,51 @@ def parse_text_message(text: str, seq: int, ts: int) -> List[Dict[str, Any]]:
             if mapped:
                 results.append(mapped)
     return results
+
+
+# ============ wbi 签名（B站 2023+ 风控：getDanmuInfo 必须带 w_rid/wts） ============
+
+#: wbi 混合索引表（B站公开算法）
+WBI_MIXIN_TAB = [
+    46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49,
+    33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40,
+    61, 26, 17, 0, 1, 60, 51, 30, 4, 22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11,
+    36, 20, 34, 44, 52,
+]
+
+NAV_URL = "https://api.bilibili.com/x/web-interface/nav"
+
+
+def get_mixin_key(orig_key: str) -> str:
+    """wbi 混合：img_key+sub_key 按索引表重排取前 32 字符"""
+    return "".join(orig_key[i] for i in WBI_MIXIN_TAB if i < len(orig_key))[:32]
+
+
+def wbi_sign_params(params: Dict[str, Any], mixin_key: str) -> Dict[str, Any]:
+    """对查询参数做 wbi 签名（追加 wts + w_rid）"""
+    signed = dict(params)
+    signed["wts"] = int(time.time())
+    signed = dict(sorted(signed.items()))
+    signed = {k: "".join(c for c in str(v) if c not in "!'()*") for k, v in signed.items()}
+    query = "&".join(f"{k}={v}" for k, v in signed.items())
+    signed["w_rid"] = hashlib.md5((query + mixin_key).encode()).hexdigest()
+    return signed
+
+
+def extract_wbi_keys(nav_response: Dict[str, Any]) -> Tuple[str, str]:
+    """从 nav 响应提取 (img_key, sub_key)"""
+    wbi = (nav_response.get("data") or {}).get("wbi_img") or {}
+    img_url = wbi.get("img_url", "")
+    sub_url = wbi.get("sub_url", "")
+    img_key = img_url.rsplit("/", 1)[-1].split(".")[0]
+    sub_key = sub_url.rsplit("/", 1)[-1].split(".")[0]
+    if not img_key or not sub_key:
+        raise ValueError(f"nav 响应无 wbi_img keys: code={nav_response.get('code')}")
+    return img_key, sub_key
+
+
+def build_danmu_info_url(room_id: int, mixin_key: str) -> str:
+    """构造带 wbi 签名的 getDanmuInfo URL"""
+    params = wbi_sign_params({"id": room_id, "type": 0}, mixin_key)
+    query = "&".join(f"{k}={v}" for k, v in params.items())
+    return f"{DANMU_INFO_URL}?{query}"

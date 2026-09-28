@@ -22,16 +22,73 @@ PROTOCOL_VERSION = "bilibili-1"  # 协议版本元数据（调试三项）
 
 
 class DanmuInfoFetcher:
-    """获取弹幕服务器 token（getDanmuInfo）。游客可访问；注入替代实现便于测试。"""
+    """获取弹幕服务器 token（getDanmuInfo + wbi 签名）
 
-    async def fetch(self, room_id: int) -> Dict[str, Any]:
+    B站 2023+ 风控：裸请求返回 code=-352。修复流程：
+    1. Session 预热访问直播间页面（cookie 种子）
+    2. nav 接口拿 wbi img_key/sub_key（游客可访问）
+    3. wbi 签名（w_rid+wts）后请求 getDanmuInfo
+    注入替代实现便于测试。
+    """
+
+    def __init__(self):
+        self._session = None  # requests.Session 惰性创建（cookie 复用）
+
+    def _get_session(self):
         import requests
 
-        def _sync() -> Dict[str, Any]:
-            resp = requests.get(codec.DANMU_INFO_URL.format(room_id=room_id), timeout=10,
-                                headers={"User-Agent": "Mozilla/5.0 (danmaku-listener)"})
+        if self._session is None:
+            self._session = requests.Session()
+            self._session.headers.update({
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                              "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+                "Referer": "https://live.bilibili.com/",
+                "Origin": "https://live.bilibili.com",
+            })
+        return self._session
+
+    async def fetch_wbi_keys(self) -> str:
+        """nav 接口获取 wbi mixin key"""
+        import requests
+
+        def _sync() -> str:
+            s = self._get_session()
+            resp = s.get(codec.NAV_URL, timeout=10)
             resp.raise_for_status()
-            return resp.json()
+            img_key, sub_key = codec.extract_wbi_keys(resp.json())
+            return codec.get_mixin_key(img_key + sub_key)
+
+        return await asyncio.get_running_loop().run_in_executor(None, _sync)
+
+    async def fetch(self, room_id: int) -> Dict[str, Any]:
+        """带 wbi 签名获取弹幕 token（每次调用实时签名——wts 时效性）"""
+
+        def _sync() -> Dict[str, Any]:
+            import requests
+
+            s = self._get_session()
+            # 预热：直播间页面（cookie 种子；已有 cookie 时为轻量请求）
+            try:
+                s.get(f"https://live.bilibili.com/{room_id}", timeout=10)
+            except Exception:
+                pass  # 预热失败不阻断（wbi 签名是主防线）
+
+            mixin_key = s.get("https://api.bilibili.com/x/web-interface/nav", timeout=10)
+            nav_data = mixin_key.json()
+            img_key, sub_key = codec.extract_wbi_keys(nav_data)
+            mixin = codec.get_mixin_key(img_key + sub_key)
+
+            params = codec.wbi_sign_params({"id": room_id, "type": 0}, mixin)
+            base_url = codec.DANMU_INFO_URL.split("?")[0]  # 去掉旧查询模板，签名参数由 params 传
+            resp = s.get(base_url, params=params, timeout=10)
+            resp.raise_for_status()
+            body = resp.json()
+            code = body.get("code")
+            if code != 0:
+                raise ValueError(
+                    f"getDanmuInfo code={code} message={body.get('message', '')!r}（B站风控/风控升级）"
+                )
+            return body
 
         return await asyncio.get_running_loop().run_in_executor(None, _sync)
 
@@ -99,9 +156,13 @@ class BilibiliProtocolEngine(BaseEngine):
         while True:
             try:
                 info = await self._danmu_info.fetch(room_id_int)
-                token = str(info.get("data", {}).get("token", ""))
+                data = info.get("data") or {}
+                token = str(data.get("token", ""))
                 if not token:
-                    raise ValueError("getDanmuInfo 未返回 token（房间号错误或风控）")
+                    raise ValueError(
+                        f"getDanmuInfo 未返回 token（code={info.get('code')} "
+                        f"message={info.get('message', '')!r}——房间号错误、风控或需登录）"
+                    )
 
                 async with websockets.connect(codec.WS_URL) as ws:
                     self._room_ws[room_id] = ws
