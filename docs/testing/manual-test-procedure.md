@@ -80,6 +80,14 @@
 
 ### 4A B站协议直连（✅ 优先测，约 10 分钟）
 
+> **2026-09-28 已实测通过**。登录态为完整弹幕流前提（游客仅事件流）；
+> cookie 获取已自动化（受控浏览器登录闭环），无需手工导出。
+
+- [ ] **4A.0** 自动登录闭环：web 控制台（`http://localhost:8080`）添加 bilibili
+      房间 → 系统检测无登录态自动弹出浏览器窗口 → 扫码/登录 → 窗口自动关闭、
+      cookie 保存（`cookie/bilibili_storage_state.json`）→ 监听自动开始
+      [预期] 前端进度：`需要登录…登录窗口已打开` → `登录成功——开始监听`
+      [注] cookie 复用：二次添加房间不再弹窗；失效时自动再次触发
 - [ ] **4A.1** 选一个**正在直播**的 B站房间（直播间页 URL 中房间号；可直接用
       `https://live.bilibili.com/<房间号>` 人工确认有弹幕滚动）
 - [ ] **4A.2** 协议直连（绕过旧路由，直接驱动阶段 1 引擎）：
@@ -95,13 +103,21 @@
       [预期] Playwright 启动并进入直播间（stdout JSON 流）。**注意**：该路径是旧引擎，
       内存行为不代表新协议引擎，仅验证兼容层未破坏
 
-### 4B 斗鱼协议直连（✅，约 10 分钟）
+### 4B 斗鱼协议直连（✅ 2026-09-28 已实测通过，约 10 分钟）
 
-- [ ] **4B.1** 选一个正在直播的斗鱼房间（`https://www.douyu.com/<房间号>`）
+> 连接通道为 **TCP 明文直连**：wss 入口被 TLS 指纹拦截（Python ClientHello 被 WAF
+> 拒绝），gateway 直连服务器拒绝标准 loginreq——danmuproxy 经典 TCP 端口
+> （12601/12602/7501/8601 等）兼容。login 与 join 之间必须等 loginres（代理逐包
+> 读，背靠背连发会丢 join_group，症状是连接稳定但零消息）。
+
+- [ ] **4B.1** 选一个**正在直播**的斗鱼房间（`https://www.douyu.com/<房间号>`，
+      页面确认直播间**非"轮播中"**——轮播房（如赛事房 288016）无真人弹幕，
+      只有 lol_eco_lead 等轮播数据，零弹幕输出是预期行为）
 - [ ] **4B.2** `python tools/protocol_listen.py douyu <房间号> --duration 60`
-      [预期] 契约 JSON 流（DANMU 带 `badge_name/badge_level` 粉丝牌字段），
-      `"protocol_version": "douyu-1"`
-- [ ] **4B.3** 观察 45s+ 运行不中断（心跳周期 45s，验证心跳维持连接）
+      [预期] 契约 JSON 流（DANMU 带 `badge_name/badge_level` 粉丝牌字段、
+      ENTER_ROOM、GIFT），`"protocol_version": "douyu-1"`，tthw <2s
+      （实测 71415 首包约 1s）
+- [ ] **4B.3** 观察 45s+ 运行不中断（心跳首帧 15s 延迟、周期 45s，验证心跳维持连接）
 
 ### 4C 抖音代理模式（⚠️ 需环境前置）
 

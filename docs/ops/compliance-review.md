@@ -34,12 +34,22 @@
 - [ ] **直播伴侣 hook 注入**：向第三方厂商进程注入代码，杀软误报率与 ToS 风险最高——需**单独知情确认**
 - [ ] 运行期直播伴侣版本漂移检测（版本不符 → ROUTE_FAILED，fix_hint 指向版本锁定指南）
 
-## 4.5 B站弹幕限流与登录 cookie（实测确认 2026-09-28）
+## 4.5 B站弹幕限流与登录 cookie（实测确认 2026-09-28，两轮）
 
-- **实测结论**：游客（无 cookie）连接 auth 成功但 B站仅推送零星弹幕样本与统计事件——完整弹幕流需要登录态 cookie
-- 获取方式：专用小号登录 B站 → 浏览器 F12 → Network 面板复制请求 Cookie 头（需含 SESSDATA、buvid3）
-- 存放：`cookie/bilibili_cookies.txt`（一行 "SESSDATA=xxx; buvid3=xxx; ..." 格式）
-- 合规：使用专用监听小号（不绑客户主账号），受 §3 硬约束覆盖
+- **第一轮结论**：游客（无 cookie）连接 auth 成功但 B站仅推送零星弹幕样本与统计事件——完整弹幕流需要登录态 cookie
+- **第二轮结论**（barrage-fly SDK 1.5.8 逐行对照 + A/B 实测）：
+  - auth 包必须含 `buvid`（2023-08 起必须字段）与与 token 配对的登录 `uid`（DedeUserID）——缺任一被服务端踢线（无 close frame 连环断开）或降级限流
+  - **WS 握手头必须模拟浏览器**（UA + Origin）：裸 Python UA 连接被降级推送——事件流稀疏、弹幕被哑（对照实测：握手头修复后事件流恢复、登录态弹幕恢复）
+  - 游客 + `finger/spi` 生成的 buvid3/buvid4：事件流恢复，弹幕仍被哑（登录态仍是完整弹幕流前提）
+- **cookie 获取已自动化**：受控浏览器登录闭环（用户在可见窗口自行登录，系统仅保存 cookie）——合规同 §3 专用小号约束
+- 实测参照：`docs/testing/manual-test-procedure.md` §4A；A/B 工具 `tools/bili_diag.py --cookie`
+
+## 4.6 斗鱼连接通道（实测确认 2026-09-28）
+
+- wss 入口（danmuproxy:9501）连接被重置；wsproxy:6671 被 TLS 指纹拦截（Python ClientHello 被 WAF 拒绝）
+- 采用 **TCP 明文直连**（danmuproxy:12601 等，帧格式与 WS 版一致）：实测 guest 可听、完整弹幕流（DANMU/ENTER_ROOM/GIFT）
+- gateway API（`/lapi/live/gateway/web/{roomId}?isH5=1`）返回的直连服务器接受连接但拒绝标准 loginreq——仅作兜底地址
+- 游客可听，暂无账号需求；若未来风控升级（登录限流），启用 §3 专用小号流程
 
 ## 5. 数据合规
 
