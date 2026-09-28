@@ -10,6 +10,21 @@
     --accent-hover: #6a44a0;
     --success: #00c853;
     --danger: #ff1744;
+
+    /* 契约 v1 九类徽章色（Design Pass 5） */
+    --type-danmu: #4a9eff;
+    --type-gift: #e8b93e;
+    --type-super-chat: #ff5c5c;
+    --type-enter: #7ec8a9;
+    --type-like: #f08fb0;
+    --type-live: #b088f5;
+    --type-stats: #8aa8c8;
+    --type-social: #c8a878;
+    /* 系统告警色 */
+    --warn-gap: #e8b93e;
+    --warn-login: #b088f5;
+    --warn-route: #ff5c5c;
+    --warn-ok: #7ec8a9;
     --warning: #ffab00;
     --border: #2a2a4a;
 }
@@ -21,7 +36,7 @@
 }
 
 body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
     background-color: var(--bg-primary);
     color: var(--text-primary);
     min-height: 100vh;
@@ -368,4 +383,127 @@ button:disabled {
 .room-item .status-badge.stopped {
     background-color: var(--border);
     color: var(--text-secondary);
+}
+
+
+/* ===== 前端 v2：契约渲染样式（测试控制台） ===== */
+
+.console-tag {
+    font-size: 12px;
+    color: var(--text-secondary);
+    border: 1px solid var(--text-secondary);
+    border-radius: 3px;
+    padding: 1px 6px;
+    margin-left: 8px;
+    vertical-align: middle;
+}
+
+.data-source {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-left: 8px;
+}
+
+/* 系统告警条 */
+.alert-bar {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 0 12px;
+}
+.alert {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 10px;
+    border-radius: 4px;
+    font-size: 13px;
+}
+.alert a { color: inherit; text-decoration: underline; }
+.alert-warn  { background: rgba(232, 185, 62, 0.15); color: var(--warn-gap); }
+.alert-login { background: rgba(176, 136, 245, 0.15); color: var(--warn-login); }
+.alert-route { background: rgba(255, 92, 92, 0.15); color: var(--warn-route); }
+.alert-ok    { background: rgba(126, 200, 169, 0.15); color: var(--warn-ok); }
+.alert-info  { background: var(--bg-secondary); color: var(--text-secondary); }
+.alert-qr    { gap: 10px; }
+.alert-close {
+    background: none;
+    border: none;
+    color: inherit;
+    font-size: 16px;
+    cursor: pointer;
+    padding: 0 4px;
+}
+
+/* 弹幕类型徽章 */
+.type-badge {
+    display: inline-block;
+    font-size: 11px;
+    color: #fff;
+    border-radius: 3px;
+    padding: 1px 6px;
+    margin-right: 8px;
+    min-width: 44px;
+    text-align: center;
+}
+.danmaku-item {
+    display: flex;
+    align-items: baseline;
+    padding: 3px 8px;
+}
+.danmaku-text { word-break: break-all; }
+.gap-marker {
+    text-align: center;
+    color: var(--warn-gap);
+    font-size: 12px;
+    padding: 4px 0;
+    opacity: 0.8;
+}
+
+/* 类型过滤 chips */
+.type-filter { display: flex; gap: 4px; flex-wrap: wrap; }
+.filter-chip {
+    background: none;
+    border: 1px solid var(--text-secondary);
+    color: var(--text-secondary);
+    border-radius: 3px;
+    font-size: 11px;
+    padding: 1px 6px;
+    cursor: pointer;
+}
+.filter-chip.active { color: var(--text-primary); border-color: var(--text-primary); }
+
+/* 统计面板 */
+.stats-engine, .stats-rate {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 0;
+    font-size: 13px;
+}
+.stats-label { color: var(--text-secondary); }
+.stats-value { font-variant-numeric: tabular-nums; }
+.stats-types .stats-row, .stats-rooms .stats-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 2px 0;
+    font-size: 12px;
+}
+
+/* 空态 */
+.empty-state {
+    text-align: center;
+    color: var(--text-secondary);
+    padding: 48px 16px;
+}
+.empty-hint { font-size: 12px; }
+.empty-hint code {
+    background: var(--bg-secondary);
+    padding: 2px 4px;
+    border-radius: 3px;
+}
+
+/* 响应式：<900px 右栏折叠（Design Pass 6 最小口径） */
+@media (max-width: 900px) {
+    .right-panel { display: none; }
 }

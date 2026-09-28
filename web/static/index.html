@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DanmakuListener</title>
+    <title>DanmakuListener 测试控制台</title>
     <link rel=",icon" href="data:,">
     <link rel="stylesheet" href="/static/style.css">
 </head>
@@ -11,12 +11,16 @@
     <div class="app-container">
         <!-- 顶部标题栏 -->
         <header class="header">
-            <h1>DanmakuListener</h1>
+            <h1>DanmakuListener <span class="console-tag">本地测试控制台</span></h1>
             <div class="connection-status">
                 <span id="status-indicator" class="status-dot disconnected"></span>
                 <span id="status-text">未连接</span>
+                <span id="data-source" class="data-source hidden"></span>
             </div>
         </header>
+
+        <!-- 系统告警条（SYSTEM_STATUS 可视化，最新在上，可关闭） -->
+        <div id="alert-bar" class="alert-bar" role="alert" aria-live="assertive"></div>
 
         <!-- 主体内容 -->
         <div class="main-content">
@@ -26,7 +30,7 @@
                 <section class="room-section">
                     <h2>房间管理</h2>
                     <div class="room-add-form">
-                        <input type="text" id="room-input" placeholder="douyin:123456">
+                        <input type="text" id="room-input" placeholder="bilibili:23058" aria-label="房间标识 平台:房间ID">
                         <button id="add-room-btn">添加</button>
                     </div>
                     <div id="room-error" class="error-msg hidden"></div>
@@ -48,31 +52,49 @@
                 </section>
             </aside>
 
-            <!-- 中间主区域：弹幕显示 -->
+            <!-- 中间主区域：系统告警 + 弹幕显示 -->
             <main class="danmaku-section">
                 <div class="danmaku-header">
                     <h2>实时弹幕</h2>
+                    <div class="type-filter" id="type-filter" role="group" aria-label="消息类型过滤"></div>
                     <button id="scroll-toggle-btn">暂停滚动</button>
                 </div>
-                <div id="danmaku-container" class="danmaku-container"></div>
+                <div id="danmaku-container" class="danmaku-container" aria-live="polite" aria-label="实时弹幕流">
+                    <div class="empty-state" id="empty-state">
+                        <p>暂无消息</p>
+                        <p class="empty-hint">在左侧添加房间（如 bilibili:23058），或用命令行启动回放：<br><code>python -m danmaku_listener serve --replay docs/contract/examples/demo.jsonl</code></p>
+                    </div>
+                </div>
             </main>
 
-            <!-- 右侧面板：关键词屏蔽 -->
+            <!-- 右侧面板：统计面板 + 关键词屏蔽 -->
             <aside class="right-panel">
+                <!-- 统计面板 -->
+                <section class="stats-section">
+                    <h2>统计</h2>
+                    <div class="stats-engine">
+                        <span class="stats-label">引擎</span>
+                        <span id="stats-engine" class="stats-value">—</span>
+                    </div>
+                    <div class="stats-rate">
+                        <span class="stats-label">速率</span>
+                        <span id="stats-rate" class="stats-value">0 msg/s</span>
+                    </div>
+                    <div id="stats-types" class="stats-types"></div>
+                    <div id="stats-rooms" class="stats-rooms"></div>
+                </section>
+
+                <!-- 关键词屏蔽 -->
                 <section class="keyword-section">
                     <h2>关键词屏蔽</h2>
-                    <div class="keyword-toggle">
-                        <label class="switch">
-                            <input type="checkbox" id="keyword-filter-toggle" checked>
-                            <span class="slider"></span>
-                        </label>
-                        <span>启用过滤</span>
-                    </div>
-                    <div id="keyword-list" class="keyword-list"></div>
                     <div class="keyword-add-form">
-                        <input type="text" id="keyword-input" placeholder="输入屏蔽关键词">
+                        <input type="text" id="keyword-input" placeholder="屏蔽关键词" aria-label="屏蔽关键词">
                         <button id="add-keyword-btn">添加</button>
                     </div>
+                    <label class="kw-toggle">
+                        <input type="checkbox" id="keyword-toggle" checked> 启用过滤
+                    </label>
+                    <ul id="keyword-list" class="keyword-list"></ul>
                 </section>
             </aside>
         </div>

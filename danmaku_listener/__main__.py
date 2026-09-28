@@ -16,6 +16,7 @@ JSON 流）。单平台验收以此解耦 AUTOlive 可用性（DX 回归项：�
 import argparse
 import asyncio
 import json
+import os
 import sys
 import time
 
@@ -50,6 +51,7 @@ def _build_parser() -> argparse.ArgumentParser:
     serve = sub.add_parser("serve", help="常驻服务：WS 推送通道 + 消息源")
     serve.add_argument("--config", default=None, help="TOML 配置文件路径")
     serve.add_argument("--replay", default=None, help="回放 fixtures JSONL 作为消息源（通道冒烟）")
+    serve.add_argument("--web", action="store_true", help="同时挂载测试控制台前端（web_port 8080）")
 
     sub.add_parser("contract", help="打印契约版本信息")
     return parser
@@ -170,7 +172,7 @@ async def cmd_listen(target: str | None, timeout: float, replay_path: str | None
     return 0
 
 
-async def cmd_serve(config: str | None, replay: str | None = None) -> int:
+async def cmd_serve(config: str | None, replay: str | None = None, with_web: bool = False) -> int:
     """常驻服务：WS 推送通道 + 消息源（回放演示或引擎注册表，阶段 0 骨架）"""
     import os
 
@@ -185,6 +187,17 @@ async def cmd_serve(config: str | None, replay: str | None = None) -> int:
     token = load_token(settings.ws_token_file, os.environ.get("DANMAKU_TOKEN"))
     server = PushServer(host=settings.ws_bind, port=settings.ws_port, token=token)
     await server.start()
+
+    if with_web:
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from web.app import create_app as _create_web_app
+        from aiohttp import web as _web
+        webapp = _create_web_app()
+        web_runner = _web.AppRunner(webapp)
+        await web_runner.setup()
+        web_site = _web.TCPSite(web_runner, "localhost", settings.web_port)
+        await web_site.start()
+        print(json.dumps({"web_console": f"http://localhost:{settings.web_port}"}), flush=True)
     print(
         json.dumps({
             "service": "danmaku-serve",
@@ -198,12 +211,12 @@ async def cmd_serve(config: str | None, replay: str | None = None) -> int:
 
     try:
         if replay:
-            from danmaku_listener.fixtures.replayer import replay
+            from danmaku_listener.fixtures.replayer import replay as _replay_src  # 别名避免遮蔽路径参数
 
             async def sink(wire: dict) -> None:
                 await server.broadcast(wire)
 
-            async for _ in replay(replay, sink, speed=5.0, loop=True):
+            async for _ in _replay_src(replay, sink, speed=5.0, loop=True):
                 pass
         else:
             # 引擎注册表随阶段 1-5 接入；阶段 0 服务保持空转（DX 回归项已固定 CLI 面）
@@ -224,7 +237,7 @@ def main() -> int:
     if args.command == "listen":
         return asyncio.run(cmd_listen(args.target, args.timeout, args.replay, args.speed))
     if args.command == "serve":
-        return asyncio.run(cmd_serve(args.config, getattr(args, "replay", None)))
+        return asyncio.run(cmd_serve(args.config, getattr(args, "replay", None), getattr(args, "web", False)))
     return 2
 
 

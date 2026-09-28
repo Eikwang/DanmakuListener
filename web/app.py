@@ -267,11 +267,22 @@ def create_app() -> web.Application:
 
 
 async def main() -> None:
-    """主函数：启动 Web 服务"""
+    """主函数：启动 Web 服务（测试控制台；端口 8080 与 PushServer 8765 隔离）"""
+    from danmaku_listener.config.settings import get_settings
+    from danmaku_listener.push.ws_server import PushServer
+
+    settings = get_settings()
     host = "localhost"
-    port = 8765
+    port = settings.web_port
 
     app = create_app()
+
+    # 广播单源（CEO 义务块）：/ws 客户端管理委托 PushServer 实例（非 8765 那个）
+    from danmaku_listener.push.ws_server import PushServer as _PS
+    push = _PS(host="127.0.0.1", port=0, token=None)  # port=0：仅复用 handler/broadcast，不监听
+    app.router.add_get("/ws", push.ws_handler)
+    bridge = get_bridge()
+    bridge.set_push_server(push)
 
     runner = web.AppRunner(app, keepalive_timeout=30, client_timeout=60)
     await runner.setup()
