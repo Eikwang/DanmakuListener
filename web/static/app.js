@@ -354,6 +354,13 @@ class DanmakuApp {
       e.target.textContent = this.autoScroll ? "暂停滚动" : "恢复滚动";
     });
     document.getElementById("add-keyword-btn")?.addEventListener("click", () => this.addKeyword());
+    document.getElementById("settings-toggle-btn")?.addEventListener("click", (e) => {
+      const body = document.getElementById("settings-body");
+      const hidden = body.classList.toggle("hidden");
+      e.target.textContent = hidden ? "展开" : "收起";
+      e.target.setAttribute("aria-expanded", String(!hidden));
+    });
+    document.getElementById("save-config-btn")?.addEventListener("click", () => this.saveConfig());
     document.getElementById("keyword-toggle")?.addEventListener("change", (e) => {
       this.api("/api/keywords/toggle", "PUT", { enabled: e.target.checked }).then(() => this.loadKeywords());
     });
@@ -391,6 +398,44 @@ class DanmakuApp {
     await this.api("/api/keywords", "POST", { keyword: input.value });
     input.value = "";
     this.loadKeywords();
+  }
+
+  async loadConfig() {
+    try {
+      const data = await this.api("/api/config");
+      for (const [key, value] of Object.entries(data.config || {})) {
+        const input = document.getElementById(`cfg-${key}`);
+        if (input) input.value = value;
+      }
+      const src = document.getElementById("data-source");
+      if (src && data.source === "config.local.toml") src.textContent = "配置: config.local.toml";
+    } catch (e) { /* config 可选 */ }
+  }
+
+  async saveConfig() {
+    const msg = document.getElementById("settings-msg");
+    const fields = ["ws_port", "web_port", "max_rooms", "fast_retry_max",
+                    "slow_retry_cap_seconds", "bus_ring_capacity",
+                    "bus_dedup_window_seconds", "session_lifetime_seconds"];
+    const config = {};
+    for (const f of fields) {
+      const el = document.getElementById(`cfg-${f}`);
+      if (el && el.value !== "") config[f] = Number(el.value);
+    }
+    try {
+      const resp = await this.api("/api/config", "PUT", { config });
+      if (resp.success) {
+        msg.textContent = "已保存（需重启服务生效）";
+        msg.className = "settings-msg ok";
+      } else {
+        msg.textContent = resp.error || "保存失败";
+        msg.className = "settings-msg err";
+      }
+    } catch (e) {
+      msg.textContent = `保存失败: ${e}`;
+      msg.className = "settings-msg err";
+    }
+    msg.classList.remove("hidden");
   }
 
   async loadRooms() {
@@ -441,6 +486,7 @@ class DanmakuApp {
   async loadInitialState() {
     await this.loadRooms();
     await this.loadKeywords();
+    await this.loadConfig();
     try {
       const status = await this.api("/api/status");
       if (status.message_count != null) {

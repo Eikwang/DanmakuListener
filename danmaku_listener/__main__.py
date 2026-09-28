@@ -179,14 +179,21 @@ async def cmd_serve(config: str | None, replay: str | None = None, with_web: boo
     from danmaku_listener.config.settings import get_settings, load_toml_overrides
     from danmaku_listener.push.ws_server import PushServer, load_token
 
-    settings = get_settings()
-    overrides = load_toml_overrides(config) if config else {}
+    # S2 默认加载（round3 L-1）：显式 --config 优先，否则 config.local.toml（缺失静默）；
+    # 植入模块级覆盖实例确保 web app/bridge/引擎全部拿到新值（get_settings 优先返回）
+    from danmaku_listener.config.config_store import load_overrides
+    from danmaku_listener.config.settings import set_settings
+    config_path = config or os.path.join(os.getcwd(), "config.local.toml")
+    overrides = load_overrides(config_path) if os.path.exists(config_path) else {}
     if overrides:
-        settings = settings.__class__(**overrides)
+        settings = get_settings()
+        set_settings(settings.__class__(**{**{f: getattr(settings, f) for f in settings.__class__.model_fields}, **overrides}))
+    settings = get_settings()
 
     token = load_token(settings.ws_token_file, os.environ.get("DANMAKU_TOKEN"))
     server = PushServer(host=settings.ws_bind, port=settings.ws_port, token=token)
     await server.start()
+    app["config_path"] = config_path
 
     if with_web:
         sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

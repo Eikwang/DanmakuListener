@@ -172,6 +172,72 @@ async def api_toggle_keyword_filter(request: web.Request) -> web.Response:
     return web.json_response(result)
 
 
+async def api_get_config(request: web.Request) -> web.Response:
+    """获取白名单配置参数当前值（S2 设置面板）"""
+    bridge = request.app.get("bridge") or get_bridge()
+    from danmaku_listener.config.config_store import CONFIG_WHITELIST, default_config_path, load_overrides
+    from danmaku_listener.config.settings import get_settings
+
+    settings = get_settings()
+    values = {f: getattr(settings, f) for f in CONFIG_WHITELIST}
+    return web.json_response({
+        "config": values,
+        "source": "config.local.toml" if os.path.exists(default_config_path()) else "defaults",
+        "all_require_restart": True,
+    })
+
+
+async def api_put_config(request: web.Request) -> web.Response:
+    """更新白名单配置参数（S2 设置面板；round2 C3：写入跟随 --config 或默认 config.local.toml）"""
+    bridge = request.app.get("bridge") or get_bridge()
+    from danmaku_listener.config.config_store import (
+        CONFIG_WHITELIST, default_config_path, load_overrides, save_fields)
+    from danmaku_listener.config.settings import Settings, get_settings, set_settings
+
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"success": False, "error": "Invalid JSON"}, status=400)
+
+    updates = data.get("config") or {}
+    unknown = [k for k in updates if k not in CONFIG_WHITELIST]
+    if unknown:
+        return web.json_response({
+            "success": False,
+            "error": f"未知/不可配置参数: {unknown}",
+            "allowed": CONFIG_WHITELIST,
+        }, status=400)
+
+    # 值校验（round3 L-3）：Settings(**merged) 试构造，model_validator 错误转译 400
+    current = get_settings()
+    merged = {f: getattr(current, f) for f in CONFIG_WHITELIST}
+    merged.update(updates)
+    try:
+        validated = Settings(**merged)
+    except Exception as e:
+        return web.json_response({
+            "success": False,
+            "error": f"参数校验失败: {e}",
+        }, status=400)
+
+    # 写盘（tomlkit 保留结构；失败告警不崩溃）
+    target = request.app.get("config_path") or default_config_path()
+    try:
+        save_fields(target, updates)
+    except Exception as e:
+        return web.json_response({"success": False, "error": f"写入配置失败: {e}"}, status=500)
+
+    # 植入新值（round3 L-1：模块级覆盖实例，立即对 get_settings 生效；
+    # 引擎构造参数等仍需重启生效——统一声明见响应）
+    set_settings(validated)
+
+    return web.json_response({
+        "success": True,
+        "config": {f: getattr(validated, f) for f in CONFIG_WHITELIST},
+        "all_require_restart": True,
+    })
+
+
 async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
     """WebSocket 连接处理器
 
@@ -253,6 +319,10 @@ def create_app() -> web.Application:
     cors.add(app.router.add_post("/api/rooms", api_add_room))
     cors.add(app.router.add_delete("/api/rooms/{platform}/{room_id}", api_remove_room))
     cors.add(app.router.add_post("/api/rooms/stop-all", api_stop_all))
+
+    # 配置参数 API（S2 设置面板）
+    cors.add(app.router.add_get("/api/config", api_get_config))
+    cors.add(app.router.add_put("/api/config", api_put_config))
 
     # 关键词屏蔽 API
     cors.add(app.router.add_get("/api/keywords", api_get_keywords))

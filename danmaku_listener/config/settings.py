@@ -134,14 +134,40 @@ class Settings(BaseSettings):
         return f"{self.proxy_host}:{self.proxy_port}"
 
 
+_override_settings: Optional[Settings] = None
+
+
+def set_settings(settings: Settings) -> None:
+    """植入全局配置实例（S2：config.local.toml 默认加载的传播机制，round3 L-1）
+
+    lru_cache 无插入 API，故用模块级覆盖变量：植入后 get_settings 优先返回它，
+    确保 web app/bridge/引擎全部拿到配置值。
+    """
+    global _override_settings
+    _override_settings = settings
+
+
+def reset_settings() -> None:
+    """清除覆盖实例（恢复 lru_cache 默认路径；测试用）"""
+    global _override_settings
+    _override_settings = None
+    get_settings.cache_clear()
+
+
 @lru_cache
+def _default_settings() -> Settings:
+    return Settings()
+
+
 def get_settings() -> Settings:
-    """获取全局配置单例
+    """获取全局配置单例（优先返回 set_settings 植入的覆盖实例）
 
     Returns:
         Settings 实例
     """
-    return Settings()
+    if _override_settings is not None:
+        return _override_settings
+    return _default_settings()
 
 
 def load_toml_overrides(path: str) -> dict:

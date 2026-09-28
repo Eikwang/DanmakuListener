@@ -84,6 +84,35 @@
                     <div id="stats-rooms" class="stats-rooms"></div>
                 </section>
 
+                <!-- 设置面板（S2） -->
+                <section class="settings-section">
+                    <h2>设置 <button id="settings-toggle-btn" class="settings-toggle" aria-expanded="false">展开</button></h2>
+                    <div id="settings-body" class="settings-body hidden">
+                        <div class="settings-group">
+                            <h3>通道</h3>
+                            <label class="setting-row">WS 端口 <input type="number" id="cfg-ws_port"></label>
+                            <label class="setting-row">控制台端口 <input type="number" id="cfg-web_port"></label>
+                        </div>
+                        <div class="settings-group">
+                            <h3>引擎</h3>
+                            <label class="setting-row">最大房间数 <input type="number" id="cfg-max_rooms"></label>
+                            <label class="setting-row">快速重试次数 <input type="number" id="cfg-fast_retry_max"></label>
+                            <label class="setting-row">慢速重试封顶(秒) <input type="number" id="cfg-slow_retry_cap_seconds"></label>
+                            <label class="setting-row">页面会话寿命(秒) <input type="number" id="cfg-session_lifetime_seconds"></label>
+                        </div>
+                        <div class="settings-group">
+                            <h3>缓冲</h3>
+                            <label class="setting-row">环形缓冲容量 <input type="number" id="cfg-bus_ring_capacity"></label>
+                            <label class="setting-row">去重窗口(秒) <input type="number" id="cfg-bus_dedup_window_seconds"></label>
+                        </div>
+                        <div class="settings-actions">
+                            <button id="save-config-btn">保存</button>
+                            <span class="restart-note">保存后需重启服务生效</span>
+                        </div>
+                        <div id="settings-msg" class="settings-msg hidden"></div>
+                    </div>
+                </section>
+
                 <!-- 关键词屏蔽 -->
                 <section class="keyword-section">
                     <h2>关键词屏蔽</h2>
