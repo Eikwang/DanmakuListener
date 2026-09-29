@@ -13,6 +13,7 @@ from typing import Dict, Optional
 from danmaku_listener.engines.base import BaseEngine
 from danmaku_listener.engines.protocol.bilibili import BilibiliProtocolEngine
 from danmaku_listener.engines.protocol.douyin import DouyinWebProtocolEngine
+from danmaku_listener.engines.protocol.taobao import TaobaoWebProtocolEngine
 from danmaku_listener.engines.protocol.douyu import DouyuProtocolEngine
 from danmaku_listener.engines.protocol.huya import HuyaProtocolEngine
 from danmaku_listener.engines.protocol.kuaishou import KuaishouProtocolEngine
@@ -27,6 +28,7 @@ PLATFORM_ENGINES = {
     "douyu": DouyuProtocolEngine,
     "huya": HuyaProtocolEngine,
     "kuaishou": KuaishouProtocolEngine,
+    "taobao": TaobaoWebProtocolEngine,
     "wechat_channels": WechatChannelsEngine,
 }
 

@@ -71,3 +71,5 @@ static/Release/*.exe
 static/Release/*.dll
 config.local.toml
 前端显示.txt
+live-text-ref/
+taobao-live-ref/
