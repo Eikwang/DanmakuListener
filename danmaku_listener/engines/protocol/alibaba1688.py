@@ -49,3 +49,11 @@ class Alibaba1688Engine(TaobaoWebProtocolEngine):
     @property
     def engine_id(self) -> str:
         return "webws:alibaba1688"
+
+    def validate_room_id(self, room_id: str) -> None:
+        """add_room 预校验：1688 引擎无法解析淘宝链接（提示用对前缀）"""
+        try:
+            self._extract_live_id(room_id)
+        except ValueError as e:
+            raise ValueError(
+                f"{e}——若为淘宝直播间请使用 taobao: 前缀添加") from e

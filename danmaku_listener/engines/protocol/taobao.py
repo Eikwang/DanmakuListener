@@ -401,6 +401,14 @@ class TaobaoWebProtocolEngine(BaseEngine):
     def _extract_live_id(room_spec: str) -> str:
         return extract_live_id(room_spec)
 
+    def validate_room_id(self, room_id: str) -> None:
+        """add_room 预校验：淘宝引擎无法解析 1688 链接（提示用对前缀）"""
+        try:
+            self._extract_live_id(room_id)
+        except ValueError as e:
+            raise ValueError(
+                f"{e}——若为 1688 直播间请使用 alibaba1688: 前缀添加") from e
+
     @staticmethod
     def _envelope(room_id: str, mapped: dict) -> dict:
         """契约信封组装（全键——缺键会被 bridge 兜底包装为 ENGINE_STATUS）"""

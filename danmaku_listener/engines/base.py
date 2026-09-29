@@ -80,6 +80,13 @@ class BaseEngine(ABC):
         """引擎标识，如 ``protocol:bilibili`` / ``proxy:douyin`` / ``fallback:generic``"""
         return f"engine:{self.__class__.__name__}"
 
+    def validate_room_id(self, room_id: str) -> None:
+        """房间参数预校验（add_room 时调用；不可解析抛 ValueError）
+
+        默认不校验；平台引擎覆写以在添加时给出明确错误（而非静默退避循环）。
+        """
+        return None
+
     @property
     def status(self) -> EngineStatus:
         """获取当前状态"""

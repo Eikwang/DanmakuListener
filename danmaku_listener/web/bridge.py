@@ -416,6 +416,13 @@ class DanmakuBridge:
                                "请在弹出的浏览器中扫码/登录；登录后自动开始监听",
                 }
 
+        # 4.8 房间参数预校验（引擎可解析性——错误前缀立即 400 而非静默循环）
+        if hasattr(engine, "validate_room_id"):
+            try:
+                engine.validate_room_id(spec.room_id)
+            except ValueError as e:
+                raise RoomError(str(e), status=400)
+
         # 5. 启动该房间
         try:
             await engine.start(spec.room_id)
