@@ -440,8 +440,8 @@ class TaobaoWebProtocolEngine(BaseEngine):
                     "payload": {"type": "GIFT", "user_name": obj.get("nick", ""),
                                 "gift_name": gift_name,
                                 "gift_count": obj.get("count", obj.get("num", 1))}}
-        # 统计：viewCountFormat/pageViewCount
-        if "viewCountFormat" in obj or "pageViewCount" in obj:
+        # 统计：viewCountFormat/pageViewCount/totalCount 单键（1688 形态）
+        if "viewCountFormat" in obj or "pageViewCount" in obj or "totalCount" in obj:
             current = obj.get("onlineCount", obj.get("current_viewers", 0))
             total = obj.get("totalCount", obj.get("total_viewers", 0))
             return {"category": "business", "type": "ROOM_STATS", "seq": seq,

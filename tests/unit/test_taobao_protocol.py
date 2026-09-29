@@ -86,6 +86,15 @@ def test_map_like():
     assert mapped["payload"]["count"] == 3
 
 
+def test_map_stats_total_count_only():
+    """1688 形态：totalCount 单键统计对象也映射 ROOM_STATS（修复 30s 假超时）"""
+    obj = {"totalCount": 102835}
+    mapped = TaobaoWebProtocolEngine._map_powermsg("123", obj, 1, 1700000000)
+    assert mapped is not None
+    assert mapped["type"] == "ROOM_STATS"
+    assert mapped["payload"]["total_view_count"] == 102835
+
+
 def test_map_chat_and_gift_by_subtype():
     eng = TaobaoWebProtocolEngine()
     chat = {"subType": 10001, "nick": "用户A", "userid": "7", "content": "主播好"}
