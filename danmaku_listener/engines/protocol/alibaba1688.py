@@ -23,6 +23,7 @@ class Alibaba1688Engine(TaobaoWebProtocolEngine):
     """1688 直播弹幕引擎（淘宝 mtop powermsg 协议同构复用）"""
 
     platform = "alibaba1688"
+    PROTOCOL_VERSION = PROTOCOL_VERSION  # alibaba1688-1
 
     MTOP_DOMAIN = "1688.com"
     LIVE_URL_TEMPLATE = LIVE_URL_TEMPLATE

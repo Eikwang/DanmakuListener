@@ -57,6 +57,7 @@ class TaobaoWebProtocolEngine(BaseEngine):
     """淘宝直播 mtop 双通道引擎（每平台一实例、每房间独立任务）"""
 
     platform = "taobao"
+    PROTOCOL_VERSION = PROTOCOL_VERSION  # 类属性（子类覆写自己的版本号）
 
     #: mtop 网关域名与直播间 URL 模板（1688 子类覆写——同协议异域名）
     MTOP_DOMAIN = "taobao.com"
@@ -409,19 +410,22 @@ class TaobaoWebProtocolEngine(BaseEngine):
             raise ValueError(
                 f"{e}——若为 1688 直播间请使用 alibaba1688: 前缀添加") from e
 
-    @staticmethod
-    def _envelope(room_id: str, mapped: dict) -> dict:
-        """契约信封组装（全键——缺键会被 bridge 兜底包装为 ENGINE_STATUS）"""
+    def _envelope(self, room_id: str, mapped: dict) -> dict:
+        """契约信封组装（全键——缺键会被 bridge 兜底包装为 ENGINE_STATUS）
+
+        platform/engine 用 self（1688 子类继承后如实标注——用户实测教训：
+        静态方法硬编码导致 1688 消息被标成 taobao）
+        """
         return {
             "contract_version": "1.0.0",
             "category": mapped["category"],
             "type": mapped["type"],
-            "platform": "taobao",
+            "platform": self.platform,
             "room_id": room_id,
             "seq": mapped["seq"],
             "timestamp": mapped["timestamp"],
-            "engine": "webws:taobao",
-            "protocol_version": PROTOCOL_VERSION,
+            "engine": self.engine_id,
+            "protocol_version": self.PROTOCOL_VERSION,
             "payload": mapped["payload"],
         }
 
