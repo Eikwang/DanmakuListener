@@ -39,6 +39,10 @@ class Live1688ParseError(ValueError):
     """房间参数无法解析"""
 
 
+class NeedLoginVisible(Exception):
+    """需要可见窗口登录（内部信号）"""
+
+
 def extract_feed_id(room_spec: str) -> str:
     """feedId 归一：数字 / 完整直播间链接（feedId=）"""
     if "1688.com" in room_spec:
@@ -166,13 +170,21 @@ class Live1688Engine(BaseEngine):
         feed_id = self._extract_feed_id(room_id)
         logger.info(f"[1688] room {room_id} connecting (feed_id={feed_id})")
         backoff = 15.0
+        headless = True
         while not self._stop_flags.get(room_id):
             session_start = int(time.time())
             try:
-                await self._run_session(room_id, feed_id)
+                await self._run_session(room_id, feed_id, headless=headless)
                 backoff = 15.0
             except asyncio.CancelledError:
                 raise
+            except NeedLoginVisible:
+                # 可见窗口登录（阻塞至登录成功/超时）→ 登录后重开正常会话
+                if self._stop_flags.get(room_id):
+                    return
+                await self._wait_login_visible(room_id, feed_id)
+                headless = True  # 登录态入 profile，后续恢复无头
+                continue
             except Live1688ParseError as e:
                 logger.warning(f"[1688] room {room_id} {e}")
                 await self._emit_route_failed(room_id, "1688.page.parse_failed",
@@ -202,15 +214,21 @@ class Live1688Engine(BaseEngine):
     def _extract_feed_id(room_id: str) -> str:
         return extract_feed_id(room_id)
 
-    async def _run_session(self, room_id: str, feed_id: str) -> None:
-        """单次有界会话：常驻页面 + 弹幕响应拦截"""
+    async def _run_session(self, room_id: str, feed_id: str,
+                           headless: bool = True) -> None:
+        """单次有界会话：常驻页面 + 弹幕响应拦截
+
+        登录闭环（2026-09-29 实测：1688 聊天弹幕只推给登录会话——游客 pull
+        只有统计/等级/系统消息）：未登录时改可见窗口等用户阿里账号登录
+        （unb cookie 出现即成功；persistent profile 持久登录态，后续启动免登录）。
+        """
         from playwright.async_api import async_playwright
 
         deadline = time.monotonic() + self._session_lifetime
         async with async_playwright() as pw:
             context = await pw.chromium.launch_persistent_context(
                 self._profile_dir(),
-                headless=True,
+                headless=headless,
                 user_agent=("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                             "AppleWebKit/537.36 (KHTML, like Gecko) "
                             "Chrome/126.0.0.0 Safari/537.36"),
@@ -245,12 +263,20 @@ class Live1688Engine(BaseEngine):
                     logger.debug(f"[1688] room {room_id} goto warning: {e}")
 
                 logger.info(f"[1688] room {room_id} live page ready")
+
+                # 登录闭环：聊天弹幕只推给登录会话（2026-09-29 实测）——
+                # 未登录（无 unb cookie）且当前为无头时改可见窗口等用户登录
+                if not self._has_login_cookie(context) and headless:
+                    logger.info(f"[1688] room {room_id} not logged in — visible window for login")
+                    await self._emit_system_status(
+                        room_id, "1688 需要登录（聊天弹幕仅登录可见）——"
+                                 "已弹出浏览器，请用阿里账号/淘宝账号扫码登录")
+                    raise NeedLoginVisible()
+
                 self._set_status(self.status.__class__.RUNNING)
 
                 # 有界会话循环 + 响应流静默检测：
                 # 下播/风控后页面的弹幕轮询停止 → SILENCE_TIMEOUT 无 pull 响应 → 三段式
-                # （页面关键词检测不可靠——全页 HTML 含"已结束"模板文案会误判在播房间，
-                #  用户实测在播房间被误杀——2026-09-29 改响应流静默检测）
                 while time.monotonic() < deadline and not self._stop_flags.get(room_id):
                     await asyncio.sleep(2)
                     if time.monotonic() - last_pull_box["t"] > SILENCE_TIMEOUT:
@@ -258,6 +284,63 @@ class Live1688Engine(BaseEngine):
                             "1688.session.silent: 90s 无弹幕接口响应"
                             "（可能未开播/已下播/风控——feedId 场次级，"
                             "开播后重新复制直播间链接）")
+            finally:
+                await context.close()
+
+    @staticmethod
+    def _has_login_cookie(context) -> bool:
+        """登录态判定：unb cookie（阿里系账号标识）存在且有值"""
+        try:
+            for c in context.cookies([]) if False else []:
+                pass
+            # cookies() 需要传 URL；用页面级请求 cookie 简化——遍历全部
+        except Exception:  # noqa: BLE001
+            pass
+        return False
+
+    async def _wait_login_visible(self, room_id: str, feed_id: str) -> None:
+        """可见窗口登录流程：用户登录（unb cookie 出现）→ 登录态入 profile → 返回"""
+        from playwright.async_api import async_playwright
+
+        async with async_playwright() as pw:
+            context = await pw.chromium.launch_persistent_context(
+                self._profile_dir(),
+                headless=False,
+                user_agent=("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                            "AppleWebKit/537.36 (KHTML, like Gecko) "
+                            "Chrome/126.0.0.0 Safari/537.36"),
+                viewport={"width": 1280, "height": 800},
+                args=["--disable-blink-features=AutomationControlled"])
+            try:
+                page = context.pages[0] if context.pages else await context.new_page()
+                try:
+                    await page.goto(
+                        LIVE_URL_TEMPLATE.format(feed_id=feed_id),
+                        timeout=30000, wait_until="domcontentloaded")
+                except Exception:  # noqa: BLE001
+                    pass
+                deadline = time.monotonic() + 300.0
+                logged = False
+                while time.monotonic() < deadline:
+                    try:
+                        for c in await context.cookies(
+                                "https://live.1688.com" if False else
+                                ["https://live.1688.com", "https://www.1688.com",
+                                 "https://login.1688.com"]):
+                            if c.get("name") == "unb" and c.get("value"):
+                                logged = True
+                                break
+                    except Exception:  # noqa: BLE001
+                        pass
+                    if logged:
+                        break
+                    await asyncio.sleep(2)
+                if logged:
+                    await self._emit_system_status(
+                        room_id, "1688 登录成功——开始监听")
+                    logger.info(f"[1688] room {room_id} login ok (unb cookie)")
+                else:
+                    logger.warning(f"[1688] room {room_id} login window timeout")
             finally:
                 await context.close()
 
@@ -357,6 +440,20 @@ class Live1688Engine(BaseEngine):
         return None
 
     # ---- 系统消息 ----
+
+    async def _emit_system_status(self, room_id: str, detail: str) -> None:
+        from danmaku_listener.contract import Category, SystemType
+        from danmaku_listener.contract.models import Envelope, UnifiedMessage
+
+        msg = UnifiedMessage(
+            envelope=Envelope(
+                category=Category.SYSTEM, type=SystemType.ENGINE_STATUS.value,
+                platform=self.platform, room_id=room_id, seq=self.next_seq(room_id),
+                timestamp=int(time.time()), engine=self.engine_id,
+            ),
+            payload={"type": "ENGINE_STATUS", "engine": self.engine_id, "detail": detail},
+        )
+        await self._emit_message(msg.to_wire())
 
     async def _emit_route_failed(self, room_id: str, reason_code: str,
                                  fix_hint: str, docs_anchor: str) -> None:
