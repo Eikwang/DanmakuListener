@@ -3,7 +3,7 @@
 提供代理模式和浏览器模式的混合架构，支持抖音、斗鱼、B站等多平台弹幕监听。
 
 子模块采用 PEP 562 惰性导入：`danmaku_listener.contract`、`danmaku_listener.config`
-等轻量子包不触发 mitmproxy/playwright 等重依赖的加载。
+等轻量子包不触发 playwright 等重依赖的加载。
 """
 
 from typing import Any

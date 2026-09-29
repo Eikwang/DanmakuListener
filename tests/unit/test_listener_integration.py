@@ -7,10 +7,8 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from danmaku_listener.listener import DanmakuListener
-from danmaku_listener.engines.proxy_engine import ProxyEngine
 from danmaku_listener.engines.browser_engine import BrowserEngine
 from danmaku_listener.engines.base import EngineStatus
-from danmaku_listener.adapters.douyin import DouyinAdapter
 from danmaku_listener.adapters.douyu import DouyuAdapter
 from danmaku_listener.adapters.bilibili import BilibiliAdapter
 from danmaku_listener.adapters.generic import GenericAdapter
@@ -25,11 +23,6 @@ class TestDanmakuListenerIntegration:
         """创建监听器实例"""
         return DanmakuListener()
 
-    def test_get_engine_returns_proxy_for_douyin(self, listener):
-        """测试抖音平台返回 ProxyEngine"""
-        engine = listener._get_engine("douyin")
-        assert isinstance(engine, ProxyEngine)
-
     def test_get_engine_returns_browser_for_other_platforms(self, listener):
         """测试非抖音平台返回 BrowserEngine"""
         engine = listener._get_engine("bilibili")
@@ -40,11 +33,6 @@ class TestDanmakuListenerIntegration:
         engine1 = listener._get_engine("bilibili")
         engine2 = listener._get_engine("taobao")
         assert engine1 is engine2
-
-    def test_get_adapter_returns_douyin_for_douyin(self, listener):
-        """测试抖音平台返回 DouyinAdapter"""
-        adapter = listener._get_adapter("douyin")
-        assert isinstance(adapter, DouyinAdapter)
 
     def test_get_adapter_returns_bilibili_for_bilibili(self, listener):
         """测试B站平台返回 BilibiliAdapter"""
@@ -69,15 +57,6 @@ class TestDanmakuListenerIntegration:
                 listener._get_adapter("fake_platform")
 
     @pytest.mark.asyncio
-    async def test_start_creates_engine_for_douyin(self, listener):
-        """测试启动抖音房间时创建 ProxyEngine"""
-        with patch.object(ProxyEngine, 'start', new_callable=AsyncMock) as mock_start:
-            await listener.start(["douyin:123456"])
-            mock_start.assert_called_once_with("123456")
-            assert "123456" in listener._engines
-            assert isinstance(listener._engines["123456"], ProxyEngine)
-
-    @pytest.mark.asyncio
     async def test_start_creates_browser_engine_for_bilibili(self, listener):
         """测试启动 B站房间时创建 BrowserEngine"""
         with patch.object(BrowserEngine, 'start', new_callable=AsyncMock) as mock_start:
@@ -88,33 +67,31 @@ class TestDanmakuListenerIntegration:
 
     @pytest.mark.asyncio
     async def test_start_mixed_platforms(self, listener):
-        """测试混合平台启动（代理+浏览器）"""
-        with patch.object(ProxyEngine, 'start', new_callable=AsyncMock) as mock_proxy_start, \
-             patch.object(BrowserEngine, 'start', new_callable=AsyncMock) as mock_browser_start:
-            await listener.start(["douyin:123456", "bilibili:789012"])
-            mock_proxy_start.assert_called_once_with("123456")
-            mock_browser_start.assert_called_once_with("789012")
+        """测试浏览器管线混合平台启动"""
+        with patch.object(BrowserEngine, 'start', new_callable=AsyncMock) as mock_browser_start:
+            await listener.start(["bilibili:789012", "douyu:123456"])
+            assert mock_browser_start.call_count == 2
 
     @pytest.mark.asyncio
     async def test_start_rejects_too_many_rooms(self, listener):
         """测试超过最大房间数时抛出异常"""
-        rooms = [f"douyin:{i}" for i in range(20)]
+        rooms = [f"bilibili:{i}" for i in range(20)]
         with pytest.raises(ValueError, match="Maximum"):
             await listener.start(rooms)
 
     @pytest.mark.asyncio
     async def test_start_rejects_invalid_spec(self, listener):
         """测试无效房间规格被跳过"""
-        with patch.object(ProxyEngine, 'start', new_callable=AsyncMock):
-            await listener.start(["douyin:123456", "invalid_spec"])
+        with patch.object(BrowserEngine, 'start', new_callable=AsyncMock):
+            await listener.start(["bilibili:123456", "invalid_spec"])
             # 只有有效规格的房间被添加
             assert "123456" in listener._engines
 
     @pytest.mark.asyncio
     async def test_stop_stops_all_engines(self, listener):
         """测试停止时关闭所有引擎"""
-        mock_engine1 = AsyncMock(spec=ProxyEngine)
-        mock_engine2 = AsyncMock(spec=ProxyEngine)
+        mock_engine1 = AsyncMock()
+        mock_engine2 = AsyncMock()
         listener._engines = {"room1": mock_engine1, "room2": mock_engine2}
         listener._running = True
 
@@ -142,9 +119,9 @@ class TestDanmakuListenerIntegration:
     async def test_handle_raw_message_parses_and_publishes(self, listener):
         """测试原始消息经过适配器解析后发布到事件总线"""
         # Mock 适配器
-        mock_adapter = AsyncMock(spec=DouyinAdapter)
+        mock_adapter = AsyncMock(spec=DouyuAdapter)
         mock_message = DanmakuMessage(
-            platform="douyin",
+            platform="douyu",
             room_id="123456",
             user_name="test_user",
             content="hello",
@@ -162,7 +139,7 @@ class TestDanmakuListenerIntegration:
         # 替换适配器获取
         with patch.object(listener, '_get_adapter', return_value=mock_adapter):
             raw_data = {
-                "platform": "douyin",
+                "platform": "douyu",
                 "room_id": "123456",
                 "raw_data": {"method": "WebcastChatMessage", "payload": b'{}'},
                 "msg_id": "msg_001",
@@ -176,11 +153,11 @@ class TestDanmakuListenerIntegration:
     async def test_handle_raw_message_dedup_filters(self, listener):
         """测试去重过滤器过滤重复消息"""
         listener._dedup.should_filter = MagicMock(return_value=True)
-        mock_adapter = AsyncMock(spec=DouyinAdapter)
+        mock_adapter = AsyncMock(spec=DouyuAdapter)
 
         with patch.object(listener, '_get_adapter', return_value=mock_adapter):
             raw_data = {
-                "platform": "douyin",
+                "platform": "douyu",
                 "room_id": "123456",
                 "raw_data": {"method": "WebcastChatMessage"},
                 "msg_id": "msg_001",
@@ -225,8 +202,8 @@ class TestDanmakuListenerIntegration:
     @pytest.mark.asyncio
     async def test_context_manager(self, listener):
         """测试上下文管理器协议"""
-        with patch.object(ProxyEngine, 'start', new_callable=AsyncMock), \
-             patch.object(ProxyEngine, 'stop', new_callable=AsyncMock):
+        with patch.object(BrowserEngine, 'start', new_callable=AsyncMock), \
+             patch.object(BrowserEngine, 'stop', new_callable=AsyncMock):
             async with listener as l:
                 assert l is listener
 

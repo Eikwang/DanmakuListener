@@ -84,12 +84,8 @@ class TestPlatformParser:
         """测试验证无效平台"""
         assert validate_platform("unknown") is False
 
-    def test_get_default_engine_douyin(self):
-        """测试抖音默认使用代理引擎"""
-        assert get_default_engine("douyin") == "proxy"
-
     def test_get_default_engine_other_platforms(self):
-        """测试其他平台默认使用浏览器引擎"""
+        """测试旧管线默认使用浏览器引擎（mitmproxy 代理路线已移除，抖音走 registry 协议引擎）"""
         assert get_default_engine("bilibili") == "browser"
         assert get_default_engine("douyu") == "browser"
 
@@ -104,7 +100,6 @@ class TestSettings:
         """测试默认配置值"""
         settings = Settings()
         assert settings.log_level == "INFO"
-        assert settings.proxy_port == 8827
         assert settings.max_rooms == 10
         assert settings.browser_headless is True
         assert settings.cookie_dir == "./cookie"
@@ -112,21 +107,6 @@ class TestSettings:
         assert settings.reconnect_base_delay == 1.0
         assert settings.heartbeat_interval == 30
         assert settings.dedup_window_size == 300
-
-    def test_proxy_host_default(self):
-        """测试默认代理地址"""
-        settings = Settings()
-        assert settings.proxy_host == "127.0.0.1"
-
-    def test_proxy_host_listen_any(self):
-        """测试监听所有接口时的代理地址"""
-        settings = Settings(listen_any=True)
-        assert settings.proxy_host == "0.0.0.0"
-
-    def test_proxy_address(self):
-        """测试完整代理地址"""
-        settings = Settings()
-        assert settings.proxy_address == "127.0.0.1:8827"
 
     def test_get_settings_cached(self):
         """测试配置单例缓存"""

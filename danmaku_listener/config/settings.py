@@ -21,8 +21,6 @@ class Settings(BaseSettings):
 
     Attributes:
         log_level: 日志级别 (DEBUG/INFO/WARNING/ERROR)
-        proxy_port: 代理服务器端口
-        listen_any: 是否监听所有网络接口 (True=0.0.0.0, False=127.0.0.1)
         max_rooms: 同时监听的最大房间数
         browser_headless: 浏览器是否使用无头模式
         cookie_dir: Cookie 存储目录
@@ -41,10 +39,6 @@ class Settings(BaseSettings):
     # ===== 日志配置 =====
     log_level: str = "INFO"
 
-    # ===== 代理服务器配置 =====
-    proxy_port: int = 8827
-    listen_any: bool = False
-
     # ===== 浏览器引擎配置 =====
     max_rooms: int = 10
     browser_headless: bool = True
@@ -61,14 +55,6 @@ class Settings(BaseSettings):
 
     # ===== 去重窗口 =====
     dedup_window_size: int = 300
-
-    # ===== 代理引擎配置 =====
-    used_proxy: bool = True
-    cert_dir: str = "~/.mitmproxy"
-    process_filter: str = "chrome,msedge,QQBrowser,360se,firefox,2345Explorer,iexplore"
-    force_polling: bool = False
-    auto_pause: bool = False
-    ssl_decrypt_hostnames: str = ""
 
     # ===== 契约 v1 新增：推送通道与安全（DX-C / Eng S-2） =====
     ws_port: int = 8765                    # 本机 WS 推送端口
@@ -106,34 +92,9 @@ class Settings(BaseSettings):
         return self
 
     @property
-    def process_filter_list(self) -> list:
-        """返回进程过滤白名单列表（逗号分割）"""
-        if not self.process_filter:
-            return []
-        return [p.strip() for p in self.process_filter.split(",") if p.strip()]
-
-    @property
-    def ssl_decrypt_extra_hostnames(self) -> list:
-        """返回额外的 SSL 解密域名列表（逗号分割）"""
-        if not self.ssl_decrypt_hostnames:
-            return []
-        return [h.strip() for h in self.ssl_decrypt_hostnames.split(",") if h.strip()]
-
-    @property
     def bus_drop_order_list(self) -> list:
         """背压分级丢弃顺序（先丢在前）"""
         return [t.strip().upper() for t in self.bus_drop_order.split(",") if t.strip()]
-
-    @property
-    def proxy_host(self) -> str:
-        """返回代理服务器监听地址"""
-        return "0.0.0.0" if self.listen_any else "127.0.0.1"
-
-    @property
-    def proxy_address(self) -> str:
-        """返回完整的代理服务器地址"""
-        return f"{self.proxy_host}:{self.proxy_port}"
-
 
 _override_settings: Optional[Settings] = None
 
@@ -174,7 +135,7 @@ def get_settings() -> Settings:
 def load_toml_overrides(path: str) -> dict:
     """读取 TOML 配置文件并返回展平的覆盖字典（TOML → Settings 字段名）
 
-    支持嵌套节（[proxy] port → proxy_port）与平铺键两种写法；
+    支持嵌套节与平铺键两种写法；
     优先级：内置默认 < 本函数结果 < 环境变量 < 每房间覆盖（见 CONFIG_PRIORITY_DOC）。
 
     Args:

@@ -213,23 +213,14 @@ class TestStopAll:
             assert bridge._mock_engine.stop.call_count == 2
 
     @pytest.mark.asyncio
-    async def test_stop_all_restores_proxy(self):
-        """stop-all 后系统代理恢复 → BR-006"""
+    async def test_stop_all_stops_engines(self):
+        """stop-all 后引擎逐个停止（BR-006：mitmproxy 代理恢复随原生切换移除）"""
         bridge = _make_bridge_with_mocked_engines()
-        # mock _get_proxy_status 在停止后返回 disabled
-        original_proxy_status = bridge._get_proxy_status
-        proxy_states = []
-        def track_proxy():
-            s = original_proxy_status()
-            proxy_states.append(s["enabled"])
-            return s
-        bridge._get_proxy_status = track_proxy
         app = _create_app_with_bridge(bridge)
         async with TestClient(TestServer(app)) as client:
             with patch("danmaku_listener.engines.registry.build_engine", return_value=bridge._mock_engine):
                 await client.post("/api/rooms", json={"room": "bilibili:111"})
                 await client.post("/api/rooms/stop-all")
-            # stop_all 应调用 registry 引擎 stop（系统代理恢复逻辑由引擎侧承接）
             bridge._mock_engine.stop.assert_called_once_with("111")
 
 

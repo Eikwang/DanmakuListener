@@ -4,7 +4,6 @@
 """
 
 from danmaku_listener.engines.base import BaseEngine, EngineStatus
-from danmaku_listener.engines.proxy_engine import ProxyEngine
 from danmaku_listener.engines.browser_engine import BrowserEngine
 
-__all__ = ["BaseEngine", "EngineStatus", "ProxyEngine", "BrowserEngine"]
+__all__ = ["BaseEngine", "EngineStatus", "BrowserEngine"]

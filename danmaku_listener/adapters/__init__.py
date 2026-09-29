@@ -4,9 +4,8 @@
 """
 
 from danmaku_listener.adapters.base import BaseAdapter
-from danmaku_listener.adapters.douyin import DouyinAdapter
 from danmaku_listener.adapters.douyu import DouyuAdapter
 from danmaku_listener.adapters.bilibili import BilibiliAdapter
 from danmaku_listener.adapters.generic import GenericAdapter
 
-__all__ = ["BaseAdapter", "DouyinAdapter", "DouyuAdapter", "BilibiliAdapter", "GenericAdapter"]
+__all__ = ["BaseAdapter", "DouyuAdapter", "BilibiliAdapter", "GenericAdapter"]

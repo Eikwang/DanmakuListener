@@ -70,16 +70,15 @@ def validate_platform(platform: str) -> bool:
 
 
 def get_default_engine(platform: str) -> str:
-    """获取平台的默认引擎类型
+    """获取平台的默认引擎类型（旧 listener 管线）
+
+    抖音已切换原生 Web WS 协议引擎（2026-09-29，registry 路由）；
+    mitmproxy 代理路线整体移除——旧管线剩余平台一律浏览器模式。
 
     Args:
         platform: 平台标识
 
     Returns:
-        "proxy" 或 "browser"
+        "browser"（旧管线仅剩浏览器模式）
     """
-    # 抖音优先使用代理模式
-    if platform == "douyin":
-        return "proxy"
-    # 其他平台暂时使用浏览器模式（后续可扩展代理模式）
     return "browser"

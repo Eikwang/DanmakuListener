@@ -1,9 +1,5 @@
 """默认配置值常量"""
 
-# ===== 代理服务器配置 =====
-DEFAULT_PROXY_PORT = 8827
-DEFAULT_LISTEN_ANY = False
-
 # ===== 浏览器引擎配置 =====
 DEFAULT_MAX_ROOMS = 10
 DEFAULT_BROWSER_HEADLESS = True

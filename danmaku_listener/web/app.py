@@ -45,10 +45,6 @@ async def api_get_status(request: web.Request) -> web.Response:
     return web.json_response(bridge.get_status())
 
 
-async def api_get_proxy_status(request: web.Request) -> web.Response:
-    """获取系统代理状态 → AC-001, AC-004"""
-    bridge = request.app.get("bridge") or get_bridge()
-    return web.json_response(bridge._get_proxy_status())
 
 
 async def api_get_rooms(request: web.Request) -> web.Response:
@@ -106,24 +102,8 @@ async def api_stop_all(request: web.Request) -> web.Response:
         return web.json_response({"success": False, "error": str(e)}, status=500)
 
 
-async def api_proxy_enable(request: web.Request) -> web.Response:
-    """开启系统代理 → AC-004, AC-016"""
-    bridge = request.app.get("bridge") or get_bridge()
-    result = await bridge.enable_proxy()
-    if result.get("success"):
-        return web.json_response(result)
-    else:
-        return web.json_response(result, status=500)
 
 
-async def api_proxy_disable(request: web.Request) -> web.Response:
-    """关闭系统代理 → AC-011"""
-    bridge = request.app.get("bridge") or get_bridge()
-    result = await bridge.disable_proxy()
-    if result.get("success"):
-        return web.json_response(result)
-    else:
-        return web.json_response(result, status=500)
 
 
 async def api_get_keywords(request: web.Request) -> web.Response:
@@ -305,11 +285,8 @@ def create_app() -> web.Application:
 
     # 系统状态 API
     cors.add(app.router.add_get("/api/status", api_get_status))
-    cors.add(app.router.add_get("/api/proxy/status", api_get_proxy_status))
 
     # 系统代理控制 API
-    cors.add(app.router.add_post("/api/proxy/enable", api_proxy_enable))
-    cors.add(app.router.add_post("/api/proxy/disable", api_proxy_disable))
 
     # WebSocket 弹幕推送
     app.router.add_get("/ws", websocket_handler)

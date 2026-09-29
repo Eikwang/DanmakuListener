@@ -34,16 +34,6 @@ class TestPageElements:
             assert 'id="danmaku-container"' in text
 
     @pytest.mark.asyncio
-    async def test_page_has_proxy_toggle(self):
-        """页面包含 #proxy-toggle"""
-        from danmaku_listener.web.app import create_app
-        app = create_app()
-        async with TestClient(TestServer(app)) as client:
-            resp = await client.get("/")
-            text = await resp.text()
-            assert 'id="proxy-toggle"' in text
-
-    @pytest.mark.asyncio
     async def test_page_has_keyword_list(self):
         """页面包含 #keyword-list"""
         from danmaku_listener.web.app import create_app

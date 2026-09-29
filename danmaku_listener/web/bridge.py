@@ -330,95 +330,11 @@ class DanmakuBridge:
             "room_seq": dict(self._room_seq),
             "message_count": self._message_count,
             "push_clients": len(self._push._clients) if self._push is not None else len(self._ws_clients),
-            "proxy": self._get_proxy_status(),
             "keyword_filter": {
                 "enabled": self._keyword_filter_enabled,
                 "count": len(self._blocked_keywords),
             },
         }
-
-    def _get_proxy_status(self) -> dict:
-        """获取代理状态（读取注册表）"""
-        try:
-            import winreg
-            key = winreg.OpenKey(
-                winreg.HKEY_CURRENT_USER,
-                r"Software\Microsoft\Windows\CurrentVersion\Internet Settings",
-                0,
-                winreg.KEY_READ,
-            )
-            enabled = winreg.QueryValueEx(key, "ProxyEnable")[0] == 1
-            server = ""
-            if enabled:
-                try:
-                    server = winreg.QueryValueEx(key, "ProxyServer")[0]
-                except Exception:
-                    server = ""
-            winreg.CloseKey(key)
-
-            if enabled and server:
-                parts = server.split(":")
-                return {
-                    "enabled": True,
-                    "host": parts[0],
-                    "port": int(parts[1]) if len(parts) > 1 else 8827,
-                }
-            return {"enabled": False, "host": "", "port": 0}
-        except Exception:
-            return {"enabled": False, "host": "", "port": 0}
-
-    def _get_system_proxy_manager(self):
-        """获取 SystemProxyManager 实例"""
-        from danmaku_listener.managers.system_proxy_manager import SystemProxyManager
-        return SystemProxyManager(enabled=True)
-
-    def _get_proxy_host(self) -> str:
-        """获取配置的代理地址"""
-        try:
-            from danmaku_listener.config.settings import get_settings
-            settings = get_settings()
-            return getattr(settings, "proxy_host", "127.0.0.1")
-        except Exception:
-            return "127.0.0.1"
-
-    def _get_proxy_port(self) -> int:
-        """获取配置的代理端口"""
-        try:
-            from danmaku_listener.config.settings import get_settings
-            settings = get_settings()
-            return getattr(settings, "proxy_port", 8827)
-        except Exception:
-            return 8827
-
-    async def enable_proxy(self) -> dict:
-        """开启系统代理 → AC-004
-
-        Returns:
-            操作结果字典
-        """
-        host = self._get_proxy_host()
-        port = self._get_proxy_port()
-        spm = self._get_system_proxy_manager()
-
-        success = spm.register(host, port)
-        if success:
-            return {"success": True, "enabled": True, "host": host, "port": port}
-        else:
-            return {"success": False, "error": "Failed to set system proxy, check permissions"}
-
-    async def disable_proxy(self) -> dict:
-        """关闭系统代理 → AC-011
-
-        Returns:
-            操作结果字典
-        """
-        spm = self._get_system_proxy_manager()
-
-        success = spm.close()
-        if success:
-            return {"success": True, "enabled": False, "host": "", "port": 0}
-        else:
-            return {"success": False, "error": "Failed to disable system proxy"}
 
     async def add_room(self, room_spec: str) -> dict:
         """添加房间并启动监听（契约 v1：registry 引擎路由全切换）

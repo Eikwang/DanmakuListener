@@ -39,17 +39,17 @@ def test_toml_nested_and_flat(tmp_path):
             """
             log_level = "DEBUG"
 
-            [proxy]
+            [ws]
             port = 9999
             """
         ),
         encoding="utf-8",
     )
     overrides = load_toml_overrides(str(toml))
-    assert overrides["proxy_port"] == 9999
+    assert overrides["ws_port"] == 9999
     assert overrides["log_level"] == "DEBUG"
     s = Settings(**overrides)
-    assert s.proxy_port == 9999
+    assert s.ws_port == 9999
     assert s.log_level == "DEBUG"
 
 

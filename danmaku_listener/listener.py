@@ -14,10 +14,8 @@ from danmaku_listener.bus.event_bus import EventBus
 from danmaku_listener.bus.message import DanmakuMessage
 from danmaku_listener.bus.dedup_filter import DedupFilter
 from danmaku_listener.engines.base import BaseEngine
-from danmaku_listener.engines.proxy_engine import ProxyEngine
 from danmaku_listener.engines.browser_engine import BrowserEngine
 from danmaku_listener.adapters.base import BaseAdapter
-from danmaku_listener.adapters.douyin import DouyinAdapter
 from danmaku_listener.adapters.douyu import DouyuAdapter
 from danmaku_listener.adapters.bilibili import BilibiliAdapter
 from danmaku_listener.adapters.generic import GenericAdapter
@@ -61,7 +59,6 @@ class DanmakuListener:
         self._engines: Dict[str, BaseEngine] = {}
         self._adapters: Dict[str, BaseAdapter] = {}
         self._browser_engine: Optional[BrowserEngine] = None
-        self._proxy_engine: Optional[ProxyEngine] = None
         self._reconnect_manager: Optional[ReconnectManager] = None
         self._running = False
 
@@ -191,16 +188,12 @@ class DanmakuListener:
         self._running = False
         logger.info("Stopping all monitors...")
 
-        # 停止代理引擎
+        # 逐个停止房间引擎
         for room_id, engine in list(self._engines.items()):
             try:
-                if isinstance(engine, ProxyEngine):
-                    await engine.stop(room_id)
+                await engine.stop(room_id)
             except Exception as e:
                 logger.error(f"Error stopping engine for room {room_id}: {e}")
-
-        # 清空代理引擎单例
-        self._proxy_engine = None
 
         # 停止浏览器引擎（一次性关闭所有 Context）
         if self._browser_engine:
@@ -216,8 +209,8 @@ class DanmakuListener:
     def _get_engine(self, platform: str) -> BaseEngine:
         """根据平台获取对应的引擎实例
 
-        代理模式平台共享同一个 ProxyEngine 单例（mitmproxy 只需启动一次）。
         浏览器模式平台共享同一个 BrowserEngine 单例。
+        （mitmproxy 代理路线已随抖音原生 Web WS 切换而移除——2026-09-29）
 
         Args:
             platform: 平台标识
@@ -230,12 +223,7 @@ class DanmakuListener:
         """
         engine_type = get_default_engine(platform)
 
-        if engine_type == "proxy":
-            # ProxyEngine 单例：所有代理模式平台共享 → AC-001
-            if self._proxy_engine is None:
-                self._proxy_engine = ProxyEngine()
-            return self._proxy_engine
-        elif engine_type == "browser":
+        if engine_type == "browser":
             # 浏览器引擎使用单例，所有浏览器模式平台共享
             if self._browser_engine is None:
                 self._browser_engine = BrowserEngine(
@@ -249,8 +237,8 @@ class DanmakuListener:
     def _get_adapter(self, platform: str) -> BaseAdapter:
         """根据平台获取对应的适配器实例
 
-        代理模式平台使用专用适配器（如 DouyinAdapter）。
         浏览器模式平台使用专用适配器（如 DouyuAdapter、BilibiliAdapter）。
+        （抖音已切原生 Web WS 协议引擎，不走旧管线适配器——2026-09-29）
 
         Args:
             platform: 平台标识
@@ -261,9 +249,7 @@ class DanmakuListener:
         Raises:
             NotImplementedError: 如果平台暂不支持
         """
-        if platform == "douyin":
-            return DouyinAdapter()
-        elif platform == "douyu":
+        if platform == "douyu":
             return DouyuAdapter()
         elif platform == "bilibili":
             return BilibiliAdapter()
@@ -336,49 +322,15 @@ class DanmakuListener:
     async def _handle_raw_message(self, data: dict) -> None:
         """处理原始消息
 
-        支持两种消息格式：
-        1. 代理模式：{type, room_id, method, payload, msg_id, platform}
-           - type="danmaku" → 构造 DecodedMessage 传给 DouyinAdapter
-           - type="ws_connected"/"ws_disconnect" → 状态事件，不转发到适配器
-        2. 浏览器模式：{platform, room_id, raw_data, msg_id}
+        浏览器模式消息格式：{platform, room_id, raw_data, msg_id}
+        （mitmproxy 代理模式分支已随抖音原生 Web WS 切换移除——2026-09-29）
 
         Args:
             data: 包含 platform, room_id 等字段的字典
         """
         try:
-            msg_type = data.get("type", "")
             platform = data.get("platform") or ""
             room_id = data.get("room_id") or ""
-
-            # 代理模式状态事件（ws_connected, ws_disconnect, reconnect_success）
-            if msg_type in ("ws_connected", "ws_disconnect", "reconnect_success"):
-                logger.debug(f"Proxy status event: {msg_type} room={room_id}")
-                # 状态事件不转发到适配器
-                return
-
-            # 代理模式弹幕消息 → 构造 DecodedMessage 传给适配器
-            if msg_type == "danmaku" and platform:
-                method = data.get("method", "")
-                payload = data.get("payload", b"")
-                msg_id = data.get("msg_id", "")
-
-                # 去重检查 → AC-019
-                if msg_id and self._dedup.should_filter(room_id, str(msg_id)):
-                    return
-
-                # 构造 DecodedMessage 传给 DouyinAdapter
-                from danmaku_listener.engines.protobuf_decoder import DecodedMessage
-                decoded = DecodedMessage(
-                    method=method,
-                    payload=payload if isinstance(payload, bytes) else b"",
-                    msg_id=str(msg_id),
-                )
-
-                adapter = self._get_adapter(platform)
-                message = await adapter.parse(decoded, context={"platform": platform, "room_id": room_id})
-                if message:
-                    await self._bus.publish("danmaku", message)
-                return
 
             # 浏览器模式消息（raw_data 字段）
             raw_data = data.get("raw_data")

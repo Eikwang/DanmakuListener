@@ -35,9 +35,9 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-douyin = ["mitmproxy>=9.0.0"]
+douyin = []  # 原生 Web WS 直连（quickjs/protobuf 已入主依赖）
 wechat = ["playwright>=1.30.0"]
-all = ["mitmproxy>=9.0.0", "playwright>=1.30.0"]
+all = ["playwright>=1.30.0"]
 
 [project.scripts]
 danmaku-listen = "danmaku_listener.__main__:main"
