@@ -58,10 +58,22 @@ class TaobaoWebProtocolEngine(BaseEngine):
 
     platform = "taobao"
 
-    def __init__(self, state_store=None, domain: str = "taobao.com",
+    #: mtop 网关域名与直播间 URL 模板（1688 子类覆写——同协议异域名）
+    MTOP_DOMAIN = "taobao.com"
+    LIVE_URL_TEMPLATE = "https://tbzb.taobao.com/live?liveId={live_id}"
+    #: powermsg 轮询参数（1688 页面实测：首拉 offset=0、pagesize 20、sdk h5_3.3.3）
+    POWERMSG_SDK_VERSION = "h5_3.4.2"
+    POWERMSG_PAGESIZE = 10
+    POWERMSG_INIT_OFFSET_ZERO = False  # 淘宝=当前时间戳起拉增量；1688=0 起拉历史
+    #: 页面来源（mtop 网关校验 Referer/Origin 域——1688 引擎覆写）
+    PAGE_ORIGIN = "https://tbzb.taobao.com"
+    #: 凭证锚点：页面请求中携带 topic 的接口（子类可加 1688 subscribe）
+    TOPIC_ANCHORS = (ILIAD_API, "powermsg")
+
+    def __init__(self, state_store=None, domain: Optional[str] = None,
                  cookie_dir: str = "./cookie"):
         super().__init__(state_store=state_store)
-        self._domain = domain  # 1688 复用：domain="1688.com"（API 名实测后配置）
+        self._domain = domain or self.MTOP_DOMAIN
         self._cookie_dir = cookie_dir  # profile 持久化目录（wxlivespy 同款 userDataDir）
         self._room_tasks: Dict[str, asyncio.Task] = {}
         self._stop_flags: Dict[str, bool] = {}
@@ -116,8 +128,8 @@ class TaobaoWebProtocolEngine(BaseEngine):
         """
         from playwright.async_api import async_playwright
 
-        live_id = extract_live_id(room_id)
-        live_url = LIVE_URL.format(live_id=live_id)
+        live_id = self._extract_live_id(room_id)
+        live_url = self.LIVE_URL_TEMPLATE.format(live_id=live_id)
 
         async def attempt(wait_limit: float) -> Optional[Dict[str, Any]]:
             """单轮 headless 凭证提取：page 级请求捕获（context 级实测拿不到）"""
@@ -142,7 +154,7 @@ class TaobaoWebProtocolEngine(BaseEngine):
                         if state["topic"]:
                             return
                         u = request.url
-                        if ILIAD_API in u or "powermsg" in u:
+                        if any(a in u for a in self.TOPIC_ANCHORS):
                             m = re.search(r"[?&]data=([^&]+)", u)
                             raw = m.group(1) if m else request.post_data
                             if raw:
@@ -163,9 +175,11 @@ class TaobaoWebProtocolEngine(BaseEngine):
                     deadline = time.monotonic() + wait_limit
                     while state["topic"] is None and time.monotonic() < deadline:
                         await asyncio.sleep(1)
+                    # 全量 cookie（1688 网关要求 isg 等安全 cookie 齐全；
+                    # 淘宝网关仅 _m_h5_tk 必需——全量兼容两者）
                     state["cookies"] = {c["name"]: c["value"]
                                         for c in await context.cookies()
-                                        if c["name"] in ("_m_h5_tk", "_m_h5_tk_enc")}
+                                        if c.get("value")}
                 finally:
                     await context.close()
             return state
@@ -241,7 +255,7 @@ class TaobaoWebProtocolEngine(BaseEngine):
     # ---- 房间任务主循环 ----
 
     async def _run_room(self, room_id: str) -> None:
-        live_id = extract_live_id(room_id)
+        live_id = self._extract_live_id(room_id)
         logger.info(f"[taobao] room {room_id} connecting (live_id={live_id})")
         backoff = 15.0
         while not self._stop_flags.get(room_id):
@@ -297,18 +311,21 @@ class TaobaoWebProtocolEngine(BaseEngine):
 
     async def _poll_powermsg(self, room_id: str, client: MtopClient, cred: MtopCredential,
                              topic: str, live_id: str, last_msg_box: dict) -> None:
-        offset = str(int(time.time() * 1000))
+        offset = "0" if self.POWERMSG_INIT_OFFSET_ZERO else str(int(time.time() * 1000))
         loop = asyncio.get_running_loop()
         headers = {
             "x-biz-type": "powermsg",
             "x-biz-info": "namespace=1",
-            "referer": LIVE_URL.format(live_id=live_id),
+            "referer": self.PAGE_ORIGIN + "/",
+            "origin": self.PAGE_ORIGIN,
         }
         while not self._stop_flags.get(room_id):
             try:
                 data = {
-                    "topic": topic, "offset": offset, "pagesize": 10,
-                    "tag": "", "bizcode": 1, "sdkversion": "h5_3.4.2", "role": 3,
+                    "topic": topic, "offset": offset,
+                    "pagesize": self.POWERMSG_PAGESIZE,
+                    "tag": "", "bizcode": 1,
+                    "sdkversion": self.POWERMSG_SDK_VERSION, "role": 3,
                 }
                 result = await loop.run_in_executor(
                     None, client.get, POWERMSG_API, POWERMSG_VERSION,
@@ -379,6 +396,10 @@ class TaobaoWebProtocolEngine(BaseEngine):
                 logger.warning(f"[taobao] room {room_id} iliad error: "
                                f"{type(e).__name__}: {str(e)[:80]}")
                 await asyncio.sleep(5)
+
+    @staticmethod
+    def _extract_live_id(room_spec: str) -> str:
+        return extract_live_id(room_spec)
 
     @staticmethod
     def _envelope(room_id: str, mapped: dict) -> dict:

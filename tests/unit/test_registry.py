@@ -7,7 +7,7 @@ from danmaku_listener.engines.registry import PLATFORM_ENGINES, build_engine
 
 def test_all_platforms_registered():
     assert set(PLATFORM_ENGINES.keys()) == {
-        "bilibili", "douyu", "huya", "kuaishou", "wechat_channels", "douyin", "taobao"
+        "bilibili", "douyu", "huya", "kuaishou", "wechat_channels", "douyin", "taobao", "alibaba1688"
     }
 
 
@@ -19,5 +19,5 @@ def test_build_engine_returns_correct_type():
 
 
 def test_unknown_platform_clear_error():
-    with pytest.raises(KeyError, match="1688"):
-        build_engine("1688")
+    with pytest.raises(KeyError, match="pinduoduo"):
+        build_engine("pinduoduo")
