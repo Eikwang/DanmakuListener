@@ -19,6 +19,8 @@ import asyncio
 import json
 import re
 import time
+
+import requests
 from typing import Any, Dict, Optional
 
 import websockets  # noqa: F401  保留与其它协议引擎一致的导入形态
@@ -56,9 +58,11 @@ class TaobaoWebProtocolEngine(BaseEngine):
 
     platform = "taobao"
 
-    def __init__(self, state_store=None, domain: str = "taobao.com"):
+    def __init__(self, state_store=None, domain: str = "taobao.com",
+                 cookie_dir: str = "./cookie"):
         super().__init__(state_store=state_store)
         self._domain = domain  # 1688 复用：domain="1688.com"（API 名实测后配置）
+        self._cookie_dir = cookie_dir  # profile 持久化目录（wxlivespy 同款 userDataDir）
         self._room_tasks: Dict[str, asyncio.Task] = {}
         self._stop_flags: Dict[str, bool] = {}
 
@@ -92,90 +96,89 @@ class TaobaoWebProtocolEngine(BaseEngine):
 
     # ---- 凭证阶段（Playwright）----
 
+    def _profile_dir(self) -> str:
+        """浏览器 profile 持久化目录（wxlivespy 同款 userDataDir 模式）——
+        滑块验证通过一次后设备指纹/cookie 持久保存，后续启动免验证"""
+        import os
+
+        d = f"{self._cookie_dir}/taobao_profile"
+        os.makedirs(d, exist_ok=True)
+        return d
+
     async def _fetch_credentials(self, room_id: str) -> tuple:
         """打开直播间页 → topic + cookies
 
-        风控处理（2026-09-29 实测）：无头访问高频触发滑块验证——检测到滑块改
-        可见窗口让用户拖一下（一次性，通过后页面自动恢复弹幕轮询）。
-        等待事件驱动：topic 一出现立即返回（headless 上限 45s / 可见 150s）。
+        风控处理（2026-09-29 实测校准）：淘宝 noCaptcha 检测自动化指纹
+        （navigator.webdriver 等）——自动化浏览器里**人工拖滑块也会失败**
+        （error rTVSNv）。对策：launch_persistent_context（profile 持久化）
+        + 反检测注入 + AutomationControlled 禁用；首次验证通过后 profile
+        保存，后续启动免验证。等待事件驱动（headless 45s / 可见 240s）。
         """
         from playwright.async_api import async_playwright
 
         live_id = extract_live_id(room_id)
         live_url = LIVE_URL.format(live_id=live_id)
 
-        async def attempt(headless: bool, wait_limit: float) -> Optional[Dict[str, Any]]:
-            state: Dict[str, Any] = {"topic": None, "slider": False, "cookies": {}}
+        async def attempt(wait_limit: float) -> Optional[Dict[str, Any]]:
+            """单轮 headless 凭证提取：page 级请求捕获（context 级实测拿不到）"""
+            state: Dict[str, Any] = {"topic": None, "cookies": {}}
             async with async_playwright() as pw:
-                browser = await pw.chromium.launch(headless=headless)
+                context = await pw.chromium.launch_persistent_context(
+                    self._profile_dir(),
+                    headless=True,
+                    user_agent=UA,
+                    viewport={"width": 1280, "height": 800},
+                    args=["--disable-blink-features=AutomationControlled",
+                          "--disable-setuid-sandbox",
+                          "--hide-crash-restore-bubble"],
+                )
                 try:
-                    context = await browser.new_context(user_agent=UA)
-                    page = await context.new_page()
+                    await context.add_init_script(
+                        "Object.defineProperty(navigator, 'webdriver', "
+                        "{get: () => undefined});")
+                    page = context.pages[0] if context.pages else await context.new_page()
 
                     def on_request(request) -> None:
                         if state["topic"]:
                             return
-                        if ILIAD_API in request.url or "powermsg" in request.url:
-                            m = re.search(r"[?&]data=([^&]+)", request.url)
+                        u = request.url
+                        if ILIAD_API in u or "powermsg" in u:
+                            m = re.search(r"[?&]data=([^&]+)", u)
                             raw = m.group(1) if m else request.post_data
                             if raw:
                                 try:
-                                    data = json.loads(raw)
+                                    from urllib.parse import unquote
+                                    data = json.loads(unquote(raw))
                                     if data.get("topic"):
                                         state["topic"] = data["topic"]
                                 except json.JSONDecodeError:
                                     pass
 
-                    context.on("request", on_request)
+                    page.on("request", on_request)
                     try:
                         await page.goto(live_url, timeout=30000)
                     except Exception as e:  # noqa: BLE001
                         logger.debug(f"[taobao] room {room_id} page goto warning: {e}")
 
-                    # 滑块检测（无头轮）：页面含验证文案 → 改可见窗口
-                    if headless:
-                        await asyncio.sleep(4)
-                        try:
-                            content = await page.content()
-                            if ("完成验证" in content or "拖动" in content
-                                    or "punish" in page.url):
-                                state["slider"] = True
-                                return state
-                        except Exception:  # noqa: BLE001
-                            pass
-
                     deadline = time.monotonic() + wait_limit
-                    auto_slide_tried = False
                     while state["topic"] is None and time.monotonic() < deadline:
-                        if not headless:
-                            try:
-                                content = await page.content()
-                                if ("完成验证" in content or "拖动" in content) and not auto_slide_tried:
-                                    auto_slide_tried = True
-                                    state["slider"] = True
-                                    await self._emit_system_status(
-                                        room_id, "淘宝风控滑块验证——自动尝试中，若失败请手动拖动滑块")
-                                    await self._try_auto_slide(page)
-                            except Exception:  # noqa: BLE001
-                                pass
                         await asyncio.sleep(1)
                     state["cookies"] = {c["name"]: c["value"]
                                         for c in await context.cookies()
                                         if c["name"] in ("_m_h5_tk", "_m_h5_tk_enc")}
                 finally:
-                    await browser.close()
+                    await context.close()
             return state
 
-        # 第一轮无头（正常路径）；滑块 → 可见窗口重试（用户拖滑块，一次性）
-        state = await attempt(headless=True, wait_limit=45.0)
-        if state["slider"] or not state["topic"]:
-            await self._emit_system_status(
-                room_id, "淘宝风控验证——已弹出浏览器窗口，请拖动滑块完成验证（一次性）")
-            state = await attempt(headless=False, wait_limit=150.0)
+        state = await attempt(wait_limit=45.0)
+        if not state["topic"]:
+            # 二次尝试（页面偶发加载慢/轮询冷启动）
+            state = await attempt(wait_limit=45.0)
 
         if not state["topic"]:
             raise RuntimeError(
-                "taobao.credential.topic_failed: 未能获取 topic（未开播/风控未通过/页面加载慢）")
+                "taobao.credential.topic_failed: 未能获取 topic（未开播/风控/页面加载慢——"
+                "持续失败可稍后重试）")
         if not state["cookies"].get("_m_h5_tk"):
             raise RuntimeError("taobao.credential.token_failed: 未获取 _m_h5_tk（风控升级特征）")
         logger.info(f"[taobao] room {room_id} credentials ready (topic={state['topic'][:24]}...)")
@@ -244,24 +247,27 @@ class TaobaoWebProtocolEngine(BaseEngine):
         while not self._stop_flags.get(room_id):
             try:
                 topic, cred = await self._fetch_credentials(room_id)
-                session = requests.Session()
-                session.headers.update({"User-Agent": UA})
-                for k, v in cred.cookies.items():
-                    session.cookies.set(k, v)
-                client = MtopClient(self._domain, UA, session)
 
-                last_msg = time.monotonic()
+                def _make_client() -> MtopClient:
+                    # 每通道独立 Session（两轮询并发跨线程共享 Session 会竞争失败）
+                    s = requests.Session()
+                    s.headers.update({"User-Agent": UA})
+                    for k, v in cred.cookies.items():
+                        s.cookies.set(k, v)
+                    return MtopClient(self._domain, UA, s)
+
+                last_msg_box = {"t": time.monotonic()}
                 poll_task = asyncio.create_task(
-                    self._poll_powermsg(room_id, client, cred, topic, live_id,
-                                        lambda: last_msg))
+                    self._poll_powermsg(room_id, _make_client(), cred, topic, live_id,
+                                        last_msg_box))
                 comment_task = asyncio.create_task(
-                    self._poll_comments(room_id, client, cred, topic))
+                    self._poll_comments(room_id, _make_client(), cred, topic))
                 self._set_status(self.status.__class__.RUNNING)
                 try:
                     while not self._stop_flags.get(room_id):
                         await asyncio.sleep(2)
                         # 30s 无消息 → 凭证过期/风控 → 整轮重建（Eng：主通道断流检测）
-                        if time.monotonic() - last_msg > NO_MESSAGE_TIMEOUT:
+                        if time.monotonic() - last_msg_box["t"] > NO_MESSAGE_TIMEOUT:
                             raise RuntimeError(
                                 "taobao.no_message_timeout: 30s 无消息（凭证过期/风控）")
                 finally:
@@ -290,7 +296,7 @@ class TaobaoWebProtocolEngine(BaseEngine):
     # ---- 主通道：powermsg 长轮询 ----
 
     async def _poll_powermsg(self, room_id: str, client: MtopClient, cred: MtopCredential,
-                             topic: str, live_id: str, last_msg_ref) -> None:
+                             topic: str, live_id: str, last_msg_box: dict) -> None:
         offset = str(int(time.time() * 1000))
         loop = asyncio.get_running_loop()
         headers = {
@@ -312,7 +318,7 @@ class TaobaoWebProtocolEngine(BaseEngine):
                     offset = timestamps[-1].get("offset", offset)
                     for td in timestamps:
                         await self._parse_powermsg_item(room_id, td, ts=int(time.time()))
-                    last_msg_ref()
+                    last_msg_box["t"] = time.monotonic()
                 await asyncio.sleep(POLL_INTERVAL_POWERMSG)
             except MtopError as e:
                 logger.warning(f"[taobao] room {room_id} powermsg error: {e}")
@@ -358,6 +364,7 @@ class TaobaoWebProtocolEngine(BaseEngine):
                     mapped = self._map_comment(room_id, c, self.next_seq(room_id),
                                                int(time.time()))
                     if mapped:
+                        last_msg_box["t"] = time.monotonic()
                         await self._emit_message(mapped)
                 await asyncio.sleep(max(int(delay_ms), 2000) / 1000.0)
             except MtopError as e:
