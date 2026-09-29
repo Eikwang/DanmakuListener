@@ -11,8 +11,8 @@ serve 与 AUTOlive 集成的统一入口：按平台构造契约 v1 引擎。
 from typing import Dict, Optional
 
 from danmaku_listener.engines.base import BaseEngine
-from danmaku_listener.engines.douyin_grab import DouyinBarrageGrabEngine
 from danmaku_listener.engines.protocol.bilibili import BilibiliProtocolEngine
+from danmaku_listener.engines.protocol.douyin import DouyinWebProtocolEngine
 from danmaku_listener.engines.protocol.douyu import DouyuProtocolEngine
 from danmaku_listener.engines.protocol.huya import HuyaProtocolEngine
 from danmaku_listener.engines.protocol.kuaishou import KuaishouProtocolEngine
@@ -21,21 +21,22 @@ from danmaku_listener.persistence.room_state_store import RoomStateStore
 
 PLATFORM_ENGINES = {
     "bilibili": BilibiliProtocolEngine,
+    # ADR-001 修订（2026-09-29）：抖音原生 Web WS 直连（T0 冒烟 PASS）——
+    # BarrageGrab 桥接按用户裁定撤销（douyin_grab.py 待 §4C 验证后删除）
+    "douyin": DouyinWebProtocolEngine,
     "douyu": DouyuProtocolEngine,
     "huya": HuyaProtocolEngine,
     "kuaishou": KuaishouProtocolEngine,
     "wechat_channels": WechatChannelsEngine,
-    # ADR-001：独立代理进程（DouyinBarrageGrab）+ WS IPC——本引擎为其桥接层
-    "douyin": DouyinBarrageGrabEngine,
 }
 
 #: 引擎可用性 warnings（CEO-2：加房间响应透出，前端可见）
 PLATFORM_WARNINGS = {
     "huya": "虎牙 Tars 协议直连（2026-09-28 实测打通：DANMU/GIFT）；礼物名暂为类型编号",
     "kuaishou": "快手 web 直播间已强制游客登录（2026-09 实测）——首次添加弹登录窗口，登录后自动监听",
+    "douyin": "抖音 Web WS 原生直连（2026-09 T0 冒烟通过：DANMU 实测）——无需外部程序；"
+              "签名资产失效或风控升级时报三段式错误",
     "wechat_channels": "后台页面/接口结构待实测校准（微信更新可能变更）",
-    "douyin": "需前置：安装 BarrageGrab 根证书 → 管理员启动 BarrageGrab（系统代理模式，"
-              "内置 WS 服务默认 ws://127.0.0.1:8888）→ 再添加房间；未启动时连接会自动重试",
 }
 
 

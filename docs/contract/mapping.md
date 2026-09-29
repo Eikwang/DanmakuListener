@@ -21,3 +21,8 @@
   （ordinaryroad-live-chat-client / blivedm / DouyinBarrageGrab）仅作结构对照。
 - 平台特有字段（如抖音 Appid/EnterTipType、B 站徽章）放入对应载荷的 optional 字段，
   不新增消息类型（additive-only）。
+- **抖音 GIFT.count 语义（2026-09-29）**：取 GiftMessage.totalCount 原样透传——
+  **累计值**（连击期间持续增长），下游（AUTOlive 触发逻辑）勿按增量消费；
+  groupCount/repeatCount/comboCount 不参与（连击合并 defer，见 TODOS）。
+- **抖音粉丝团回退**：Web WS 路线 proto 的 FansclubMessage 字段语义未实测，
+  无法可靠映射—— SOCIAL 暂不承载粉丝团事件（TODOS）。

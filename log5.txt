@@ -1,0 +1,170 @@
+(D:\AI\EDTalk\runtime312) PS D:\AI\DanmakuListener> python -m danmaku_listener serve --web
+2026-09-28 16:11:10.656 | INFO     | danmaku_listener.push.ws_server:start:57 - PushServer listening on ws://127.0.0.1:8765/ws
+{"web_console": "http://localhost:8080"}
+{"service": "danmaku-serve", "ws": "ws://127.0.0.1:8765/ws", "auth": "loopback-only (未配置 token)", "contract_version": "1.0.0", "engines_online": []}
+serve: no message source yet — engines land with phases 1-5 (use --replay to smoke-test the channel)
+2026-09-28 16:11:11.277 | INFO     | danmaku_listener.web.bridge:_load_blocked_keywords:222 - Loaded 0 blocked keywords
+2026-09-28 16:13:10.625 | INFO     | danmaku_listener.engines.bilibili_login:run_login_flow:106 - [bilibili] login flow OK (13 cookies saved)
+2026-09-28 16:13:10.802 | INFO     | danmaku_listener.engines.protocol.bilibili:_run_room:204 - [bilibili] room 27695110 connecting
+2026-09-28 16:13:11.745 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://zj-cn-live-comet.chat.bilibili.com:2245/sub
+2026-09-28 16:13:11.773 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://zj-cn-live-comet.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:13:11.881 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://zj-cn-live-comet.chat.bilibili.com:2245/sub
+2026-09-28 16:13:11.911 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://zj-cn-live-comet.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:13:12.009 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://zj-cn-live-comet.chat.bilibili.com:2245/sub
+2026-09-28 16:13:12.038 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://zj-cn-live-comet.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:13:12.296 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://bd-bj-live-comet-10.chat.bilibili.com:2245/sub
+2026-09-28 16:13:12.341 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://bd-bj-live-comet-10.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:13:12.599 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://bd-sz-live-comet-09.chat.bilibili.com:2245/sub
+2026-09-28 16:13:12.642 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://bd-sz-live-comet-09.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:13:12.711 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://broadcastlv.chat.bilibili.com:2245/sub
+2026-09-28 16:13:12.718 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://broadcastlv.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:13:12.718 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:246 - [bilibili] room 27695110 error: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:13:28.132 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://zj-cn-live-comet.chat.bilibili.com:2245/sub
+2026-09-28 16:13:28.160 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://zj-cn-live-comet.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:13:28.269 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://zj-cn-live-comet.chat.bilibili.com:2245/sub
+2026-09-28 16:13:28.296 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://zj-cn-live-comet.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:13:28.395 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://zj-cn-live-comet.chat.bilibili.com:2245/sub
+2026-09-28 16:13:28.423 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://zj-cn-live-comet.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:13:28.575 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://bd-bj-live-comet-10.chat.bilibili.com:2245/sub
+2026-09-28 16:13:28.628 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://bd-bj-live-comet-10.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:13:28.902 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://bd-sz-live-comet-07.chat.bilibili.com:2245/sub
+2026-09-28 16:13:28.943 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://bd-sz-live-comet-07.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:13:29.014 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://broadcastlv.chat.bilibili.com:2245/sub
+2026-09-28 16:13:29.022 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://broadcastlv.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:13:29.022 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:246 - [bilibili] room 27695110 error: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:13:44.437 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://zj-cn-live-comet.chat.bilibili.com:2245/sub
+2026-09-28 16:13:44.468 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://zj-cn-live-comet.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:13:44.565 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://zj-cn-live-comet.chat.bilibili.com:2245/sub
+2026-09-28 16:13:44.593 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://zj-cn-live-comet.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:13:44.707 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://zj-cn-live-comet.chat.bilibili.com:2245/sub
+2026-09-28 16:13:44.734 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://zj-cn-live-comet.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:13:45.002 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://bd-bj-live-comet-12.chat.bilibili.com:2245/sub
+2026-09-28 16:13:45.047 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://bd-bj-live-comet-12.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:13:45.112 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://bd-gz-live-comet-09.chat.bilibili.com:2245/sub
+2026-09-28 16:13:45.120 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://bd-gz-live-comet-09.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:13:45.157 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://broadcastlv.chat.bilibili.com:2245/sub
+2026-09-28 16:13:45.164 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://broadcastlv.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:13:45.164 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:246 - [bilibili] room 27695110 error: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:14:00.565 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://zj-cn-live-comet.chat.bilibili.com:2245/sub
+2026-09-28 16:14:00.596 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://zj-cn-live-comet.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:14:00.700 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://zj-cn-live-comet.chat.bilibili.com:2245/sub
+2026-09-28 16:14:00.725 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://zj-cn-live-comet.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:14:00.814 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://zj-cn-live-comet.chat.bilibili.com:2245/sub
+2026-09-28 16:14:00.842 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://zj-cn-live-comet.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:14:01.004 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://bd-gz-live-comet-13.chat.bilibili.com:2245/sub
+2026-09-28 16:14:01.014 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://bd-gz-live-comet-13.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:14:01.178 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://bd-gz-live-comet-12.chat.bilibili.com:2245/sub
+2026-09-28 16:14:01.188 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://bd-gz-live-comet-12.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:14:01.246 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://broadcastlv.chat.bilibili.com:2245/sub
+2026-09-28 16:14:01.254 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://broadcastlv.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:14:01.254 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:246 - [bilibili] room 27695110 error: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:14:16.673 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://zj-cn-live-comet.chat.bilibili.com:2245/sub
+2026-09-28 16:14:16.699 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://zj-cn-live-comet.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:14:16.786 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://zj-cn-live-comet.chat.bilibili.com:2245/sub
+2026-09-28 16:14:16.813 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://zj-cn-live-comet.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:14:16.909 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://zj-cn-live-comet.chat.bilibili.com:2245/sub
+2026-09-28 16:14:16.937 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://zj-cn-live-comet.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:14:17.189 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://bd-bj-live-comet-06.chat.bilibili.com:2245/sub
+2026-09-28 16:14:17.232 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://bd-bj-live-comet-06.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:14:17.365 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://bd-bj-live-comet-12.chat.bilibili.com:2245/sub
+2026-09-28 16:14:17.405 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://bd-bj-live-comet-12.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:14:17.436 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://broadcastlv.chat.bilibili.com:2245/sub
+2026-09-28 16:14:17.444 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://broadcastlv.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:14:17.445 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:246 - [bilibili] room 27695110 error: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:14:32.864 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://zj-cn-live-comet.chat.bilibili.com:2245/sub
+2026-09-28 16:14:32.890 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://zj-cn-live-comet.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:14:32.982 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://zj-cn-live-comet.chat.bilibili.com:2245/sub
+2026-09-28 16:14:33.009 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://zj-cn-live-comet.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:14:33.125 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://zj-cn-live-comet.chat.bilibili.com:2245/sub
+2026-09-28 16:14:33.152 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://zj-cn-live-comet.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:14:33.314 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://bd-gz-live-comet-14.chat.bilibili.com:2245/sub
+2026-09-28 16:14:33.323 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://bd-gz-live-comet-14.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:14:33.455 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://bd-bj-live-comet-12.chat.bilibili.com:2245/sub
+2026-09-28 16:14:33.497 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://bd-bj-live-comet-12.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:14:33.565 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://broadcastlv.chat.bilibili.com:2245/sub
+2026-09-28 16:14:33.595 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://broadcastlv.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:14:33.595 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:246 - [bilibili] room 27695110 error: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:14:49.081 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://zj-cn-live-comet.chat.bilibili.com:2245/sub
+2026-09-28 16:14:49.112 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://zj-cn-live-comet.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:14:49.206 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://zj-cn-live-comet.chat.bilibili.com:2245/sub
+2026-09-28 16:14:49.234 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://zj-cn-live-comet.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:14:49.345 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://zj-cn-live-comet.chat.bilibili.com:2245/sub
+2026-09-28 16:14:49.372 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://zj-cn-live-comet.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:14:49.496 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://bd-sz-live-comet-07.chat.bilibili.com:2245/sub
+2026-09-28 16:14:49.535 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://bd-sz-live-comet-07.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:14:49.660 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://bd-sz-live-comet-11.chat.bilibili.com:2245/sub
+2026-09-28 16:14:49.699 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://bd-sz-live-comet-11.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:14:49.754 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://broadcastlv.chat.bilibili.com:2245/sub
+2026-09-28 16:14:49.761 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://broadcastlv.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:14:49.761 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:246 - [bilibili] room 27695110 error: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:15:05.141 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://zj-cn-live-comet.chat.bilibili.com:2245/sub
+2026-09-28 16:15:05.167 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://zj-cn-live-comet.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:15:05.267 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://zj-cn-live-comet.chat.bilibili.com:2245/sub
+2026-09-28 16:15:05.296 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://zj-cn-live-comet.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:15:05.385 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://zj-cn-live-comet.chat.bilibili.com:2245/sub
+2026-09-28 16:15:05.418 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://zj-cn-live-comet.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:15:05.449 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://bd-gz-live-comet-12.chat.bilibili.com:2245/sub
+2026-09-28 16:15:05.457 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://bd-gz-live-comet-12.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:15:05.692 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://bd-sz-live-comet-12.chat.bilibili.com:2245/sub
+2026-09-28 16:15:05.726 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://bd-sz-live-comet-12.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:15:05.753 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://broadcastlv.chat.bilibili.com:2245/sub
+2026-09-28 16:15:05.760 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://broadcastlv.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:15:05.760 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:246 - [bilibili] room 27695110 error: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:15:21.154 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://zj-cn-live-comet.chat.bilibili.com:2245/sub
+2026-09-28 16:15:21.179 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://zj-cn-live-comet.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:15:21.270 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://zj-cn-live-comet.chat.bilibili.com:2245/sub
+2026-09-28 16:15:21.298 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://zj-cn-live-comet.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:15:21.389 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://zj-cn-live-comet.chat.bilibili.com:2245/sub
+2026-09-28 16:15:21.416 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://zj-cn-live-comet.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:15:21.568 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://bd-gz-live-comet-11.chat.bilibili.com:2245/sub
+2026-09-28 16:15:21.578 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://bd-gz-live-comet-11.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:15:21.696 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://bd-sz-live-comet-07.chat.bilibili.com:2245/sub
+2026-09-28 16:15:21.734 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://bd-sz-live-comet-07.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:15:21.777 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://broadcastlv.chat.bilibili.com:2245/sub
+2026-09-28 16:15:21.785 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:236 - [bilibili] room 27695110 ws wss://broadcastlv.chat.bilibili.com:2245/sub failed: ConnectionClosedError: no close frame received or sent
+2026-09-28 16:15:21.786 | WARNING  | danmaku_listener.engines.protocol.bilibili:_run_room:246 - [bilibili] room 27695110 error: ConnectionClosedError: no close frame received or sent
+Traceback (most recent call last):
+  File "D:\AI\EDTalk\runtime312\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\AI\EDTalk\runtime312\Lib\asyncio\base_events.py", line 691, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "D:\AI\DanmakuListener\danmaku_listener\__main__.py", line 234, in cmd_serve
+    await asyncio.Event().wait()
+  File "D:\AI\EDTalk\runtime312\Lib\asyncio\locks.py", line 212, in wait
+    await fut
+asyncio.exceptions.CancelledError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "D:\AI\DanmakuListener\danmaku_listener\__main__.py", line 260, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "D:\AI\DanmakuListener\danmaku_listener\__main__.py", line 255, in main
+    return asyncio.run(cmd_serve(args.config, getattr(args, "replay", None), getattr(args, "web", False)))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\AI\EDTalk\runtime312\Lib\asyncio\runners.py", line 195, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "D:\AI\EDTalk\runtime312\Lib\asyncio\runners.py", line 123, in run
+    raise KeyboardInterrupt()
+KeyboardInterrupt
+(D:\AI\EDTalk\runtime312) PS D:\AI\DanmakuListener>
+(D:\AI\EDTalk\runtime312) PS D:\AI\DanmakuListener> python -m danmaku_listener serve --web
+2026-09-28 16:28:24.789 | INFO     | danmaku_listener.push.ws_server:start:57 - PushServer listening on ws://127.0.0.1:8765/ws
+{"web_console": "http://localhost:8080"}
+{"service": "danmaku-serve", "ws": "ws://127.0.0.1:8765/ws", "auth": "loopback-only (未配置 token)", "contract_version": "1.0.0", "engines_online": []}
+serve: no message source yet — engines land with phases 1-5 (use --replay to smoke-test the channel)
+2026-09-28 16:28:27.113 | INFO     | danmaku_listener.web.bridge:_load_blocked_keywords:222 - Loaded 0 blocked keywords
+2026-09-28 16:28:42.631 | INFO     | danmaku_listener.web.bridge:add_room:469 - *Room added: bilibili:27695110 (protocol:bilibili)
+2026-09-28 16:28:42.631 | INFO     | danmaku_listener.engines.protocol.bilibili:_run_room:204 - [bilibili] room 27695110 connecting
+2026-09-28 16:28:43.234 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 27695110 auth sent to wss://zj-cn-live-comet.chat.bilibili.com:2245/sub
+2026-09-28 16:28:43.259 | INFO     | danmaku_listener.engines.protocol.bilibili:_read_loop:310 - [bilibili] room 27695110 auth accepted
+2026-09-28 16:31:46.409 | INFO     | danmaku_listener.web.bridge:add_room:469 - *Room added: bilibili:22427859 (protocol:bilibili)
+2026-09-28 16:31:46.410 | INFO     | danmaku_listener.engines.protocol.bilibili:_run_room:204 - [bilibili] room 22427859 connecting
+2026-09-28 16:31:46.862 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:274 - [bilibili] room 22427859 auth sent to wss://zj-cn-live-comet.chat.bilibili.com:2245/sub
+2026-09-28 16:31:46.891 | INFO     | danmaku_listener.engines.protocol.bilibili:_read_loop:310 - [bilibili] room 22427859 auth accepted

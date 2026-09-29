@@ -1,0 +1,41 @@
+(D:\AI\EDTalk\runtime312) PS D:\AI\DanmakuListener> python tools/bili_diag.py 27695110 --duration 60
+auth sent to wss://zj-cn-live-comet.chat.bilibili.com:2245/sub
+{
+ "frames": 3,
+ "proto": {
+  "1": 2,
+  "3": 1
+ },
+ "cmds": {
+  "INTERACT_WORD_V2": 2
+ },
+ "danmu_ok": 0,
+ "danmu_fail": 0,
+ "danmu_fail_samples": [],
+ "decompress_err": 0,
+ "json_err": 0
+}
+(D:\AI\EDTalk\runtime312) PS D:\AI\DanmakuListener> python tools/bili_diag.py 27695110 --duration 60
+auth sent to wss://zj-cn-live-comet.chat.bilibili.com:2245/sub
+{
+ "frames": 1,
+ "proto": {
+  "1": 1
+ },
+ "cmds": {},
+ "danmu_ok": 0,
+ "danmu_fail": 0,
+ "danmu_fail_samples": [],
+ "decompress_err": 0,
+ "json_err": 0
+}
+(D:\AI\EDTalk\runtime312) PS D:\AI\DanmakuListener> python -m danmaku_listener serve --web
+2026-09-28 15:17:40.802 | INFO     | danmaku_listener.push.ws_server:start:57 - PushServer listening on ws://127.0.0.1:8765/ws
+{"web_console": "http://localhost:8080"}
+{"service": "danmaku-serve", "ws": "ws://127.0.0.1:8765/ws", "auth": "loopback-only (未配置 token)", "contract_version": "1.0.0", "engines_online": []}
+serve: no message source yet — engines land with phases 1-5 (use --replay to smoke-test the channel)
+2026-09-28 15:18:49.722 | INFO     | danmaku_listener.web.bridge:_load_blocked_keywords:173 - Loaded 0 blocked keywords
+2026-09-28 15:20:17.884 | INFO     | danmaku_listener.web.bridge:add_room:397 - *Room added: bilibili:27695110 (protocol:bilibili)
+2026-09-28 15:20:17.885 | INFO     | danmaku_listener.engines.protocol.bilibili:_run_room:155 - [bilibili] room 27695110 connecting
+2026-09-28 15:20:18.521 | INFO     | danmaku_listener.engines.protocol.bilibili:_serve_room:225 - [bilibili] room 27695110 auth sent to wss://zj-cn-live-comet.chat.bilibili.com:2245/sub
+2026-09-28 15:20:18.548 | INFO     | danmaku_listener.engines.protocol.bilibili:_read_loop:261 - [bilibili] room 27695110 auth accepted

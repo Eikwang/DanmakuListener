@@ -444,10 +444,8 @@ class DanmakuBridge:
         if room_key in self._rooms:
             raise RoomError(f"Room already exists: {room_key}", status=409)
 
-        # 3. douyin（ADR-001）：BarrageGrab 独立进程 WS 桥接——引擎连接失败自动重试，
-        #    前置条件（证书+BarrageGrab 启动）经 PLATFORM_WARNINGS 透出
-        if spec.platform == "douyin":
-            pass
+        # 3. douyin：原生 Web WS 直连（2026-09-29 registry 切换）——无特判，
+        #    前置条件（无外部程序）经 PLATFORM_WARNINGS 透出
 
         # 4. 构造/复用 registry 引擎实例（粒度：协议每平台一实例；视频号每房间一实例）
         engine = self._engine_instances.get(spec.platform)

@@ -28,16 +28,20 @@
 - [ ] 游客态优先：能用游客 token 的平台（B站/斗鱼/虎牙）不用登录账号
 - [ ] 小号池管理：账号来源、责任人、失效更换流程记录于 ops 手册
 
-## 4. 抖音特有项（Eng R 项，2026-09-28 路线确认）
+## 4. 抖音特有项（2026-09-29 路线确认：Web WS 原生直连）
 
-- **技术路线**：DouyinBarrageGrab 同款代理抓包（ADR-001 独立代理进程 + WS IPC）——
-  BarrageGrab（编译版）作系统代理拦截本机弹幕源，本系统经其内置 WS（8888）接收
-  转契约。barrage-fly 的 Web 签名路线未采用（签名风控维护成本高）
-- [ ] **根 CA 安装**：BarrageGrab 自签名证书，安装范围为本机信任存储（仅监听机器）；
-  卸载步骤：证书管理器删除 BarrageGrab 证书项（书面化于 BarrageGrab 官方文档）
-- [x] **hook 注入不启用**：`liveCompanHookSwitch=false`（默认关闭）——仅系统代理模式，
-  无直播伴侣进程注入；若未来启用 hook 需**单独知情确认**
-- [ ] 运行期确认：BarrageGrab 版本与直播伴侣版本兼容（更新后失效 → ROUTE_FAILED 提示）
+- **技术路线**：barrage-fly SDK 同款 Web 端 WS 直连（webcast5 入口 + quickjs 本地签名，
+  webmssdk.js 为 barrage-fly 内嵌 MIT 提取版）——T0 冒烟实测通过（真实房间 35 条弹幕）
+- **无根 CA**（不走代理抓包）、**无 hook**（无进程注入）、**无外部程序**——环境前置清零
+- **游客监听**：ttwid 游客获取 + msToken 随机 116 字符属**协议模拟而非身份伪造**
+  （不使用任何真实用户身份；B站/斗鱼/虎牙游客路线同一框架）
+- [x] **只监听不发送**：引擎无任何 sendDanmu/礼物 API 调用路径
+- [ ] **风控升级预案**：ttwid 被拒/WS 403 → 三段式错误；持续命中 → 登录态备选路线
+  （复用快手登录窗口模式，TODOS 登记）；webmssdk 上游 release 跟踪（TODOS）
+- [ ] **签名资产 provenance**：webmssdk.js（barrage-fly 1.5.8 MIT 版 by hua0512）、
+  douyin.proto（HaoDong108/DouyinBarrageGrab message.proto）——刷新流程=重新提取上游
+- [ ] **官方开放平台调研**：抖音开放平台直播评论 API 是否覆盖游客监听/企业资质要求——
+  待调研登记（TODOS）
 
 ## 4.5 B站弹幕限流与登录 cookie（实测确认 2026-09-28，两轮）
 

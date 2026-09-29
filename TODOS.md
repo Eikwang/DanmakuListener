@@ -27,3 +27,34 @@
 - **Why**: 前端展示礼物名（当前 GIFT.gift_name="4" 可读性差）。
 - **Effort**: human S / CC M（baseinfo 结构逆向 + 实测）| **Depends on**: 无
 - 来源: 虎牙实测（2026-09-28）——SDK 2024 的 cdnws+getPropsList 路线已失效
+
+## P3: 抖音登录态备选路线（风控升级预案）
+- **What**: 若抖音游客路线被风控拦截（ttwid 拒/WS 403 持续命中，reason_code=
+  douyin.room_init.ttwid_failed 等），复用快手登录窗口模式（受控浏览器扫码 →
+  storage_state → 引擎带登录 cookie）。
+- **Why**: 抖音是风控重点平台；快手已发生同类升级（先例）。触发条件写明：三段式
+  reason_code 命中风控特征时向用户提示。
+- **Effort**: human S / CC M | **Depends on**: 无（模式已验证）
+- 来源: /autoplan CEO 评审 2.3（2026-09-28）
+
+## P3: 抖音开放平台官方 API 调研
+- **What**: 调研抖音开放平台直播评论 API：是否覆盖游客监听场景、是否需企业资质、
+  限流与费用。若可行则作为长期最稳替代路线评估。
+- **Why**: 逆向 WS 本质是 treadmill；官方 API 为合规最优解（若可得）。
+- **Effort**: human S / CC S | **Depends on**: 无
+- 来源: /autoplan CEO 评审 4.1（2026-09-28）
+
+## P3: webmssdk 上游 release 跟踪（抖音签名资产预警）
+- **What**: 定期检查 barrage-fly SDK / hua0512 上游仓库 release——webmssdk.js 更新
+  即预警（抖音签名轮换先兆）；刷新流程见引擎 docstring provenance。
+- **Why**: 签名资产是抖音引擎单点（失效=全部抖音房间下线，自检可感知但无自愈）。
+- **Effort**: human S / CC S | **Depends on**: 无
+- 来源: /autoplan CEO 评审 2.2（2026-09-28）
+
+## P3: 抖音增强项（粉丝团/连击合并/表情细分）
+- **What**: ① 粉丝团监听（proto 有 FansclubMessage 但字段语义未实测，无法可靠映射）
+  ② 礼物连击合并（GIFT.count 当前为 totalCount 累计值透传——**下游勿按增量消费**）
+  ③ ChatMessage 表情/emoji 消息细分。
+- **Why**: 增强项，不阻塞核心监听；契约 GIFT.count 语义已在计划标注（累计值）。
+- **Effort**: human M / CC M | **Depends on**: 实测字段语义样本
+- 来源: /autoplan CEO/Eng 评审（2026-09-28）

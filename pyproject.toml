@@ -13,11 +13,13 @@ authors = [{ name = "DanmakuListener contributors" }]
 dependencies = [
     "aiohttp>=3.8.0",
     "aiohttp-cors>=0.7.0",
-    "websockets>=10.0",
+    "websockets>=14.0",
     "pydantic>=2.5.0",
     "pydantic-settings>=2.1.0",
     "loguru>=0.7.0",
-    "protobuf>=4.21.0",
+    "protobuf>=7.35.1,<8",
+    "quickjs>=1.19.0",
+    "requests>=2.31.0",
     "psutil>=5.9.0",
     "qrcode>=7.0",
     "tomlkit>=0.12.0",
@@ -46,6 +48,7 @@ include = ["danmaku_listener*"]
 
 [tool.setuptools.package-data]
 "danmaku_listener.web" = ["static/*", "blocked_keywords.json"]
+"danmaku_listener.engines.protocol.douyin_assets" = ["*.js", "*.proto"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
