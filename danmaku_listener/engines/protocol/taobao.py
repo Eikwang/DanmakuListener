@@ -93,55 +93,147 @@ class TaobaoWebProtocolEngine(BaseEngine):
     # ---- 凭证阶段（Playwright）----
 
     async def _fetch_credentials(self, room_id: str) -> tuple:
-        """打开直播间页 → topic + cookies（async Playwright；失败抛 RuntimeError）"""
+        """打开直播间页 → topic + cookies
+
+        风控处理（2026-09-29 实测）：无头访问高频触发滑块验证——检测到滑块改
+        可见窗口让用户拖一下（一次性，通过后页面自动恢复弹幕轮询）。
+        等待事件驱动：topic 一出现立即返回（headless 上限 45s / 可见 150s）。
+        """
         from playwright.async_api import async_playwright
 
         live_id = extract_live_id(room_id)
         live_url = LIVE_URL.format(live_id=live_id)
-        topic: Optional[str] = None
-        cookies: Dict[str, str] = {}
 
-        async with async_playwright() as pw:
-            browser = await pw.chromium.launch(headless=True)
-            try:
-                context = await browser.new_context(user_agent=UA)
-                page = await context.new_page()
-
-                def on_request(request) -> None:
-                    nonlocal topic
-                    if topic:
-                        return
-                    if ILIAD_API in request.url:
-                        m = re.search(r"[?&]data=([^&]+)", request.url)
-                        if m:
-                            try:
-                                data = json.loads(m.group(1))
-                                topic = data.get("topic")
-                            except json.JSONDecodeError:
-                                pass
-
-                context.on("request", on_request)
+        async def attempt(headless: bool, wait_limit: float) -> Optional[Dict[str, Any]]:
+            state: Dict[str, Any] = {"topic": None, "slider": False, "cookies": {}}
+            async with async_playwright() as pw:
+                browser = await pw.chromium.launch(headless=headless)
                 try:
-                    await page.goto(live_url, timeout=15000)
-                except Exception as e:  # noqa: BLE001
-                    logger.debug(f"[taobao] room {room_id} page goto warning: {e}")
-                for _ in range(10):
-                    if topic:
-                        break
-                    await asyncio.sleep(1)
-                for c in await context.cookies():
-                    if c["name"] in ("_m_h5_tk", "_m_h5_tk_enc"):
-                        cookies[c["name"]] = c["value"]
-            finally:
-                await browser.close()
+                    context = await browser.new_context(user_agent=UA)
+                    page = await context.new_page()
 
-        if not topic:
+                    def on_request(request) -> None:
+                        if state["topic"]:
+                            return
+                        if ILIAD_API in request.url or "powermsg" in request.url:
+                            m = re.search(r"[?&]data=([^&]+)", request.url)
+                            raw = m.group(1) if m else request.post_data
+                            if raw:
+                                try:
+                                    data = json.loads(raw)
+                                    if data.get("topic"):
+                                        state["topic"] = data["topic"]
+                                except json.JSONDecodeError:
+                                    pass
+
+                    context.on("request", on_request)
+                    try:
+                        await page.goto(live_url, timeout=30000)
+                    except Exception as e:  # noqa: BLE001
+                        logger.debug(f"[taobao] room {room_id} page goto warning: {e}")
+
+                    # 滑块检测（无头轮）：页面含验证文案 → 改可见窗口
+                    if headless:
+                        await asyncio.sleep(4)
+                        try:
+                            content = await page.content()
+                            if ("完成验证" in content or "拖动" in content
+                                    or "punish" in page.url):
+                                state["slider"] = True
+                                return state
+                        except Exception:  # noqa: BLE001
+                            pass
+
+                    deadline = time.monotonic() + wait_limit
+                    auto_slide_tried = False
+                    while state["topic"] is None and time.monotonic() < deadline:
+                        if not headless:
+                            try:
+                                content = await page.content()
+                                if ("完成验证" in content or "拖动" in content) and not auto_slide_tried:
+                                    auto_slide_tried = True
+                                    state["slider"] = True
+                                    await self._emit_system_status(
+                                        room_id, "淘宝风控滑块验证——自动尝试中，若失败请手动拖动滑块")
+                                    await self._try_auto_slide(page)
+                            except Exception:  # noqa: BLE001
+                                pass
+                        await asyncio.sleep(1)
+                    state["cookies"] = {c["name"]: c["value"]
+                                        for c in await context.cookies()
+                                        if c["name"] in ("_m_h5_tk", "_m_h5_tk_enc")}
+                finally:
+                    await browser.close()
+            return state
+
+        # 第一轮无头（正常路径）；滑块 → 可见窗口重试（用户拖滑块，一次性）
+        state = await attempt(headless=True, wait_limit=45.0)
+        if state["slider"] or not state["topic"]:
+            await self._emit_system_status(
+                room_id, "淘宝风控验证——已弹出浏览器窗口，请拖动滑块完成验证（一次性）")
+            state = await attempt(headless=False, wait_limit=150.0)
+
+        if not state["topic"]:
             raise RuntimeError(
-                "taobao.credential.topic_failed: 未能获取 topic（房间号错误/未开播/风控）")
-        if not cookies.get("_m_h5_tk"):
+                "taobao.credential.topic_failed: 未能获取 topic（未开播/风控未通过/页面加载慢）")
+        if not state["cookies"].get("_m_h5_tk"):
             raise RuntimeError("taobao.credential.token_failed: 未获取 _m_h5_tk（风控升级特征）")
-        logger.info(f"[taobao] room {room_id} credentials ready (topic={topic[:24]}...)")
-        return topic, MtopCredential(cookies)
+        logger.info(f"[taobao] room {room_id} credentials ready (topic={state['topic'][:24]}...)")
+        return state["topic"], MtopCredential(state["cookies"])
+
+    @staticmethod
+    async def _try_auto_slide(page) -> bool:
+        """自动尝试拖动风控滑块（拟人缓动轨迹；noCaptcha 常在 iframe 内）"""
+        try:
+            slider = None
+            for frame in page.frames:
+                slider = await frame.query_selector(
+                    '.nc_iconfont.btn_slide, .btn_slide, [data-role="slider"], '
+                    '#nc_1_n1z, .nc-lang-cnt ~ * .btn_slide')
+                if slider:
+                    target_page = page
+                    break
+            if not slider:
+                logger.debug("[taobao] slider element not found")
+                return False
+            box = await slider.bounding_box()
+            if not box:
+                return False
+            import random as _rand
+
+            start_x = box["x"] + box["width"] / 2
+            start_y = box["y"] + box["height"] / 2
+            track = max(box["width"] * 4.5, 260)
+            await page.mouse.move(start_x, start_y)
+            await page.mouse.down()
+            steps = 45
+            for i in range(steps):
+                t = i / steps
+                dx = track * (1 - (1 - t) ** 2) + _rand.uniform(-1.5, 1.5)
+                await page.mouse.move(start_x + dx, start_y + _rand.uniform(-1.2, 1.2))
+                await asyncio.sleep(_rand.uniform(0.008, 0.028))
+            await page.mouse.up()
+            logger.info("[taobao] auto slide attempted")
+            return True
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[taobao] auto slide error: {e}")
+            return False
+
+    async def _emit_system_status(self, room_id: str, detail: str) -> None:
+        import time as _time
+
+        from danmaku_listener.contract import Category, SystemType
+        from danmaku_listener.contract.models import Envelope, UnifiedMessage
+
+        msg = UnifiedMessage(
+            envelope=Envelope(
+                category=Category.SYSTEM, type=SystemType.ENGINE_STATUS.value,
+                platform=self.platform, room_id=room_id, seq=self.next_seq(room_id),
+                timestamp=int(_time.time()), engine=self.engine_id,
+            ),
+            payload={"type": "ENGINE_STATUS", "engine": self.engine_id, "detail": detail},
+        )
+        await self._emit_message(msg.to_wire())
 
     # ---- 房间任务主循环 ----
 
