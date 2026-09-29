@@ -321,7 +321,11 @@ class TaobaoWebProtocolEngine(BaseEngine):
                     last_msg_box["t"] = time.monotonic()
                 await asyncio.sleep(POLL_INTERVAL_POWERMSG)
             except MtopError as e:
-                logger.warning(f"[taobao] room {room_id} powermsg error: {e}")
+                logger.warning(f"[taobao] room {room_id} powermsg mtop error: {e}")
+                await asyncio.sleep(5)
+            except Exception as e:  # noqa: BLE001  task 不得静默死亡
+                logger.warning(f"[taobao] room {room_id} powermsg error: "
+                               f"{type(e).__name__}: {str(e)[:80]}")
                 await asyncio.sleep(5)
             except asyncio.CancelledError:
                 raise
@@ -340,7 +344,7 @@ class TaobaoWebProtocolEngine(BaseEngine):
                 continue
             mapped = self._map_powermsg(room_id, obj, self.next_seq(room_id), ts)
             if mapped:
-                await self._emit_message(mapped)
+                await self._emit_message(self._envelope(room_id, mapped))
 
     # ---- 评论通道：iliad 轮询 ----
 
@@ -364,14 +368,33 @@ class TaobaoWebProtocolEngine(BaseEngine):
                     mapped = self._map_comment(room_id, c, self.next_seq(room_id),
                                                int(time.time()))
                     if mapped:
-                        last_msg_box["t"] = time.monotonic()
-                        await self._emit_message(mapped)
+                        await self._emit_message(self._envelope(room_id, mapped))
                 await asyncio.sleep(max(int(delay_ms), 2000) / 1000.0)
             except MtopError as e:
-                logger.warning(f"[taobao] room {room_id} iliad error: {e}")
+                logger.warning(f"[taobao] room {room_id} iliad mtop error: {e}")
                 await asyncio.sleep(5)
             except asyncio.CancelledError:
                 raise
+            except Exception as e:  # noqa: BLE001  网络异常等——task 不得静默死亡
+                logger.warning(f"[taobao] room {room_id} iliad error: "
+                               f"{type(e).__name__}: {str(e)[:80]}")
+                await asyncio.sleep(5)
+
+    @staticmethod
+    def _envelope(room_id: str, mapped: dict) -> dict:
+        """契约信封组装（全键——缺键会被 bridge 兜底包装为 ENGINE_STATUS）"""
+        return {
+            "contract_version": "1.0.0",
+            "category": mapped["category"],
+            "type": mapped["type"],
+            "platform": "taobao",
+            "room_id": room_id,
+            "seq": mapped["seq"],
+            "timestamp": mapped["timestamp"],
+            "engine": "webws:taobao",
+            "protocol_version": PROTOCOL_VERSION,
+            "payload": mapped["payload"],
+        }
 
     # ---- 上游消息 → 契约 v1（显式清单，与 test_taobao_protocol.py 对齐）----
 
