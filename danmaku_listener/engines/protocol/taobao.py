@@ -68,6 +68,9 @@ class TaobaoWebProtocolEngine(BaseEngine):
     POWERMSG_INIT_OFFSET_ZERO = False  # 淘宝=当前时间戳起拉增量；1688=0 起拉历史
     #: 页面来源（mtop 网关校验 Referer/Origin 域——1688 引擎覆写）
     PAGE_ORIGIN = "https://tbzb.taobao.com"
+    #: 订阅开关与 H5 appKey（1688 页面实测：pull 前须 subscribe，否则空返回）
+    POWERMSG_SUBSCRIBE = False
+    POWERMSG_H5_APPKEY = "H5_1WhTdTy0y67M01"
     #: 凭证锚点：页面请求中携带 topic 的接口（子类可加 1688 subscribe）
     TOPIC_ANCHORS = (ILIAD_API, "powermsg")
 
@@ -320,6 +323,25 @@ class TaobaoWebProtocolEngine(BaseEngine):
             "referer": self.PAGE_ORIGIN + "/",
             "origin": self.PAGE_ORIGIN,
         }
+        # 订阅前置（1688 页面实测：不 subscribe 则 pull 的 timestampList 恒空）
+        if self.POWERMSG_SUBSCRIBE:
+            now = int(time.time() * 1000)
+            sub_data = {
+                "namespace": 1, "topic": topic, "role": 3,
+                "sdkVersion": self.POWERMSG_SDK_VERSION, "tag": "",
+                "timestamp": now, "ext": now,
+                "appKey": self.POWERMSG_H5_APPKEY,
+                "utdId": f"{random.randint(10**9, 10**10)}_{random.randint(100, 999)}",
+                "token": "",
+            }
+            try:
+                sub_result = await loop.run_in_executor(
+                    None, client.get, "mtop.taobao.powermsg.h5.msg.subscribe",
+                    "1.0", POWERMSG_APP_KEY, sub_data, cred.m_h5_tk, headers)
+                logger.info(f"[taobao] room {room_id} powermsg subscribe: "
+                            f"{str(sub_result.get('ret'))[:60]}")
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"[taobao] room {room_id} subscribe error: {e}")
         while not self._stop_flags.get(room_id):
             try:
                 data = {

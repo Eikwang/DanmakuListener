@@ -34,6 +34,7 @@ class Alibaba1688Engine(TaobaoWebProtocolEngine):
     POWERMSG_PAGESIZE = 20
     POWERMSG_INIT_OFFSET_ZERO = True
     PAGE_ORIGIN = "https://live.1688.com"
+    POWERMSG_SUBSCRIBE = True  # 1688 网关：pull 前必须订阅（否则 timestampList 恒空）
 
     @staticmethod
     def _extract_live_id(room_spec: str) -> str:
