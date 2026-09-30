@@ -18,17 +18,19 @@ wss 握手/入组/心跳/ACK（上行协议未公开——受控页面无需逆�
    checked_show_id / message_data；弹幕在 `message_data.live_chat_list[]`
    （uid/nickname/chat_message/sub_type/chat_sub_type/can_reply）
 
-## 消息类型支持矩阵（2026-09-30 在播房间 450+ 条采样实测校准）
+## 消息类型支持矩阵（2026-09-30 实测校准 + 用户裁定范围）
+
+**业务消息仅监听入场/弹幕/点赞三种（拼多多无礼物功能，用户裁定）**；
+ROOM_STATS 统计保留供前端展示。
 
 | message_type | 契约消息 | 备注 |
 | --- | --- | --- |
-| live_chat | DANMU | message_data.live_chat_list[]（chat_message/uid/nickname/sub_type/can_reply）——与调研形态一致，实测命中 |
-| live_chat_notice | ENTER_ROOM / SOCIAL | notice_type: enter→ENTER_ROOM、favorite→SOCIAL(follow)、group_open（开团运营位）不 emit |
-| live_chat_ext_v2 | LIKE / SOCIAL | sub_type: 121(thumb_up_chat)→LIKE、116(favor)→SOCIAL(follow)、120(buy_style)→SOCIAL(buy)；body.title/content |
+| live_chat | DANMU | message_data.live_chat_list[]（chat_message/uid/nickname/sub_type/can_reply）——实测命中 |
+| live_chat_notice | ENTER_ROOM | 仅 notice_type=enter；favorite（关注）/group_open（开团）不监听（用户裁定） |
+| live_chat_ext_v2 | LIKE | 仅 sub_type=121（thumb_up_chat）；116 关注/120 购买不监听（用户裁定） |
 | live_audience_num | ROOM_STATS | live_audience_num 观看数 |
 | show_thumb_up_count | ROOM_STATS | total_count 点赞总数 |
-| live_gift_rank | ⏳ 待采样 | 礼物榜形态（真实礼物事件待样本） |
-| anchor_rank_change / anchor_acting_notice | 不 emit | 主播榜/讲解通知 |
+| anchor_rank_change / anchor_acting_notice / live_gift_rank | 不 emit | 主播榜/讲解通知（拼多多无礼物功能——不存在礼物事件） |
 
 ## 房间参数
 
