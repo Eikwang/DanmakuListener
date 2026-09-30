@@ -40,6 +40,15 @@ class PDDParseError(ValueError):
     """房间参数无法解析"""
 
 
+class NeedLoginVisible(Exception):
+    """需要可见窗口登录（内部信号）"""
+
+
+#: 登录态候选 cookie（2026-09-30 调研实证弹幕需登录；具体 cookie 名待实测——
+#: _wait_login_visible 会把登录后新增 cookie 全部打日志，供校准收紧）
+LOGIN_COOKIE_CANDIDATES = ("pdd_user_id", "PassId", "PDDAccessToken", "pdd_uid")
+
+
 def extract_room_id(room_spec: str) -> str:
     """房间参数归一：拼多多直播间链接原样直达 / 纯数字 show_id"""
     spec = room_spec.strip()
@@ -286,16 +295,24 @@ class PDDProtocolEngine(BaseEngine):
                     else None)
         logger.info(f"[pdd] room {room_id} connecting (key={room_key})")
         backoff = 15.0
+        headless = True
         while not self._stop_flags.get(room_id):
             try:
                 if goto_url is None:
                     raise PDDParseError(
                         "拼多多直播间需要页面链接——请使用直播间分享链接"
                         "（网页直播间 URL 形态待实测，纯数字 show_id 无从打开）")
-                await self._run_session(room_id, room_key, goto_url)
+                await self._run_session(room_id, room_key, goto_url, headless)
                 backoff = 15.0
             except asyncio.CancelledError:
                 raise
+            except NeedLoginVisible:
+                # 可见窗口登录（阻塞至登录成功/超时）→ 登录后重开正常会话
+                if self._stop_flags.get(room_id):
+                    return
+                await self._wait_login_visible(room_id, goto_url)
+                headless = True  # 登录态入 profile，后续恢复无头
+                continue
             except PDDParseError as e:
                 logger.warning(f"[pdd] room {room_id} {e}")
                 await self._emit_route_failed(room_id, "pdd.page.parse_failed",
@@ -314,8 +331,12 @@ class PDDProtocolEngine(BaseEngine):
                 backoff = min(backoff * 2, 900.0)
 
     async def _run_session(self, room_id: str, room_key: str,
-                           goto_url: str) -> None:
-        """单次有界会话：常驻页面 + 二进制帧拦截 + 业务帧静默检测"""
+                           goto_url: str, headless: bool = True) -> None:
+        """单次有界会话：常驻页面 + 二进制帧拦截 + 业务帧静默检测
+
+        登录闭环（调研实证弹幕需登录会话）：无头+未登录 → NeedLoginVisible
+        → 可见窗口等扫码登录（persistent profile 持久登录态，后续免登录）。
+        """
         from playwright.async_api import async_playwright
 
         session_start = int(time.time())
@@ -326,7 +347,7 @@ class PDDProtocolEngine(BaseEngine):
         async with async_playwright() as pw:
             context = await pw.chromium.launch_persistent_context(
                 self._profile_dir(),
-                headless=True,
+                headless=headless,
                 user_agent=("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                             "AppleWebKit/537.36 (KHTML, like Gecko) "
                             "Chrome/126.0.0.0 Safari/537.36"),
@@ -361,6 +382,16 @@ class PDDProtocolEngine(BaseEngine):
                     logger.debug(f"[pdd] room {room_id} goto warning: {e}")
 
                 logger.info(f"[pdd] room {room_id} live page ready")
+
+                # 登录闭环：弹幕只在登录会话推送（调研实证）——
+                # 无头且未登录 → 弹可见窗口等用户扫码
+                if headless and not await self._has_login_cookie(context):
+                    logger.info(f"[pdd] room {room_id} not logged in — visible window for login")
+                    await self._emit_system_status(
+                        room_id, "拼多多需要登录（弹幕仅登录会话推送）——"
+                                 "已弹出浏览器，请在页面内登录（扫码/账号）")
+                    raise NeedLoginVisible()
+
                 self._set_status(self.status.__class__.RUNNING)
 
                 while time.monotonic() < deadline and not self._stop_flags.get(room_id):
@@ -375,6 +406,86 @@ class PDDProtocolEngine(BaseEngine):
         elapsed = int(time.time()) - session_start
         if elapsed >= 14400.0:
             logger.info(f"[pdd] room {room_id} session rebuilt after {elapsed}s")
+
+    # ---- 登录闭环 ----
+
+    @staticmethod
+    async def _login_cookie_names(context) -> set:
+        try:
+            return {c.get("name") for c in await context.cookies()}
+        except Exception:  # noqa: BLE001
+            return set()
+
+    @classmethod
+    async def _has_login_cookie(cls, context) -> bool:
+        """登录态判定：候选登录 cookie 任一命中（有值）
+
+        具体登录 cookie 名待实测校准——_wait_login_visible 会把登录后
+        新增 cookie 全部打日志，据此收紧候选列表。
+        """
+        try:
+            names = await cls._login_cookie_names(context)
+            if not names:
+                return False
+            for c in await context.cookies():
+                if c.get("name") in LOGIN_COOKIE_CANDIDATES and c.get("value"):
+                    return True
+            return False
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[pdd] login cookie check error: {e}")
+            return False
+
+    async def _wait_login_visible(self, room_id: str, goto_url: str) -> None:
+        """可见窗口登录：用户手动登录（扫码/账号）→ 登录态入 profile → 返回
+
+        动态 cookie 差异检测：不依赖预设候选——登录后新增的 cookie 名全部
+        打日志（真实登录标志可见，供校准 LOGIN_COOKIE_CANDIDATES）。
+        """
+        from playwright.async_api import async_playwright
+
+        async with async_playwright() as pw:
+            context = await pw.chromium.launch_persistent_context(
+                self._profile_dir(),
+                headless=False,
+                user_agent=("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                            "AppleWebKit/537.36 (KHTML, like Gecko) "
+                            "Chrome/126.0.0.0 Safari/537.36"),
+                viewport={"width": 1280, "height": 800},
+                args=["--disable-blink-features=AutomationControlled"])
+            try:
+                page = context.pages[0] if context.pages else await context.new_page()
+                try:
+                    await page.goto(goto_url, timeout=30000,
+                                    wait_until="domcontentloaded")
+                except Exception:  # noqa: BLE001
+                    pass
+                baseline = await self._login_cookie_names(context)
+                logger.info(f"[pdd] room {room_id} login window open "
+                            f"(baseline cookies={len(baseline)})")
+                deadline = time.monotonic() + 300.0
+                logged = False
+                while time.monotonic() < deadline:
+                    await asyncio.sleep(2)
+                    names = await self._login_cookie_names(context)
+                    if not logged and names - baseline:
+                        # 首批新增 cookie：打日志（真实登录标志）
+                        logger.info(f"[pdd] room {room_id} new cookies after "
+                                    f"login action: {sorted(names - baseline)}")
+                    for c in await context.cookies():
+                        if (c.get("name") in LOGIN_COOKIE_CANDIDATES
+                                and c.get("value")):
+                            logged = True
+                            break
+                    if logged:
+                        break
+                if logged:
+                    await self._emit_system_status(
+                        room_id, "拼多多登录成功——开始监听")
+                    logger.info(f"[pdd] room {room_id} login ok")
+                else:
+                    logger.warning(f"[pdd] room {room_id} login window timeout")
+            finally:
+                await context.close()
 
     async def _on_ws_frame(self, room_id: str, payload: Any) -> None:
         """framereceived 事件 → 解码 emit（二进制帧 payload 为 bytes）"""
@@ -410,6 +521,20 @@ class PDDProtocolEngine(BaseEngine):
             "protocol_version": PROTOCOL_VERSION,
             "payload": mapped["payload"],
         }
+
+    async def _emit_system_status(self, room_id: str, detail: str) -> None:
+        from danmaku_listener.contract import Category, SystemType
+        from danmaku_listener.contract.models import Envelope, UnifiedMessage
+
+        msg = UnifiedMessage(
+            envelope=Envelope(
+                category=Category.SYSTEM, type=SystemType.ENGINE_STATUS.value,
+                platform=self.platform, room_id=room_id, seq=self.next_seq(room_id),
+                timestamp=int(time.time()), engine=self.engine_id,
+            ),
+            payload={"type": "ENGINE_STATUS", "engine": self.engine_id, "detail": detail},
+        )
+        await self._emit_message(msg.to_wire())
 
     async def _emit_route_failed(self, room_id: str, reason_code: str,
                                  fix_hint: str, docs_anchor: str) -> None:
