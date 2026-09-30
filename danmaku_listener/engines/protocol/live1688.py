@@ -275,17 +275,80 @@ class Live1688Engine(BaseEngine):
 
                 self._set_status(self.status.__class__.RUNNING)
 
-                # 有界会话循环 + 响应流静默检测：
-                # 下播/风控后页面的弹幕轮询停止 → SILENCE_TIMEOUT 无 pull 响应 → 三段式
-                while time.monotonic() < deadline and not self._stop_flags.get(room_id):
-                    await asyncio.sleep(2)
-                    if time.monotonic() - last_pull_box["t"] > SILENCE_TIMEOUT:
-                        raise Live1688ParseError(
-                            "1688.session.silent: 90s 无弹幕接口响应"
-                            "（可能未开播/已下播/风控——feedId 场次级，"
-                            "开播后重新复制直播间链接）")
+                # DOM 弹幕轮询任务（2026-09-30 实测：1688 聊天弹幕不走任何 HTTP
+                # 响应通道——发送与拉取均无网络回显——唯一可靠通道 = DOM 弹幕区
+                # 读取；pull 拦截并行保留做 ROOM_STATS）
+                dom_task = asyncio.create_task(self._poll_dom_danmu(room_id, page))
+                try:
+                    # 有界会话循环 + 响应流静默检测：
+                    # 下播/风控后页面的弹幕轮询停止 → SILENCE_TIMEOUT 无 pull 响应 → 三段式
+                    while time.monotonic() < deadline and not self._stop_flags.get(room_id):
+                        await asyncio.sleep(2)
+                        if time.monotonic() - last_pull_box["t"] > SILENCE_TIMEOUT:
+                            raise Live1688ParseError(
+                                "1688.session.silent: 90s 无弹幕接口响应"
+                                "（可能未开播/已下播/风控——feedId 场次级，"
+                                "开播后重新复制直播间链接）")
+                finally:
+                    dom_task.cancel()
+                    try:
+                        await dom_task
+                    except (asyncio.CancelledError, Exception):
+                        pass
             finally:
                 await context.close()
+
+    async def _poll_dom_danmu(self, room_id: str, page) -> None:
+        """DOM 弹幕区读取（1688 弹幕唯一可靠通道——实测网络响应无弹幕回显）
+
+        弹幕 DOM：div.pc-living-room-message > .comment-message-list >
+        .comment-message > .msg-text（文本形态 `昵称:内容`——2026-09-30
+        TESTMARK 实测定位）。每 2s 全量读取，新指纹条目 emit DANMU。
+        """
+        seen: set = set()  # 已见弹幕指纹（文本 hash；有界防内存涨）
+        seen_list: list = []
+        while not self._stop_flags.get(room_id):
+            try:
+                texts = await page.evaluate(
+                    """() => {
+                        const out = [];
+                        document.querySelectorAll(
+                            '.pc-living-room-message .comment-message-list .comment-message'
+                        ).forEach(el => {
+                            const node = el.querySelector('.msg-text') || el;
+                            const t = (node.textContent || '').trim();
+                            if (t) out.push(t);
+                        });
+                        return out;
+                    }""")
+                ts = int(time.time())
+                for text in texts:
+                    # 指纹：完整文本 hash（弹幕滚动历史区不重复）
+                    h = hash(text)
+                    if h in seen:
+                        continue
+                    seen.add(h)
+                    seen_list.append(h)
+                    if len(seen_list) > 500:
+                        old_h = seen_list.pop(0)
+                        seen.discard(old_h)
+                    self.mark_received(room_id, ts)
+                    nick, _, content = text.partition(":")
+                    mapped = {
+                        "category": "business", "type": "DANMU",
+                        "seq": self.next_seq(room_id), "timestamp": ts,
+                        "payload": {"type": "DANMU",
+                                    "user_name": nick.strip(),
+                                    "content": content.strip() if content else text},
+                    }
+                    await self._emit_message(self._envelope(room_id, mapped))
+                await asyncio.sleep(2)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"[1688] room {room_id} dom poll error: "
+                               f"{type(e).__name__}: {str(e)[:60]}")
+                await asyncio.sleep(5)
 
     @staticmethod
     async def _has_login_cookie(context) -> bool:
