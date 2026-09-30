@@ -214,6 +214,11 @@ class WechatChannelsEngine(BaseEngine):
                 except Exception:  # noqa: BLE001
                     pass
 
+                # 导航：直播 → 直播管理 → 进入直播间（2026-09-30 用户实测
+                # 路径——弹幕/入场/点赞/礼物的 live/msg 轮询只在进入直播间
+                # 中控页后才启动；liveBuild 落地页本身不轮询）
+                await self._navigate_to_live_room(room_id, page)
+
                 # 有界会话读循环：到期/停止信号退出（重建由外层负责）
                 while time.monotonic() < deadline and not self._stop_flags.get(room_id):
                     await asyncio.sleep(2)
@@ -222,6 +227,92 @@ class WechatChannelsEngine(BaseEngine):
                 await browser.close()
 
     # ---- 网络层拦截（wxlivespy 同构解析）----
+
+    @staticmethod
+    async def _click_text_anywhere(page, texts, timeout_s: float = 6.0) -> bool:
+        """全页面范围点击文本匹配的最小可见元素（不限侧栏）"""
+        import asyncio as _asyncio
+
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            cands = await page.evaluate(
+                """(texts) => {
+                    const out = [];
+                    document.querySelectorAll('div,li,span,button,a').forEach(el => {
+                        const t = (el.innerText || '').trim();
+                        if (texts.some(x => t === x || t.startsWith(x))
+                                && t.length < 12 && el.children.length <= 1) {
+                            const r = el.getBoundingClientRect();
+                            if (r.width > 0 && r.height > 0)
+                                out.push({x: r.x + r.width/2, y: r.y + r.height/2});
+                        }
+                    });
+                    return out;
+                }""", list(texts))
+            if cands:
+                c = cands[0]
+                await page.mouse.click(c["x"], c["y"])
+                return True
+            await _asyncio.sleep(0.5)
+        return False
+
+    async def _navigate_to_live_room(self, room_id: str, page) -> bool:
+        """导航：直播菜单 → 直播管理 → 进入直播间（2026-09-30 用户实测路径）
+
+        live/msg 轮询只在**直播间中控页**启动。三步点击（左侧菜单栏区域内
+        匹配文本，防误点正文）；找不到"进入直播间"时明确提示（常见原因：
+        直播未开播/场次列表为空）。
+        """
+        import asyncio as _asyncio
+
+        async def _click_in_sidebar(texts, timeout_s: float = 5.0) -> bool:
+            deadline = time.monotonic() + timeout_s
+            while time.monotonic() < deadline:
+                cands = await page.evaluate(
+                    """(texts) => {
+                        const out = [];
+                        document.querySelectorAll('div,li,span').forEach(el => {
+                            const t = (el.innerText || '').trim();
+                            if (texts.includes(t) && el.children.length <= 1) {
+                                const r = el.getBoundingClientRect();
+                                if (r.width > 0 && r.height > 0 && r.x < 120)
+                                    out.push({x: r.x + r.width/2,
+                                              y: r.y + r.height/2});
+                            }
+                        });
+                        return out;
+                    }""", list(texts))
+                if cands:
+                    c = cands[-1]
+                    await page.mouse.click(c["x"], c["y"])
+                    return True
+                await _asyncio.sleep(0.5)
+            return False
+
+        try:
+            if not await _click_in_sidebar(["直播"]):
+                logger.debug(f"[wxsp] room {room_id} 直播菜单未找到（可能已在"
+                             f"中控页：url={page.url[:60]}）")
+                return False
+            await _asyncio.sleep(2)
+            # 直播管理（子菜单项；可能已在该页则跳过）
+            if not await _click_in_sidebar(["直播管理"], timeout_s=4.0):
+                logger.debug(f"[wxsp] room {room_id} 直播管理未找到（可能已在）")
+            await _asyncio.sleep(2)
+            # 进入直播间（进行中场次的入口按钮；列表页右侧区域）
+            ok = await _click_text_anywhere(
+                page, ["进入直播间"], timeout_s=8.0)
+            if ok:
+                logger.info(f"[wxsp] room {room_id} 已进入直播间中控页")
+                await _asyncio.sleep(3)
+            else:
+                await self._emit_system_status(
+                    room_id, "未找到'进入直播间'入口——确认直播正在进行"
+                             "（开播后刷新管理页）；若从未开播请先开播")
+            return ok
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[wxsp] room {room_id} 导航异常: {e}")
+            return False
 
     @staticmethod
     def _is_feed_api(url: str) -> bool:
