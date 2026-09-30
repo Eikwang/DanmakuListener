@@ -58,7 +58,8 @@ room 标识取 popId/liveid/id 参数或链接截断。纯数字 ID 无从打开
 | chat_group_message | join_live_broadcast_summary | ENTER_ROOM（聚合形态"xx等16人来了"） |
 | chat_group_message | thumbs_up | LIKE（body.thumbs_up_num） |
 | chat_group_message | viewer_buy_product_summary 等 | 购买/购物车运营形态，不映射 |
-| chat_group_message | （无 body.type）nickName+content | DANMU（宽容兼容；text 类 body.type 待样本） |
+| chat_group_message | viewer_send_message | **DANMU**（body.nickName/content；1483 帧实测命中；游客会话即可收他人弹幕，无需登录） |
+| chat_group_message | user_places_order / viewer_buy_product_summary 等 | 下单/购买/购物车运营形态，不映射 |
 
 ## 故障排查
 

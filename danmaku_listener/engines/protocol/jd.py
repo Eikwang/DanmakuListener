@@ -120,8 +120,8 @@ def map_jd_message(frame: Dict[str, Any], seq: int, ts: int) -> Optional[Dict[st
     - join_live_broadcast_summary → ENTER_ROOM（聚合形态"xx等16人来了"）
     - thumbs_up → LIKE（body.thumbs_up_num）
     - get_statistics_result → ROOM_STATS（current_viewer/thumbs_up_num）
-    - viewer_buy_product_summary（购买）等运营形态不映射
-    - 弹幕：body.nickName+content 组合（text 类 body.type 待样本，宽容兼容）
+    - viewer_buy_product_summary/user_places_order 等运营形态不映射
+    - 弹幕：body.type=viewer_send_message（nickName+content，实测命中；游客会话即可收他人弹幕，无需登录）
     """
     top_type = frame.get("type")
     body = frame.get("body") or {}
@@ -143,6 +143,14 @@ def map_jd_message(frame: Dict[str, Any], seq: int, ts: int) -> Optional[Dict[st
         return {"category": "business", "type": "ENTER_ROOM", "seq": seq,
                 "timestamp": ts,
                 "payload": {"type": "ENTER_ROOM", "user_name": user_name}}
+    if body_type == "viewer_send_message" and content and user_name:
+        # 2026-09-30 实测：弹幕=body.type=viewer_send_message（带 body.type，
+        # 宽容路径覆盖不到——游客会话即可收其他观众弹幕，无需登录）
+        return {"category": "business", "type": "DANMU", "seq": seq,
+                "timestamp": ts,
+                "payload": {"type": "DANMU", "user_name": user_name,
+                            "content": content,
+                            "user_id": str(frame.get("from", {}).get("pinmd5", ""))}}
     if body_type == "thumbs_up":
         count = body.get("thumbs_up_num", 1)
         if not isinstance(count, int) or count < 1:

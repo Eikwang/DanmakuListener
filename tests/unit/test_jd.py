@@ -74,14 +74,30 @@ def test_map_jd_message():
         "body": {"type": "thumbs_up", "thumbs_up_num": 3}}, seq, ts)
     assert like["type"] == "LIKE" and like["payload"]["count"] == 3
 
-    # 弹幕：body.nickName+content（text 类 body.type 待样本，宽容兼容）
+    # 弹幕（实测形态）：body.type=viewer_send_message + nickName/content
     danmu = map_jd_message({
+        "type": "chat_group_message",
+        "from": {"app": "jd.live", "pinmd5": "b750e5b8"},
+        "body": {"type": "viewer_send_message", "nickName": "无聊的小土豆来了",
+                 "content": "上点那个喷雾喷苍蝇的", "groupid": "48077657",
+                 "loveLevel": 5, "userMemberLevel": 4}}, seq, ts)
+    assert danmu["type"] == "DANMU"
+    assert danmu["payload"]["user_name"] == "无聊的小土豆来了"
+    assert danmu["payload"]["content"] == "上点那个喷雾喷苍蝇的"
+
+    # 宽容兼容路径保留（无 body.type）
+    alt = map_jd_message({
         "type": "chat_group_message",
         "body": {"nickName": "观众甲", "content": "主播好",
                  "groupid": "48293857"}}, seq, ts)
-    assert danmu["type"] == "DANMU"
-    assert danmu["payload"]["user_name"] == "观众甲"
-    assert danmu["payload"]["content"] == "主播好"
+    assert alt["type"] == "DANMU"
+    assert alt["payload"]["user_name"] == "观众甲"
+    assert alt["payload"]["content"] == "主播好"
+
+    # 下单通知等高频运营形态 → 不映射
+    assert map_jd_message({
+        "type": "chat_group_message",
+        "body": {"type": "user_places_order", "nickName": "x"}}, seq, ts) is None
 
     # 购买/购物车等运营形态 → 不映射
     assert map_jd_message({
