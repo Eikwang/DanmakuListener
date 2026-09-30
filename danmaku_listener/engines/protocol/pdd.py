@@ -325,13 +325,14 @@ class PDDProtocolEngine(BaseEngine):
     platform = "pdd"
 
     def __init__(self, state_store=None, cookie_dir: str = "./cookie",
-                 raw_hook=None):
+                 raw_hook=None, http_hook=None):
         super().__init__(state_store=state_store)
         self._cookie_dir = cookie_dir
         self._room_tasks: Dict[str, asyncio.Task] = {}
         self._stop_flags: Dict[str, bool] = {}
         self._last_frame_box: Dict[str, Dict[str, float]] = {}
         self._raw_hook = raw_hook  # 诊断钩子：解码出的业务对象（含未映射）回调
+        self._http_hook = http_hook  # 诊断钩子：页面 HTTP 响应 URL（弹幕通道定位）
 
     @property
     def engine_id(self) -> str:
@@ -460,6 +461,19 @@ class PDDProtocolEngine(BaseEngine):
                         lambda p: asyncio.create_task(on_frame(ws, p)))
 
                 page.on("websocket", on_websocket)
+
+                # HTTP 响应 URL 记录（诊断钩子——普通弹幕不在 titan wss 下行，
+                # 定位页面 fetch/XHR 里是否有弹幕接口，1688 同款诊断思路）
+                if self._http_hook is not None:
+                    http_hook = self._http_hook
+
+                    def on_response(response) -> None:
+                        try:
+                            http_hook(response.url)
+                        except Exception:  # noqa: BLE001
+                            pass
+
+                    page.on("response", on_response)
 
                 try:
                     await page.goto(goto_url,

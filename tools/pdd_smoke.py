@@ -24,6 +24,7 @@ async def main(spec: str, duration: float, dump_all: bool) -> int:
     eng = PDDProtocolEngine()
     dump_fh = None
     n_raw = 0
+    http_urls = set()
     if dump_all:
         dump_fh = open("pdd_raw.jsonl", "a", encoding="utf-8")
 
@@ -35,6 +36,18 @@ async def main(spec: str, duration: float, dump_all: bool) -> int:
             dump_fh.flush()
 
         eng._raw_hook = raw_hook
+
+        def http_hook(url):
+            # 只记可能含弹幕/评论/消息的接口（全量 URL 噪声太大）
+            from urllib.parse import urlparse
+            path = urlparse(url).path.lower()
+            if any(k in path for k in ("chat", "comment", "msg", "message",
+                                       "barrage", "danmu", "pop_chat")):
+                if url not in http_urls:
+                    http_urls.add(url)
+                    print(f"[HTTP?] {url[:150]}")
+
+        eng._http_hook = http_hook
 
     def on_msg(m):
         t = m.get("type")
