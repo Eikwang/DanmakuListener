@@ -151,12 +151,14 @@ class XiaohongshuEngine(BaseEngine):
 
     platform = "xiaohongshu"
 
-    def __init__(self, state_store=None, cookie_dir: str = "./cookie"):
+    def __init__(self, state_store=None, cookie_dir: str = "./cookie",
+                 raw_hook=None):
         super().__init__(state_store=state_store)
         self._cookie_dir = cookie_dir
         self._room_tasks: Dict[str, asyncio.Task] = {}
         self._stop_flags: Dict[str, bool] = {}
         self._last_frame_box: Dict[str, Dict[str, float]] = {}  # room → {"t": monotonic}
+        self._raw_hook = raw_hook  # 诊断钩子：每个解析出的 customData（含未映射）回调
 
     @property
     def engine_id(self) -> str:
@@ -306,6 +308,11 @@ class XiaohongshuEngine(BaseEngine):
         for cd in parse_ws_frame(raw):
             last_frame["t"] = time.monotonic()  # 业务帧到达 = 链路活跃
             self.mark_received(room_id, int(time.time()))
+            if self._raw_hook is not None:
+                try:
+                    self._raw_hook(cd)
+                except Exception:  # noqa: BLE001
+                    pass
             mapped = map_custom_data(cd, self.next_seq(room_id), int(time.time()))
             if mapped:
                 await self._emit_message(self._envelope(room_id, mapped))
