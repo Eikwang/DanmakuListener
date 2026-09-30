@@ -77,3 +77,12 @@ cookie/taobao_profile/
 cookie/1688_profile/
 1688_capture.jsonl
 1688_samples.jsonl
+
+# 第三方参考项目与本地脚本（不入库——版权/杂物）
+ordinaryroad-barrage-fly/
+wxlivespy/
+直播监听脚本/
+1.双击我启动程序.bat
+log*.txt
+re.txt
+DouyinBarrageGrab
