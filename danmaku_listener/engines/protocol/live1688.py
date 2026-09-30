@@ -266,7 +266,7 @@ class Live1688Engine(BaseEngine):
 
                 # 登录闭环：聊天弹幕只推给登录会话（2026-09-29 实测）——
                 # 未登录（无 unb cookie）且当前为无头时改可见窗口等用户登录
-                if not self._has_login_cookie(context) and headless:
+                if not await self._has_login_cookie(context) and headless:
                     logger.info(f"[1688] room {room_id} not logged in — visible window for login")
                     await self._emit_system_status(
                         room_id, "1688 需要登录（聊天弹幕仅登录可见）——"
@@ -288,15 +288,18 @@ class Live1688Engine(BaseEngine):
                 await context.close()
 
     @staticmethod
-    def _has_login_cookie(context) -> bool:
-        """登录态判定：unb cookie（阿里系账号标识）存在且有值"""
+    async def _has_login_cookie(context) -> bool:
+        """登录态判定：unb cookie（阿里系账号标识）存在且有值
+
+        persistent profile 登录后 unb 持久化——遍历全部 cookie 判定。
+        （占位符实现曾永远返回 False 导致登录循环——2026-09-30 修复）
+        """
         try:
-            for c in context.cookies([]) if False else []:
-                pass
-            # cookies() 需要传 URL；用页面级请求 cookie 简化——遍历全部
-        except Exception:  # noqa: BLE001
-            pass
-        return False
+            cookies = await context.cookies()
+            return any(c.get("name") == "unb" and c.get("value") for c in cookies)
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[1688] login cookie check error: {e}")
+            return False
 
     async def _wait_login_visible(self, room_id: str, feed_id: str) -> None:
         """可见窗口登录流程：用户登录（unb cookie 出现）→ 登录态入 profile → 返回"""
