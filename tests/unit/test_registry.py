@@ -7,7 +7,7 @@ from danmaku_listener.engines.registry import PLATFORM_ENGINES, build_engine
 
 def test_all_platforms_registered():
     assert set(PLATFORM_ENGINES.keys()) == {
-        "bilibili", "douyu", "huya", "kuaishou", "wechat_channels", "douyin", "taobao", "1688"
+        "bilibili", "douyu", "huya", "kuaishou", "wechat_channels", "douyin", "taobao", "1688", "meituan"
     }
 
 
