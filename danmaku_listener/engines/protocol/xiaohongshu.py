@@ -105,7 +105,18 @@ def parse_ws_frame(raw) -> List[Dict[str, Any]]:
 
 
 def map_custom_data(cd: Dict[str, Any], seq: int, ts: int) -> Optional[Dict[str, Any]]:
-    """customData → 契约消息映射（纯函数）；未识别类型返回 None"""
+    """customData → 契约消息映射（纯函数）；未识别类型返回 None
+
+    2026-09-30 在播房间实测校准（xhs_raw.jsonl 696 条采样）：
+    - 点赞 type=praise（调研推断的 "like" 实测不存在），count 在
+      praise_info.count（本次点赞事件聚合数，非累计）；praise 的 profile
+      无 nickname → user_name 置空
+    - 礼物 type=gift_dock_and_effect（"gift" 不存在）：send_user_info.nick_name
+      （下划线命名）/ base_gift_info.name / gift_action_info.count（本次）；
+      gift_comment/gift_settle 为同一次送礼的重复视图（时序实证）——
+      跳过防重复计数
+    - share → SOCIAL(action=share)；light 为进场来源路径（语义待定，不映射）
+    """
     cd_type = cd.get("type", "")
     profile = cd.get("profile") or {}
     user_name = str(profile.get("nickname", ""))
@@ -123,27 +134,38 @@ def map_custom_data(cd: Dict[str, Any], seq: int, ts: int) -> Optional[Dict[str,
         return {**base, "type": "ENTER_ROOM",
                 "payload": {"type": "ENTER_ROOM", "user_name": user_name,
                             "user_id": user_id}}
-    if cd_type == "like":
-        count = cd.get("likeActionCount", cd.get("count", 1))
-        if not isinstance(count, int):
+    if cd_type == "praise":
+        count = (cd.get("praise_info") or {}).get("count", 1)
+        if not isinstance(count, int) or count < 1:
             count = 1
         return {**base, "type": "LIKE",
-                "payload": {"type": "LIKE", "user_name": user_name, "count": count}}
-    if cd_type == "gift":
-        gift_name = cd.get("giftName", "")
+                "payload": {"type": "LIKE", "user_name": "", "count": count}}
+    if cd_type == "gift_dock_and_effect":
+        send = cd.get("send_user_info") or {}
+        gift = cd.get("base_gift_info") or {}
+        action = cd.get("gift_action_info") or {}
+        gift_name = gift.get("name", "")
         if not gift_name:
             return None
-        count = cd.get("count", 1)
-        if not isinstance(count, int):
+        count = action.get("count", 1)
+        if not isinstance(count, int) or count < 1:
             count = 1
         return {**base, "type": "GIFT",
-                "payload": {"type": "GIFT", "user_name": user_name,
+                "payload": {"type": "GIFT",
+                            "user_name": str(send.get("nick_name", "")),
+                            "user_id": str(send.get("id", "")),
                             "gift_name": gift_name, "gift_count": count}}
     if cd_type == "follow_emcee":
         return {**base, "type": "SOCIAL",
                 "payload": {"type": "SOCIAL", "action": "follow",
                             "user_name": user_name, "user_id": user_id}}
-    return None  # refresh/letter_refresh/gift_dock_and_effect 等：活跃信号或未映射
+    if cd_type == "share":
+        return {**base, "type": "SOCIAL",
+                "payload": {"type": "SOCIAL", "action": "share",
+                            "user_name": user_name, "user_id": user_id}}
+    # refresh/letter_refresh：活跃信号；gift_comment/gift_settle：送礼重复视图；
+    # light/live_banner_resource/goods_rank_entrance_im：运营位/来源路径——均不 emit
+    return None
 
 
 class XiaohongshuEngine(BaseEngine):

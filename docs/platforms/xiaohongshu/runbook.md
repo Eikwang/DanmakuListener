@@ -9,16 +9,20 @@ WebSocket `framereceived` 帧拦截。观众侧无需登录（设备 cookie a1 �
 帧结构：JSON 帧 `t==4` → `b.d.b[]` → 每项 `.d` base64 → JSON →
 `customData`（JSON 字符串）二次 parse → 业务对象。
 
-## 消息类型支持矩阵
+## 消息类型支持矩阵（2026-09-30 在播房间 696 条采样实测校准）
 
 | customData.type | 契约消息 | 备注 |
 | --- | --- | --- |
 | text | DANMU | desc=内容、profile.nickname/user_id |
-| audience_join / audience_join_v2 | ENTER_ROOM | |
-| like | LIKE | likeActionCount（无该字段时 count=1） |
-| gift | GIFT | giftName/count |
+| audience_join / audience_join_v2 | ENTER_ROOM | 实测 audience_join_v2 为主 |
+| praise | LIKE | praise_info.count=本次点赞事件聚合数；profile 无 nickname → user_name 空（调研推断的 "like" type 实测不存在） |
+| gift_dock_and_effect | GIFT | send_user_info.nick_name（下划线命名）/base_gift_info.name/gift_action_info.count |
 | follow_emcee | SOCIAL | action=follow |
+| share | SOCIAL | action=share |
+| gift_comment / gift_settle | 不 emit | 同一次送礼的重复视图（时序实证）——跳过防重复计数 |
 | refresh / letter_refresh | 不 emit | 链路活跃信号（静默检测依据） |
+| light | 不 emit | 进场来源路径（slide/follow_feed），语义待定 |
+| live_banner_resource / goods_rank_entrance_im | 不 emit | 运营位/商品榜 |
 
 ## 房间参数
 
@@ -26,9 +30,9 @@ WebSocket `framereceived` 帧拦截。观众侧无需登录（设备 cookie a1 �
 
 ## 待实测校准项
 
-- like 的计数字段名（likeActionCount 为调研推断，待真实样本确认）
-- 礼物详细字段（价格/等级等如有）
-- 未登录状态下 WS 是否推弹幕（若被风控：首次添加弹登录窗口闭环，同 1688 模式）
+- ~~like 的计数字段名~~（已校准：praise/praise_info.count）
+- ~~礼物详细字段~~（已校准：gift_dock_and_effect 全嵌套结构）
+- 未登录状态下 WS 是否推弹幕（本次实测未登录可收——若后续风控：登录闭环同 1688 模式）
 - 下播时页面行为（当前用 90s 业务帧静默判定）
 
 ## 故障排查

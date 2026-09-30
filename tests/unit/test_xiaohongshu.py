@@ -60,6 +60,7 @@ def test_parse_ws_frame_ignores_noise():
 
 
 def test_map_custom_data_types():
+    """2026-09-30 在播房间实测形态校准（xhs_raw.jsonl 696 条采样）"""
     ts, seq = 1700000000, 1
     danmu = map_custom_data(
         {"type": "text", "desc": "好看", "profile": {"nickname": "小明", "user_id": "9"}},
@@ -71,20 +72,39 @@ def test_map_custom_data_types():
                              "profile": {"nickname": "小刚"}}, seq, ts)
     assert enter["type"] == "ENTER_ROOM"
 
-    like = map_custom_data({"type": "like", "likeActionCount": 3}, seq, ts)
-    assert like["type"] == "LIKE" and like["payload"]["count"] == 3
+    # 实测：点赞 type=praise，count 在 praise_info（聚合数）；profile 无 nickname
+    like = map_custom_data({"type": "praise", "praise_info": {"count": 13},
+                            "profile": {"user_id": "u1"}}, seq, ts)
+    assert like["type"] == "LIKE" and like["payload"]["count"] == 13
+    assert like["payload"]["user_name"] == ""
 
-    gift = map_custom_data({"type": "gift", "giftName": "小红心", "count": 2}, seq, ts)
-    assert gift["type"] == "GIFT" and gift["payload"]["gift_count"] == 2
+    # 实测：礼物 type=gift_dock_and_effect（下划线命名 + 嵌套取数）
+    gift = map_custom_data({
+        "type": "gift_dock_and_effect",
+        "send_user_info": {"id": "s1", "nick_name": "🥑晴天**"},
+        "base_gift_info": {"name": "人气票", "coins": 1},
+        "gift_action_info": {"count": 1, "comb_count": 70},
+    }, seq, ts)
+    assert gift["type"] == "GIFT"
+    assert gift["payload"]["gift_name"] == "人气票"
+    assert gift["payload"]["gift_count"] == 1
+    assert gift["payload"]["user_name"] == "🥑晴天**"
+    assert gift["payload"]["user_id"] == "s1"
 
     follow = map_custom_data({"type": "follow_emcee",
                               "profile": {"nickname": "粉"}}, seq, ts)
     assert follow["type"] == "SOCIAL"
 
-    # 活跃信号/未知类型 → 不 emit
-    assert map_custom_data({"type": "refresh"}, seq, ts) is None
-    assert map_custom_data({"type": "letter_refresh"}, seq, ts) is None
-    assert map_custom_data({"type": "gift_dock_and_effect"}, seq, ts) is None
+    share = map_custom_data({"type": "share",
+                             "profile": {"nickname": "分享者"}}, seq, ts)
+    assert share["type"] == "SOCIAL" and share["payload"]["action"] == "share"
+
+    # 实测不 emit：活跃信号/送礼重复视图（防重复计数）/运营位/来源路径
+    for t in ("refresh", "letter_refresh", "gift_comment", "gift_settle",
+              "light", "live_banner_resource", "goods_rank_entrance_im"):
+        assert map_custom_data({"type": t}, seq, ts) is None
+    # 调研推断的旧枚举实测不存在——防御保留（映射不到即 None）
+    assert map_custom_data({"type": "like", "likeActionCount": 3}, seq, ts) is None
 
 
 def test_envelope_platform_is_xiaohongshu():
@@ -124,7 +144,7 @@ async def test_on_ws_frame_emits_and_touches_silence_timer():
     assert eng._last_frame_box["r1"]["t"] > before
     # str payload 直传也支持
     await eng._on_ws_frame("r1", _wrap_frame([
-        {"type": "like", "likeActionCount": 5}]))
+        {"type": "praise", "praise_info": {"count": 5}}]))
     likes = [m for m in got if m["type"] == "LIKE"]
     assert len(likes) == 1 and likes[0]["payload"]["count"] == 5
 
