@@ -58,6 +58,10 @@ MSGTYPE_LIKE = 20006
 MSGTYPE_LEVEL_UP = 20031
 
 
+class NeedLoginVisible(Exception):
+    """需要可见窗口扫码登录（内部信号）"""
+
+
 class WechatChannelsEngine(BaseEngine):
     """视频号受控后台引擎（wxlivespy 同构解析 + 登录窗口闭环）"""
 
@@ -68,10 +72,8 @@ class WechatChannelsEngine(BaseEngine):
         super().__init__(state_store=state_store)
         self._cookie_dir = cookie_dir
         self._session_lifetime = session_lifetime
-        self._headless = True  # 登录窗口期间临时可见
         self._room_tasks: Dict[str, asyncio.Task] = {}
         self._stop_flags: Dict[str, bool] = {}
-        self._login_flows: Dict[str, asyncio.Task] = {}
 
     @property
     def engine_id(self) -> str:
@@ -80,15 +82,7 @@ class WechatChannelsEngine(BaseEngine):
     # ---- 公开契约 ----
 
     async def start(self, room_id: str) -> None:
-        import os
-
         if room_id in self._room_tasks and not self._room_tasks[room_id].done():
-            return
-        # 无登录态 → 登录闭环（对齐 B站/快手：弹可见浏览器扫码）
-        if not os.path.exists(self._storage_state_path()):
-            self._stop_flags[room_id] = False
-            self._login_flows[room_id] = asyncio.create_task(
-                self._login_then_start(room_id), name=f"wxsp-login-{room_id}")
             return
         self._stop_flags[room_id] = False
         self._room_tasks[room_id] = asyncio.create_task(
@@ -96,54 +90,67 @@ class WechatChannelsEngine(BaseEngine):
 
     async def stop(self, room_id: str) -> None:
         self._stop_flags[room_id] = True
-        for store in (self._room_tasks, self._login_flows):
-            task = store.pop(room_id, None)
-            if task:
-                task.cancel()
-                try:
-                    await task
-                except (asyncio.CancelledError, Exception):
-                    pass
+        task = self._room_tasks.pop(room_id, None)
+        if task:
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
 
     async def restart(self, room_id: str) -> None:
         """仅重启该房间任务（契约 I）"""
         await self.stop(room_id)
         await self.start(room_id)
 
-    # ---- 登录闭环 ----
+    # ---- 登录闭环（persistent profile：cookie 由浏览器自动管理轮换——
+    #      storage_state 快照模式扛不住视频号后台会话快速过期，2026-09-30 实测）----
 
-    def _storage_state_path(self) -> str:
+    def _profile_dir(self) -> str:
         import os
 
-        os.makedirs(self._cookie_dir, exist_ok=True)
-        return f"{self._cookie_dir}/wechat_channels_state.json"
+        d = f"{self._cookie_dir}/wxsp_profile"
+        os.makedirs(d, exist_ok=True)
+        return d
 
-    async def _login_then_start(self, room_id: str) -> None:
-        """登录窗口闭环：可见浏览器扫码 → storage_state 保存 → 自动开始监听"""
+    async def _wait_login_visible(self, room_id: str) -> None:
+        """可见窗口扫码登录：URL 离开 login.html 即成功（cookie 入 profile）"""
         from playwright.async_api import async_playwright
 
-        await self._emit_system_status(room_id, "登录窗口已打开，请用微信扫码登录视频号管理后台")
+        await self._emit_system_status(
+            room_id, "登录窗口已打开，请用微信扫码登录视频号管理后台")
         async with async_playwright() as pw:
-            browser = await pw.chromium.launch(headless=False)
+            context = await pw.chromium.launch_persistent_context(
+                self._profile_dir(), headless=False,
+                viewport={"width": 1280, "height": 800},
+                args=["--disable-blink-features=AutomationControlled"])
             try:
-                context = await browser.new_context(viewport={"width": 1280, "height": 800})
-                page = await context.new_page()
-                await page.goto(BACKEND_URL, wait_until="domcontentloaded")
+                page = context.pages[0] if context.pages else await context.new_page()
+                try:
+                    await page.goto(BACKEND_URL, wait_until="domcontentloaded",
+                                    timeout=25000)
+                except Exception:  # noqa: BLE001
+                    pass
                 deadline = time.monotonic() + 300.0
-                logged_in = False
+                logged = False
                 while time.monotonic() < deadline:
-                    if not self._needs_login(page.url):
-                        logged_in = True
-                        break
                     await asyncio.sleep(2)
-                if logged_in:
-                    await context.storage_state(path=self._storage_state_path())
+                    try:
+                        url = page.url
+                    except Exception:  # noqa: BLE001
+                        continue
+                    if not self._needs_login(url) and "login" not in url:
+                        logged = True
+                        break
+                if logged:
+                    # 等后台页完全落地（SPA 跳转稳定）
+                    await asyncio.sleep(3)
                     await self._emit_system_status(room_id, "登录成功——开始监听")
+                    logger.info(f"[wxsp] room {room_id} login ok (persistent profile)")
+                else:
+                    logger.warning(f"[wxsp] room {room_id} login window timeout")
             finally:
-                await browser.close()
-        if not self._stop_flags.get(room_id):
-            self._room_tasks[room_id] = asyncio.create_task(
-                self._run_room(room_id), name=f"wxsp-room-{room_id}")
+                await context.close()
 
     @staticmethod
     def _needs_login(url: str) -> bool:
@@ -153,12 +160,20 @@ class WechatChannelsEngine(BaseEngine):
 
     async def _run_room(self, room_id: str) -> None:
         """有界会话主循环：单页面生命周期到期后事件驱动重建（替代全局定时重启）"""
+        headless = True
         while not self._stop_flags.get(room_id):
             session_start = int(time.time())
             try:
-                await self._run_session(room_id)
+                await self._run_session(room_id, headless)
+                headless = True  # 正常到期重建恢复无头
             except asyncio.CancelledError:
                 raise
+            except NeedLoginVisible:
+                if self._stop_flags.get(room_id):
+                    return
+                await self._wait_login_visible(room_id)
+                headless = True  # 登录态入 profile，重建恢复无头
+                continue
             except Exception as e:
                 logger.warning(f"[wxsp] room {room_id} session error: {e}")
                 await self._emit_session_event(room_id, detail=f"session error: {e}")
@@ -168,19 +183,22 @@ class WechatChannelsEngine(BaseEngine):
             await self._emit_session_event(room_id, detail=f"session rebuilt after {elapsed}s")
             await asyncio.sleep(5)
 
-    async def _run_session(self, room_id: str) -> None:
+    async def _run_session(self, room_id: str, headless: bool = True) -> None:
         """单次有界会话：浏览器打开后台 → 拦截弹幕轮询接口 → 生命周期上限退出"""
         from playwright.async_api import async_playwright
 
         deadline = time.monotonic() + self._session_lifetime
         async with async_playwright() as pw:
-            browser = await pw.chromium.launch(headless=self._headless)
+            context = await pw.chromium.launch_persistent_context(
+                self._profile_dir(),
+                headless=headless,
+                viewport={"width": 1280, "height": 800},
+                args=["--disable-blink-features=AutomationControlled",
+                      "--disable-setuid-sandbox",
+                      "--hide-crash-restore-bubble"],
+            )
             try:
-                context = await browser.new_context(
-                    storage_state=self._storage_state_path(),
-                    viewport={"width": 1280, "height": 800},
-                )
-                page = await context.new_page()
+                page = context.pages[0] if context.pages else await context.new_page()
 
                 async def on_response(response) -> None:
                     try:
@@ -190,29 +208,16 @@ class WechatChannelsEngine(BaseEngine):
 
                 page.on("response", lambda r: asyncio.create_task(on_response(r)))
 
-                await page.goto(BACKEND_URL, wait_until="domcontentloaded")
+                await page.goto(BACKEND_URL, wait_until="domcontentloaded",
+                                timeout=25000)
+                # SPA 登录跳转发生在 domcontentloaded 之后——等稳再判
+                await asyncio.sleep(5)
                 if self._needs_login(page.url):
-                    # 登录态失效：改可见窗口（外层重建会话时用户可扫码）
-                    await self._emit_needs_login(room_id)
-                    self._headless = False
-                    return
+                    # 登录态失效（persistent profile 无有效会话）→ 可见窗口扫码
+                    logger.info(f"[wxsp] room {room_id} not logged in — "
+                                f"visible window for scan (url={page.url[:60]})")
+                    raise NeedLoginVisible()
                 logger.info(f"[wxsp] room {room_id} backend page ready")
-
-                # 开播工具可用性判定（2026-09-30 实测：未实名账号 liveBuild
-                # fallback 渲染首页内容——无开播工具会话即无 live/msg 轮询，
-                # 静默零消息。检测首页特征文本并明确提示）
-                try:
-                    page_text = await page.evaluate(
-                        "() => document.body ? document.body.innerText : ''")
-                    if ("昨日数据" in page_text or "最近视频" in page_text) \
-                            and "开始直播" not in page_text and "开播" not in page_text:
-                        await self._emit_system_status(
-                            room_id, "开播工具页不可用（渲染了后台首页）——"
-                                     "最常见原因：视频号未完成实名认证"
-                                     "（后台页面右上提示）。完成实名后重试；"
-                                     "实名后开播中此页将轮询弹幕")
-                except Exception:  # noqa: BLE001
-                    pass
 
                 # 导航：直播 → 直播管理 → 进入直播间（2026-09-30 用户实测
                 # 路径——弹幕/入场/点赞/礼物的 live/msg 轮询只在进入直播间
@@ -224,7 +229,7 @@ class WechatChannelsEngine(BaseEngine):
                     await asyncio.sleep(2)
                     self.mark_received(room_id, int(time.time()))
             finally:
-                await browser.close()
+                await context.close()
 
     # ---- 网络层拦截（wxlivespy 同构解析）----
 
