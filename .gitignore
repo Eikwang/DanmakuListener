@@ -91,5 +91,8 @@ BarrageGrab/
 pdd_raw.jsonl
 jd_raw.jsonl
 xhs_raw.jsonl
+*_dump.jsonl
+meituan_snapshot.json
+meituan_snapshot.jsonl
 meituan_snapshot.jsonl
 meituan_snapshot.json

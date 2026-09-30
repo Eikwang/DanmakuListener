@@ -21,8 +21,22 @@ sys.path.insert(0, ".")
 from danmaku_listener.engines.wechat_channels import WechatChannelsEngine
 
 
-async def main(room_name: str, duration: float) -> int:
+async def main(room_name: str, duration: float, dump_all: bool) -> int:
     eng = WechatChannelsEngine()
+    dump_fh = None
+    n_raw = 0
+    if dump_all:
+        dump_fh = open("wxsp_dump.jsonl", "a", encoding="utf-8")
+
+        def raw_hook(body):
+            nonlocal n_raw
+            n_raw += 1
+            dump_fh.write(json.dumps({"ts": time.time(), "kind": "raw",
+                                      "data": body},
+                                     ensure_ascii=False, default=str) + "\n")
+            dump_fh.flush()
+
+        eng._raw_hook = raw_hook
 
     def on_msg(m):
         t = m.get("type")
@@ -44,10 +58,15 @@ async def main(room_name: str, duration: float) -> int:
     eng.on_message(on_msg)
     await eng.start(room_name)
     print(f"[listen] 监听中 {duration:.0f} 秒（首次运行请先在弹出窗口扫码登录，"
-          "然后在视频号 App 开播并发弹幕/点赞）")
+          "然后在视频号 App 开播并发弹幕/点赞）"
+          + ("（live/msg 原始响应 → wxsp_dump.jsonl）" if dump_all else ""))
     await asyncio.sleep(duration)
     await eng.stop(room_name)
-    print("[done]")
+    if dump_fh:
+        dump_fh.close()
+        print(f"[done] 原始响应共 {n_raw} 条 → wxsp_dump.jsonl")
+    else:
+        print("[done]")
     return 0
 
 
@@ -55,5 +74,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("room_name", help="房间备注名（任意标识，如小号昵称）")
     ap.add_argument("--duration", type=float, default=180.0)
+    ap.add_argument("--dump-all", action="store_true",
+                    help="live/msg 原始响应写 wxsp_dump.jsonl（形态校准）")
     a = ap.parse_args()
-    sys.exit(asyncio.run(main(a.room_name, a.duration)))
+    sys.exit(asyncio.run(main(a.room_name, a.duration, a.dump_all)))

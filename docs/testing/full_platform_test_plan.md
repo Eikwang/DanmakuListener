@@ -91,7 +91,9 @@ python tools/dy_sign_smoke.py <直播间链接或ID> --duration 300
 
 ### B1. 淘宝（taobao）
 
-系统通道：AUTOlive 添加房间 `taobao:<直播间链接>`（mtop 双通道无独立冒烟工具）
+```powershell
+python tools/taobao_smoke.py "<直播间链接>" --duration 300 --dump-all
+```
 - 操作：发弹幕
 - 预期：`DANMU`、`ROOM_STATS`
 - 校准点：无
@@ -99,7 +101,7 @@ python tools/dy_sign_smoke.py <直播间链接或ID> --duration 300
 ### B2. 1688
 
 ```powershell
-python tools/alive1688_smoke.py <feedId或直播间链接> --duration 300
+python tools/live1688_smoke.py "<feedId或直播间链接>" --duration 300 --dump-all
 ```
 - **注意**：feedId 场次级——下播失效，需重新复制直播间链接
 - 操作：发弹幕（用小号在自己直播间或让朋友发）
@@ -187,8 +189,10 @@ python tools/ws_listen.py --count 50
 时间：<HH:MM>
 ```
 
-带 `--dump-all` 的平台（小红书/拼多多/京东）会把原始样本写
-`*_raw.jsonl`——反馈时提及文件已生成即可，我直接读取分析。
+**全部 12 平台冒烟脚本均支持 `--dump-all`**，dump 文件统一 `<platform>_dump.jsonl`
+（B站/斗鱼/虎牙/快手走 `protocol_listen.py --dump-all` 写 `<platform>_dump.jsonl`；
+1688 为 `1688_dump.jsonl`；抖音为 `douyin_dump.jsonl`）。反馈时提及文件已生成即可，
+我直接读取分析。dump 格式统一 `{"ts":..,"kind":"raw|wire","data":..}`。
 
 ## 九、稳定性加时项（全部通过后选做）
 

@@ -12,6 +12,7 @@ douyin_assets/ 内资产头注释。
 import argparse
 import asyncio
 import gzip
+import json
 import hashlib
 import random
 import re
@@ -79,7 +80,9 @@ def room_init(rid: str):
     return ttwid, ms_token, real_room, uid
 
 
-async def main(rid: str, duration: float) -> int:
+async def main(rid: str, duration: float, dump_all: bool = False) -> int:
+    dump_fh = open("douyin_dump.jsonl", "a", encoding="utf-8") if dump_all else None
+    n_dump = 0
     ttwid, ms_token, real_room, uid = room_init(rid)
     print(f"real_room={real_room} uid={uid[:14]}...")
     sig = get_sign(UA, real_room, uid)
@@ -144,16 +147,45 @@ async def main(rid: str, duration: float) -> int:
                     c.ParseFromString(msg.payload)
                     chat += 1
                     print(f"[弹幕{chat}] {c.user.nickName}: {c.content[:30]}")
+                    if dump_fh:
+                        import base64 as _b64
+                        dump_fh.write(json.dumps(
+                            {"ts": time.time(), "kind": "raw",
+                             "data": {"method": msg.method,
+                                      "nick": c.user.nickName,
+                                      "content": c.content,
+                                      "user_id": c.user.id,
+                                      "msg_id": c.msgId,
+                                      "payload_b64": _b64.b64encode(msg.payload).decode()}},
+                            ensure_ascii=False, default=str) + "\n")
+                        dump_fh.flush()
+                        n_dump += 1
                 elif msg.method == "WebcastGiftMessage":
                     g = dy_pb2.GiftMessage()
                     g.ParseFromString(msg.payload)
                     print(f"[礼物] {g.user.nickName}: {g.gift.name}")
+                    if dump_fh:
+                        import base64 as _b64
+                        dump_fh.write(json.dumps(
+                            {"ts": time.time(), "kind": "raw",
+                             "data": {"method": msg.method,
+                                      "nick": g.user.nickName,
+                                      "gift_name": g.gift.name,
+                                      "gift_id": g.gift.id,
+                                      "count": g.comboCount,
+                                      "payload_b64": _b64.b64encode(msg.payload).decode()}},
+                            ensure_ascii=False, default=str) + "\n")
+                        dump_fh.flush()
+                        n_dump += 1
                 elif time.monotonic() - last_hb > 10:
                     pass
             if time.monotonic() - last_hb > 10:
                 await ws.send(hb)
                 last_hb = time.monotonic()
-    print(f"total={n} chat={chat} -> {'PASS' if chat >= 3 else 'BELOW_GATE'}")
+    if dump_fh:
+        dump_fh.close()
+    print(f"total={n} chat={chat} dump={n_dump} -> "
+          f"{'PASS' if chat >= 3 else 'BELOW_GATE'}")
     return 0 if chat >= 3 else 4
 
 
@@ -161,5 +193,7 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("web_rid")
     p.add_argument("--duration", type=float, default=45.0)
+    p.add_argument("--dump-all", action="store_true",
+                   help="弹幕/礼物 protobuf 关键字段+payload 写 douyin_dump.jsonl")
     a = p.parse_args()
-    sys.exit(asyncio.run(main(a.web_rid, a.duration)))
+    sys.exit(asyncio.run(main(a.web_rid, a.duration, a.dump_all)))
