@@ -41,6 +41,25 @@ room 标识取 popId/liveid/id 参数或链接截断。纯数字 ID 无从打开
 **结论**：任何路线都需要（登录京东账号 cookie + 签名算法）或 bypass。
 需代码级开源实现支撑（liveauth 参数构造/sign 算法）——专项调研进行中。
 
+## ★ 突破：京东直播独立站（2026-09-30 用户发现）
+
+**zhibo.jd.com/liveroom?liveId=xxx**——游客可看的独立直播站，页面自建
+`wss://live-ws4.jd.com/?token=amQubWFsbF_...` 连接（页面自行完成 liveauth
+换 token，引擎免签名只拦截）。纯数字 liveId 也可直接拼 URL 进入。
+此前探测的三堵墙（liveauth 签名强制 / H5 全灭 / 商详登录墙）全部绕开。
+
+### 实测帧结构（58 帧采样实证）
+
+顶层 JSON：`datetime / from{app:jd.live, pinmd5, secretPin} / id / body / type`
+
+| 顶层 type | body.type | 契约消息 |
+| --- | --- | --- |
+| get_statistics_result | — | ROOM_STATS（current_viewer/thumbs_up_num/pv） |
+| chat_group_message | join_live_broadcast_summary | ENTER_ROOM（聚合形态"xx等16人来了"） |
+| chat_group_message | thumbs_up | LIKE（body.thumbs_up_num） |
+| chat_group_message | viewer_buy_product_summary 等 | 购买/购物车运营形态，不映射 |
+| chat_group_message | （无 body.type）nickName+content | DANMU（宽容兼容；text 类 body.type 待样本） |
+
 ## 故障排查
 
 | 现象 | 原因 | 处理 |

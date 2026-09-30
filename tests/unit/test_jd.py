@@ -48,25 +48,52 @@ def test_parse_jd_frame_shapes():
 
 
 def test_map_jd_message():
+    """2026-09-30 zhibo.jd.com 实测分发形态（58 帧采样）"""
     ts, seq = 1700000000, 1
-    danmu = map_jd_message({"type": "chat_group_message",
-                            "nickName": "观众甲", "content": "主播好"}, seq, ts)
-    assert (danmu["type"], danmu["payload"]["content"],
-            danmu["payload"]["user_name"]) == ("DANMU", "主播好", "观众甲")
+    # 统计帧 → ROOM_STATS
+    stats = map_jd_message({
+        "type": "get_statistics_result",
+        "body": {"current_viewer": 1234, "thumbs_up_num": 56, "pv": 100,
+                 "groupid": "48293857"}}, seq, ts)
+    assert stats["type"] == "ROOM_STATS"
+    assert stats["payload"]["viewer_count"] == 1234
 
-    # 字段多候选兼容
-    alt = map_jd_message({"type": "chat_group_message",
-                          "nickname": "乙", "msg": "hello"}, seq, ts)
-    assert alt["payload"]["user_name"] == "乙"
-    assert alt["payload"]["content"] == "hello"
-
-    enter = map_jd_message({"type": "join_live_broadcast",
-                            "nickName": "路人"}, seq, ts)
+    # 进场（聚合形态）
+    enter = map_jd_message({
+        "type": "chat_group_message",
+        "body": {"type": "join_live_broadcast_summary",
+                 "nickName": "123时间的玫瑰", "joinUserNum": 16,
+                 "content": "123时间的玫瑰等16人来了", "groupid": "48293857"}},
+        seq, ts)
     assert enter["type"] == "ENTER_ROOM"
+    assert enter["payload"]["user_name"] == "123时间的玫瑰"
 
-    # 无昵称/无内容 → 不 emit
-    assert map_jd_message({"type": "chat_group_message", "content": "x"}, seq, ts) is None
-    assert map_jd_message({"type": "other", "nickName": "x", "content": "y"}, seq, ts) is None
+    # 点赞
+    like = map_jd_message({
+        "type": "chat_group_message",
+        "body": {"type": "thumbs_up", "thumbs_up_num": 3}}, seq, ts)
+    assert like["type"] == "LIKE" and like["payload"]["count"] == 3
+
+    # 弹幕：body.nickName+content（text 类 body.type 待样本，宽容兼容）
+    danmu = map_jd_message({
+        "type": "chat_group_message",
+        "body": {"nickName": "观众甲", "content": "主播好",
+                 "groupid": "48293857"}}, seq, ts)
+    assert danmu["type"] == "DANMU"
+    assert danmu["payload"]["user_name"] == "观众甲"
+    assert danmu["payload"]["content"] == "主播好"
+
+    # 购买/购物车等运营形态 → 不映射
+    assert map_jd_message({
+        "type": "chat_group_message",
+        "body": {"type": "viewer_buy_product_summary", "nickName": "Xuxug",
+                 "content": "Xuxug正在购买510号商品"}}, seq, ts) is None
+    assert map_jd_message({
+        "type": "chat_group_message",
+        "body": {"type": "new_anchor_cart_number", "number": "2"}}, seq, ts) is None
+    # 非 chat_group_message 顶层
+    assert map_jd_message({"type": "other", "body": {"nickName": "x",
+                                                     "content": "y"}}, seq, ts) is None
 
 
 def test_envelope_platform_is_jd():
