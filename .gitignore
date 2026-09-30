@@ -75,6 +75,9 @@ live-text-ref/
 taobao-live-ref/
 cookie/taobao_profile/
 cookie/1688_profile/
+cookie/xhs_profile/
+cookie/pdd_profile/
+cookie/jd_profile/
 1688_capture.jsonl
 1688_samples.jsonl
 
@@ -86,3 +89,11 @@ wxlivespy/
 log*.txt
 re.txt
 DouyinBarrageGrab
+BarrageGrab/
+1688_capture.jsonl
+1688_samples.jsonl
+pdd_raw.jsonl
+jd_raw.jsonl
+xhs_raw.jsonl
+meituan_snapshot.jsonl
+meituan_snapshot.json
