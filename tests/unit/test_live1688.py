@@ -69,7 +69,11 @@ def test_envelope_platform_is_1688():
 
 @pytest.mark.asyncio
 async def test_dom_poll_emits_danmu():
-    """DOM 弹幕轮询：mock page.evaluate 返回弹幕文本 → emit DANMU（昵称:内容 解析）"""
+    """DOM 弹幕轮询：mock page.evaluate 返回 {nick,text} 条目 → emit DANMU
+
+    页面 JS 渲染源码实证：昵称在 .from（观众脱敏形态带尾冒号）、
+    内容在 .msg-text，evaluate 内已分节点提取。
+    """
     eng = Live1688Engine()
     got_list = []
 
@@ -84,7 +88,10 @@ async def test_dom_poll_emits_danmu():
         async def evaluate(self, *_a, **_k):
             FakePage.calls += 1
             if FakePage.calls == 1:
-                return ["诗***婆:测试弹幕内容", "另一用户:第二条"]
+                return [
+                    {"nick": "诗***婆", "text": "测试弹幕内容"},   # 脱敏昵称（尾冒号已在 JS 剥离）
+                    {"nick": "", "text": "无昵称条目"},            # .from 空 → 昵称置空，不得复用内容
+                ]
             return []
 
     task = asyncio.create_task(eng._poll_dom_danmu("123", FakePage()))
@@ -98,7 +105,8 @@ async def test_dom_poll_emits_danmu():
     assert len(danmus) == 2
     assert danmus[0]["payload"]["user_name"] == "诗***婆"
     assert danmus[0]["payload"]["content"] == "测试弹幕内容"
-    assert danmus[1]["payload"]["content"] == "第二条"
+    assert danmus[1]["payload"]["user_name"] == ""
+    assert danmus[1]["payload"]["content"] == "无昵称条目"
     for m in danmus:
         for k in ("contract_version", "category", "platform", "room_id",
                   "seq", "timestamp", "engine", "protocol_version", "payload"):
@@ -107,8 +115,8 @@ async def test_dom_poll_emits_danmu():
 
 
 @pytest.mark.asyncio
-async def test_dom_poll_dedup():
-    """同一弹幕文本不重复 emit（滚动历史区去重）"""
+async def test_dom_poll_nick_fallback_split():
+    """防御路径：.from 缺失时从文本拆 `昵称:内容`（两段均非空才拆）"""
     eng = Live1688Engine()
     got_list = []
 
@@ -119,7 +127,64 @@ async def test_dom_poll_dedup():
 
     class FakePage:
         async def evaluate(self, *_a, **_k):
-            return ["同一弹幕"]
+            return [{"nick": "", "text": "回显用户:回显内容"}]
+
+    task = asyncio.create_task(eng._poll_dom_danmu("123", FakePage()))
+    await asyncio.sleep(0.3)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    danmus = [m for m in got_list if m["type"] == "DANMU"]
+    assert len(danmus) == 1
+    assert danmus[0]["payload"]["user_name"] == "回显用户"
+    assert danmus[0]["payload"]["content"] == "回显内容"
+
+
+@pytest.mark.asyncio
+async def test_dom_poll_no_nick_reuse():
+    """用户实测教训回归：昵称缺失时绝不让 user_name==content"""
+    eng = Live1688Engine()
+    got_list = []
+
+    async def on_msg(m):
+        got_list.append(m)
+
+    eng.on_message(on_msg)
+
+    class FakePage:
+        async def evaluate(self, *_a, **_k):
+            return [{"nick": "", "text": "这是碳架吗"}]
+
+    task = asyncio.create_task(eng._poll_dom_danmu("123", FakePage()))
+    await asyncio.sleep(0.3)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    danmus = [m for m in got_list if m["type"] == "DANMU"]
+    assert len(danmus) == 1
+    m = danmus[0]["payload"]
+    assert m["content"] == "这是碳架吗"
+    assert m["user_name"] != m["content"]  # 核心回归断言
+
+
+@pytest.mark.asyncio
+async def test_dom_poll_dedup():
+    """同一弹幕（昵称+内容）不重复 emit（滚动历史区去重）"""
+    eng = Live1688Engine()
+    got_list = []
+
+    async def on_msg(m):
+        got_list.append(m)
+
+    eng.on_message(on_msg)
+
+    class FakePage:
+        async def evaluate(self, *_a, **_k):
+            return [{"nick": "", "text": "同一弹幕"}]
 
     task = asyncio.create_task(eng._poll_dom_danmu("123", FakePage()))
     await asyncio.sleep(0.6)

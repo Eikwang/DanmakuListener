@@ -301,30 +301,45 @@ class Live1688Engine(BaseEngine):
     async def _poll_dom_danmu(self, room_id: str, page) -> None:
         """DOM 弹幕区读取（1688 弹幕唯一可靠通道——实测网络响应无弹幕回显）
 
-        弹幕 DOM：div.pc-living-room-message > .comment-message-list >
-        .comment-message > .msg-text（文本形态 `昵称:内容`——2026-09-30
-        TESTMARK 实测定位）。每 2s 全量读取，新指纹条目 emit DANMU。
+        弹幕 DOM（页面 JS 渲染源码实证，cmod-pc-web-living-room 弹幕组件）：
+        div.comment-message 下**昵称/内容分节点**——
+        - .from     = 昵称（观众脱敏渲染形态 `首***尾:` 带尾冒号，主播原名无冒号）
+        - .msg-text = 内容（恒为纯内容，不含昵称前缀）
+        每 2s 全量读取，新指纹条目 emit DANMU。昵称缺失时置空——
+        绝不复用内容当昵称（用户实测教训：fallback 曾致 user_name==content）。
         """
-        seen: set = set()  # 已见弹幕指纹（文本 hash；有界防内存涨）
+        seen: set = set()  # 已见弹幕指纹（昵称+内容 hash；有界防内存涨）
         seen_list: list = []
         while not self._stop_flags.get(room_id):
             try:
-                texts = await page.evaluate(
+                items = await page.evaluate(
                     """() => {
                         const out = [];
                         document.querySelectorAll(
                             '.pc-living-room-message .comment-message-list .comment-message'
                         ).forEach(el => {
-                            const node = el.querySelector('.msg-text') || el;
-                            const t = (node.textContent || '').trim();
-                            if (t) out.push(t);
+                            const fromEl = el.querySelector('.from');
+                            const textEl = el.querySelector('.msg-text') || el;
+                            const nick = (((fromEl && fromEl.textContent) || '')
+                                          .trim().replace(/:$/, '')).trim();
+                            const text = (textEl.textContent || '').trim();
+                            if (text) out.push({nick: nick, text: text});
                         });
                         return out;
                     }""")
                 ts = int(time.time())
-                for text in texts:
-                    # 指纹：完整文本 hash（弹幕滚动历史区不重复）
-                    h = hash(text)
+                for item in items:
+                    nick = (item.get("nick") or "").strip()
+                    content = (item.get("text") or "").strip()
+                    # 防御：.from 缺失时从文本拆 `昵称:内容`（两段均非空才拆；
+                    # 标准渲染 .from 恒存在，此路径仅兜底回显形态）
+                    if not nick and ":" in content:
+                        n, _, c = content.partition(":")
+                        if n.strip() and c.strip():
+                            nick, content = n.strip(), c.strip()
+                    if not content:
+                        continue
+                    h = hash(f"{nick}\x00{content}")
                     if h in seen:
                         continue
                     seen.add(h)
@@ -333,13 +348,12 @@ class Live1688Engine(BaseEngine):
                         old_h = seen_list.pop(0)
                         seen.discard(old_h)
                     self.mark_received(room_id, ts)
-                    nick, _, content = text.partition(":")
                     mapped = {
                         "category": "business", "type": "DANMU",
                         "seq": self.next_seq(room_id), "timestamp": ts,
                         "payload": {"type": "DANMU",
-                                    "user_name": nick.strip(),
-                                    "content": content.strip() if content else text},
+                                    "user_name": nick,
+                                    "content": content},
                     }
                     await self._emit_message(self._envelope(room_id, mapped))
                 await asyncio.sleep(2)
