@@ -18,23 +18,30 @@ wss 握手/入组/心跳/ACK（上行协议未公开——受控页面无需逆�
    checked_show_id / message_data；弹幕在 `message_data.live_chat_list[]`
    （uid/nickname/chat_message/sub_type/chat_sub_type/can_reply）
 
-## 消息类型支持矩阵
+## 消息类型支持矩阵（2026-09-30 在播房间 450+ 条采样实测校准）
 
-| 类型 | 状态 | 备注 |
+| message_type | 契约消息 | 备注 |
 | --- | --- | --- |
-| DANMU | ⏳ 待实测 | live_chat_list[].chat_message；sub_type 区分待采样 |
-| GIFT / LIKE / ENTER_ROOM | ⏳ 待采样 | message_type 枚举待真实样本 |
+| live_chat | DANMU | message_data.live_chat_list[]（chat_message/uid/nickname/sub_type/can_reply）——与调研形态一致，实测命中 |
+| live_chat_notice | ENTER_ROOM / SOCIAL | notice_type: enter→ENTER_ROOM、favorite→SOCIAL(follow)、group_open（开团运营位）不 emit |
+| live_chat_ext_v2 | LIKE / SOCIAL | sub_type: 121(thumb_up_chat)→LIKE、116(favor)→SOCIAL(follow)、120(buy_style)→SOCIAL(buy)；body.title/content |
+| live_audience_num | ROOM_STATS | live_audience_num 观看数 |
+| show_thumb_up_count | ROOM_STATS | total_count 点赞总数 |
+| live_gift_rank | ⏳ 待采样 | 礼物榜形态（真实礼物事件待样本） |
+| anchor_rank_change / anchor_acting_notice | 不 emit | 主播榜/讲解通知 |
 
 ## 房间参数
 
-**直播间页链接**（必需）——拼多多直播间网页 URL 形态待实测
-（App 分享短链 dp.pinduoduo.com / Web 直播页），链接整体直达。
+**直播间页链接**（必需）——App 分享短链（mobile.yangkeduo.com/...，带
+_live_share_token 等参数）可在桌面浏览器打开，链接整体直达保留全部参数。
 
-## 登录与风控
+## 登录（已实测闭环）
 
-- 调研实证：拼多多弹幕需扫码登录 cookie；风控较严
-- 未登录行为待实测——若 120s 静默三段式，考虑登录闭环（1688 同款
-  NeedLoginVisible 模式，persistent profile 持久化登录态）
+- 弹幕仅登录会话推送（调研+实测双重实证）
+- 登录闭环：无头未登录 → 自动弹可见窗口 → 用户手动登录 → 恢复无头
+- **实测登录 cookie：`PDDAccessToken` / `pdd_user_id` / `pdd_user_uin`**
+  （日志动态差异检测实证）——候选列表已据此确认
+- 登录态 persistent profile 持久化，后续免登录
 
 ## 故障排查
 
