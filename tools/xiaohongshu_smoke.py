@@ -40,10 +40,11 @@ async def main(spec: str, duration: float) -> int:
             print(f"[{t}] {p}")
 
     eng.on_message(on_msg)
-    await eng.start(room_id)
+    # start 传原始 spec：链接形态保留 xsec_token 等风控参数（引擎内部提取 room_id）
+    await eng.start(spec)
     print(f"[listen] 监听中 {duration:.0f} 秒——请去直播间发弹幕/点赞！")
     await asyncio.sleep(duration)
-    await eng.stop(room_id)
+    await eng.stop(spec)
     print("[done]")
     return 0
 

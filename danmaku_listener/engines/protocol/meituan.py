@@ -45,6 +45,7 @@ POLL_INTERVAL = 1.5          # 轮询间隔（秒）——1-3s 区间取下限+�
 POLL_TIMEOUT = 10.0          # 单次 HTTP 超时
 FAIL_THRESHOLD = 40          # 连续失败阈值（约 1 分钟）→ 三段式
 DEDUP_LIMIT = 500            # commentId 去重有界集
+IDLE_NOTICE_TIMEOUT = 600.0  # 轮询正常但零新消息的静默提示阈值（10 分钟）
 
 
 class MeituanParseError(ValueError):
@@ -143,9 +144,15 @@ class MeituanPollEngine(BaseEngine):
 
         backoff = 2.0
         fail_count = 0
+        idle_since: Optional[float] = None  # 零新消息起始（静默提示用）
+        idle_notified = False
         while not self._stop_flags.get(room_id):
             try:
                 jsdata = await self._poll_once(live_id)
+                fail_count = 0
+                backoff = 2.0
+                self.mark_received(room_id, int(time.time()))
+                new_count = await self._handle_snapshot(room_id, jsdata)
             except asyncio.CancelledError:
                 raise
             except MeituanLiveEnded:
@@ -169,10 +176,20 @@ class MeituanPollEngine(BaseEngine):
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 60.0)
                 continue
-            fail_count = 0
-            backoff = 2.0
-            self.mark_received(room_id, int(time.time()))
-            await self._handle_snapshot(room_id, jsdata)
+            # 静默提示（一次性）：轮询正常但长时间零新消息——
+            # 美团接口无可靠在播判据（实测 endTime/liveStatus 均不可用），
+            # 只提示不判死，冷直播间与下播由用户区分
+            now = time.monotonic()
+            if new_count > 0:
+                idle_since, idle_notified = None, False
+            else:
+                idle_since = idle_since or now
+                if (not idle_notified and now - idle_since > IDLE_NOTICE_TIMEOUT):
+                    idle_notified = True
+                    await self._emit_system_status(
+                        room_id, "美团轮询正常但 10 分钟零新弹幕——"
+                                 "确认直播仍在进行；live_id 场次级，"
+                                 "若已下播请重新复制分享链接")
             await asyncio.sleep(POLL_INTERVAL + random.uniform(0, 0.5))
 
     # ---- 轮询与解析 ----
@@ -214,27 +231,27 @@ class MeituanPollEngine(BaseEngine):
 
         return await loop.run_in_executor(None, _follow)
 
-    async def _handle_snapshot(self, room_id: str, jsdata: Dict[str, Any]) -> None:
+    async def _handle_snapshot(self, room_id: str, jsdata: Dict[str, Any]) -> int:
         """快照 → 契约消息（倒序数组正序遍历；commentId 有界去重）
 
-        2026-09-30 历史场次实测校准：顶层 msgType 判别消息类型（2=聊天）；
-        liveInfoVo.endTime 有值=场次已结束；liveLikeCount/liveHeat → ROOM_STATS。
+        返回本轮新 emit 的消息数（静默提示用）。
+        2026-09-30 用户实测教训：liveInfoVo.endTime/liveStatus **不可用作
+        在播判据**（近期场次 endTime 同样有值、liveStatus=None）——已移除
+        该判定；场次状态只能靠弹幕流动观察（MeituanLiveEnded 仅保留给
+        网关明确报错 code!=0）。
         """
         if not isinstance(jsdata, dict):
-            return
-        live_vo = jsdata.get("liveInfoVo") or {}
-        if live_vo.get("endTime"):
-            # 场次已结束（实测：历史场次 endTime 有值、liveStatus=null）→ 三段式
-            raise MeituanLiveEnded("endTime 有值（场次已结束）")
-        await self._maybe_emit_stats(room_id, live_vo)
+            return 0
+        await self._maybe_emit_stats(room_id, jsdata.get("liveInfoVo") or {})
 
         msg_vo = jsdata.get("messageVO") or {}
         msgs = msg_vo.get("msgs")
         if not isinstance(msgs, list):
             if jsdata.get("code") not in (None, 0):
                 raise MeituanLiveEnded(f"code={jsdata.get('code')}")
-            return
+            return 0
         ts = int(time.time())
+        new_count = 0
         for one in reversed(msgs):  # 响应倒序 → 正序 emit
             if not isinstance(one, dict):
                 continue
@@ -256,6 +273,7 @@ class MeituanPollEngine(BaseEngine):
             self._seen_list.setdefault(room_id, []).append(comment_id)
             if len(self._seen_list[room_id]) > DEDUP_LIMIT:
                 self._seen[room_id].discard(self._seen_list[room_id].pop(0))
+            new_count += 1
             mapped = {
                 "category": "business", "type": "DANMU",
                 "seq": self.next_seq(room_id), "timestamp": ts,
@@ -265,6 +283,7 @@ class MeituanPollEngine(BaseEngine):
                             "user_id": str(user.get("userId", ""))},
             }
             await self._emit_message(self._envelope(room_id, mapped))
+        return new_count
 
     async def _maybe_emit_stats(self, room_id: str, live_vo: Dict[str, Any]) -> None:
         """liveLikeCount/liveHeat → ROOM_STATS（值变化才 emit，避免 1.5s 轰炸）"""

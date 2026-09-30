@@ -99,14 +99,27 @@ async def test_snapshot_dedup_and_msgtype_filter():
 
 
 @pytest.mark.asyncio
-async def test_live_ended_on_endtime():
-    """liveInfoVo.endTime 有值（场次已结束，历史场次实测）→ MeituanLiveEnded"""
+async def test_endtime_must_not_end_session():
+    """用户实测教训回归：在播/近期场次 endTime 同样有值（字段恒存在），
+    绝不能据此判定场次结束——endTime 有值时消息照常映射"""
     eng = MeituanPollEngine()
-    with pytest.raises(MeituanLiveEnded):
-        await eng._handle_snapshot(
-            "r1", {"liveInfoVo": {"beginTime": 1735553979000,
-                                  "endTime": 1735564179000},
-                   "messageVO": {"msgs": []}})
+    got = []
+
+    async def on_msg(m):
+        got.append(m)
+
+    eng.on_message(on_msg)
+    snapshot = {
+        "liveInfoVo": {"beginTime": 1757032300000, "endTime": 1757075500000,
+                       "liveStatus": None, "liveLikeCount": 4424},
+        "messageVO": {"msgs": [_danmu_msg(content="超值啊", cid="c1")]},
+    }
+    new_count = await eng._handle_snapshot("r1", snapshot)
+    assert new_count == 1
+    danmus = [m for m in got if m["type"] == "DANMU"]
+    assert len(danmus) == 1
+    stats = [m for m in got if m["type"] == "ROOM_STATS"]
+    assert stats and stats[0]["payload"]["like_count"] == 4424
 
 
 @pytest.mark.asyncio

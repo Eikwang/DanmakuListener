@@ -202,11 +202,15 @@ class XiaohongshuEngine(BaseEngine):
 
     async def _run_room(self, room_id: str) -> None:
         room_key = extract_room_id(room_id)
+        # 原始链接直达（2026-09-30 用户实测：直播间链接带 xsec_token 风控参数，
+        # 必须原样携带——纯 room_id 拼模板可能被拒；纯数字 room_id 才拼模板）
+        goto_url = (room_id.strip() if "xiaohongshu.com" in room_id
+                    else LIVE_URL_TEMPLATE.format(room_id=room_key))
         logger.info(f"[xhs] room {room_id} connecting (room_id={room_key})")
         backoff = 15.0
         while not self._stop_flags.get(room_id):
             try:
-                await self._run_session(room_id, room_key)
+                await self._run_session(room_id, room_key, goto_url)
                 backoff = 15.0
             except asyncio.CancelledError:
                 raise
@@ -230,7 +234,8 @@ class XiaohongshuEngine(BaseEngine):
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 900.0)
 
-    async def _run_session(self, room_id: str, room_key: str) -> None:
+    async def _run_session(self, room_id: str, room_key: str,
+                           goto_url: str) -> None:
         """单次有界会话：常驻页面 + WS 帧拦截 + 业务帧静默检测"""
         from playwright.async_api import async_playwright
 
@@ -271,9 +276,8 @@ class XiaohongshuEngine(BaseEngine):
                 page.on("websocket", on_websocket)
 
                 try:
-                    await page.goto(
-                        LIVE_URL_TEMPLATE.format(room_id=room_key),
-                        timeout=30000, wait_until="domcontentloaded")
+                    await page.goto(goto_url,
+                                    timeout=30000, wait_until="domcontentloaded")
                 except Exception as e:  # noqa: BLE001
                     logger.debug(f"[xhs] room {room_id} goto warning: {e}")
 
