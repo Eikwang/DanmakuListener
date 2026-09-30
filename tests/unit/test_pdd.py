@@ -80,7 +80,8 @@ def test_decode_pdd_frame_noise():
     assert decode_pdd_frame(None) == []
 
 
-def test_map_pdd_message():
+def test_map_pdd_message_live_chat_list():
+    """调研兼容形态：live_chat_list[]（弹幕文本，实测样本未现——通道待诊断）"""
     ts, seq = 1700000000, 1
     msgs = map_pdd_message({
         "message_type": "live_chat",
@@ -96,6 +97,66 @@ def test_map_pdd_message():
     assert msgs[1]["payload"]["content"] == "第二条"
     # 无 live_chat_list → 空
     assert map_pdd_message({"message_type": "other"}, seq, ts) == []
+
+
+def test_map_pdd_message_sampled_types():
+    """2026-09-30 在播房间 234 条采样实测形态"""
+    ts, seq = 1700000000, 1
+    # 观看数 → ROOM_STATS
+    stats = map_pdd_message({
+        "message_type": "live_audience_num",
+        "message_data": {"live_audience_num": 7736,
+                         "live_audience_num_desc": "7736观看"}}, seq, ts)
+    assert stats[0]["type"] == "ROOM_STATS"
+    assert stats[0]["payload"]["viewer_count"] == 7736
+
+    # 点赞总数 → ROOM_STATS 附加
+    likes = map_pdd_message({
+        "message_type": "show_thumb_up_count",
+        "message_data": {"total_count": 83}}, seq, ts)
+    assert likes[0]["payload"]["like_count"] == 83
+
+    # 进场 notice
+    enter = map_pdd_message({
+        "message_type": "live_chat_notice",
+        "message_data": {"live_chat_notice_list": [
+            {"live_chat_notice_type": "enter",
+             "live_chat_notice_data": {"user_list": [
+                 {"uid": 4012262747511, "nickname": "宋***"}]}}]}}, seq, ts)
+    assert enter[0]["type"] == "ENTER_ROOM"
+    assert enter[0]["payload"]["user_name"] == "宋***"
+    assert enter[0]["payload"]["user_id"] == "4012262747511"
+
+    # 收藏 → SOCIAL follow
+    fav = map_pdd_message({
+        "message_type": "live_chat_notice",
+        "message_data": {"live_chat_notice_list": [
+            {"live_chat_notice_type": "favorite",
+             "live_chat_notice_data": {"user_list": [{"nickname": "欢***"}]}}]}},
+        seq, ts)
+    assert fav[0]["type"] == "SOCIAL" and fav[0]["payload"]["action"] == "follow"
+
+    # group_open 开团运营位 → 不 emit
+    go = map_pdd_message({
+        "message_type": "live_chat_notice",
+        "message_data": {"live_chat_notice_list": [
+            {"live_chat_notice_type": "group_open",
+             "live_chat_notice_data": {}}]}}, seq, ts)
+    assert go == []
+
+    # ext 点赞/关注/购买
+    ext = map_pdd_message({
+        "message_type": "live_chat_ext_v2",
+        "message_data": {"live_chat_ext_list": [
+            {"sub_type": 121, "body": {"title": "最***", "content": "点了赞"}},
+            {"sub_type": 116, "body": {"title": "欢***", "content": "关注了主播"}},
+            {"sub_type": 120, "body": {"title": "王***",
+                                       "content": " 已购买2号商品"}},
+        ]}}, seq, ts)
+    kinds = [(m["type"], m["payload"].get("action")) for m in ext]
+    assert ("LIKE", None) in kinds
+    assert ("SOCIAL", "follow") in kinds
+    assert ("SOCIAL", "buy") in kinds
 
 
 def test_envelope_platform_is_pdd():

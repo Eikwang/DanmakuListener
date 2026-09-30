@@ -212,10 +212,97 @@ def decode_pdd_frame(raw: Any) -> List[Dict[str, Any]]:
 
 
 def map_pdd_message(obj: Dict[str, Any], seq: int, ts: int) -> List[Dict[str, Any]]:
-    """业务对象 → 契约消息列表（一条业务对象可能携带 live_chat_list 多条弹幕）"""
-    message_data = obj.get("message_data") or {}
+    """业务对象 → 契约消息列表（一条业务对象可能携带 list 多条事件）
+
+    2026-09-30 在播房间 234 条采样实测校准（pdd_raw.jsonl）：
+    - live_audience_num → ROOM_STATS（live_audience_num 观看数）
+    - show_thumb_up_count → ROOM_STATS 附加（total_count 点赞总数）
+    - live_chat_notice.live_chat_notice_list[]：
+      enter → ENTER_ROOM（user_list[].uid/nickname）
+      favorite → SOCIAL(follow)；group_open → 不 emit（开团商品运营位）
+    - live_chat_ext_v2.live_chat_ext_list[]：sub_type 121(thumb_up_chat) → LIKE、
+      116(live_chat_favor_message) → SOCIAL(follow)、120(live_buy_style) →
+      SOCIAL(buy)；body.title/content 组装文案
+    - 普通弹幕（调研 live_chat_list[].chat_message 形态）未见样本——
+      wss 流 240s 无文本弹幕，通道待诊断（可能 HTTP 轮询/DOM/降级推送）
+    """
+    md = obj.get("message_data") or {}
     out: List[Dict[str, Any]] = []
-    chat_list = message_data.get("live_chat_list")
+    m_type = obj.get("message_type")
+
+    if m_type == "live_audience_num":
+        num = md.get("live_audience_num")
+        if isinstance(num, int):
+            out.append({
+                "category": "business", "type": "ROOM_STATS", "seq": seq,
+                "timestamp": ts,
+                "payload": {"type": "ROOM_STATS", "viewer_count": num}})
+        return out
+
+    if m_type == "show_thumb_up_count":
+        total = md.get("total_count")
+        if isinstance(total, int):
+            out.append({
+                "category": "business", "type": "ROOM_STATS", "seq": seq,
+                "timestamp": ts,
+                "payload": {"type": "ROOM_STATS", "like_count": total}})
+        return out
+
+    if m_type == "live_chat_notice":
+        for n in md.get("live_chat_notice_list") or []:
+            if not isinstance(n, dict):
+                continue
+            data = n.get("live_chat_notice_data") or {}
+            users = data.get("user_list") or []
+            user = users[0] if users and isinstance(users[0], dict) else {}
+            n_type = n.get("live_chat_notice_type")
+            if n_type == "enter":
+                out.append({
+                    "category": "business", "type": "ENTER_ROOM", "seq": seq,
+                    "timestamp": ts,
+                    "payload": {"type": "ENTER_ROOM",
+                                "user_name": str(user.get("nickname", "")),
+                                "user_id": str(user.get("uid", ""))}})
+            elif n_type == "favorite":
+                out.append({
+                    "category": "business", "type": "SOCIAL", "seq": seq,
+                    "timestamp": ts,
+                    "payload": {"type": "SOCIAL", "action": "follow",
+                                "user_name": str(user.get("nickname", "")),
+                                "user_id": str(user.get("uid", ""))}})
+            # group_open（开团商品运营位）等不 emit
+        return out
+
+    if m_type == "live_chat_ext_v2":
+        for n in md.get("live_chat_ext_list") or []:
+            if not isinstance(n, dict):
+                continue
+            body = n.get("body") or {}
+            sub_type = n.get("sub_type")
+            title = str(body.get("title", ""))
+            content = str(body.get("content", "")).strip()
+            if sub_type == 121:  # thumb_up_chat 点赞
+                out.append({
+                    "category": "business", "type": "LIKE", "seq": seq,
+                    "timestamp": ts,
+                    "payload": {"type": "LIKE", "user_name": title, "count": 1}})
+            elif sub_type == 116:  # 关注
+                out.append({
+                    "category": "business", "type": "SOCIAL", "seq": seq,
+                    "timestamp": ts,
+                    "payload": {"type": "SOCIAL", "action": "follow",
+                                "user_name": title}})
+            elif sub_type == 120:  # 购买
+                out.append({
+                    "category": "business", "type": "SOCIAL", "seq": seq,
+                    "timestamp": ts,
+                    "payload": {"type": "SOCIAL", "action": "buy",
+                                "user_name": title,
+                                "content": content}})
+        return out
+
+    # 调研形态保留兼容：live_chat_list[]（弹幕文本，样本未现）
+    chat_list = md.get("live_chat_list")
     if isinstance(chat_list, list):
         for chat in chat_list:
             if not isinstance(chat, dict):
@@ -228,8 +315,7 @@ def map_pdd_message(obj: Dict[str, Any], seq: int, ts: int) -> List[Dict[str, An
                 "payload": {"type": "DANMU",
                             "user_name": str(chat.get("nickname", "")),
                             "content": content,
-                            "user_id": str(chat.get("uid", ""))},
-            })
+                            "user_id": str(chat.get("uid", ""))}})
     return out
 
 
