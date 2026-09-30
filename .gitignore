@@ -55,6 +55,7 @@ logs/
 
 # Cookie storage (sensitive)
 cookie/*.json
+cookie/*_profile/
 !cookie/.gitkeep
 
 # Runtime state & generated reports (machine-local)
@@ -73,11 +74,6 @@ config.local.toml
 前端显示.txt
 live-text-ref/
 taobao-live-ref/
-cookie/taobao_profile/
-cookie/1688_profile/
-cookie/xhs_profile/
-cookie/pdd_profile/
-cookie/jd_profile/
 1688_capture.jsonl
 1688_samples.jsonl
 
