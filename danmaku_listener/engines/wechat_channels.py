@@ -198,6 +198,22 @@ class WechatChannelsEngine(BaseEngine):
                     return
                 logger.info(f"[wxsp] room {room_id} backend page ready")
 
+                # 开播工具可用性判定（2026-09-30 实测：未实名账号 liveBuild
+                # fallback 渲染首页内容——无开播工具会话即无 live/msg 轮询，
+                # 静默零消息。检测首页特征文本并明确提示）
+                try:
+                    page_text = await page.evaluate(
+                        "() => document.body ? document.body.innerText : ''")
+                    if ("昨日数据" in page_text or "最近视频" in page_text) \
+                            and "开始直播" not in page_text and "开播" not in page_text:
+                        await self._emit_system_status(
+                            room_id, "开播工具页不可用（渲染了后台首页）——"
+                                     "最常见原因：视频号未完成实名认证"
+                                     "（后台页面右上提示）。完成实名后重试；"
+                                     "实名后开播中此页将轮询弹幕")
+                except Exception:  # noqa: BLE001
+                    pass
+
                 # 有界会话读循环：到期/停止信号退出（重建由外层负责）
                 while time.monotonic() < deadline and not self._stop_flags.get(room_id):
                     await asyncio.sleep(2)
