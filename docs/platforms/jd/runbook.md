@@ -30,6 +30,17 @@ room 标识取 popId/liveid/id 参数或链接截断。纯数字 ID 无从打开
 | ENTER_ROOM | ⏳ 待实测 | join_live_broadcast |
 | GIFT / LIKE | ⏳ 待采样 | 京东直播礼物/点赞帧结构未知 |
 
+## wss 直连专项探测记录（2026-09-30，押后裁定后启动）
+
+| 探测 | 结果 |
+| --- | --- |
+| liveauth 直调（api.m.jd.com/client.action） | 接口可达；无 appid 报参数缺失；带 appid=jdzb 报 `no access`；带 client/uuid 报 `signature verification failed`——**签名校验强制** |
+| H5 直播页 6 种历史 URL 形态（wq/pro.m/live.jd.com/live 等） | 全部 403/不存在/空壳 |
+| PC 商详页直播窗（item.jd.com，用户房间商品实测） | 强制登录墙（passport.jd.com 重定向） |
+
+**结论**：任何路线都需要（登录京东账号 cookie + 签名算法）或 bypass。
+需代码级开源实现支撑（liveauth 参数构造/sign 算法）——专项调研进行中。
+
 ## 故障排查
 
 | 现象 | 原因 | 处理 |
