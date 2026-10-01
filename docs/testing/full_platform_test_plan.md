@@ -54,7 +54,7 @@ ls cookie/
 ### A1. 斗鱼（douyu）
 
 ```powershell
-python tools/protocol_listen.py douyu <房间号> --duration 300
+python tools/protocol_listen.py douyu 3168536 --duration 180 --dump-all
 ```
 - 房间号示例：斗鱼直播间 URL `www.douyu.com/xxxxx` 中的数字
 - 操作：发弹幕 → 送一个礼物
@@ -64,7 +64,7 @@ python tools/protocol_listen.py douyu <房间号> --duration 300
 ### A2. B站（bilibili）
 
 ```powershell
-python tools/protocol_listen.py bilibili <房间号> --duration 300
+python tools/protocol_listen.py bilibili 1984345470 --duration 180 --dump-all
 ```
 - 操作：发弹幕 → 送礼物 → （有条件的话）购买 SC
 - 预期：`DANMU`、`GIFT`、`SUPER_CHAT`、`ENTER_ROOM`、`ROOM_STATS`
