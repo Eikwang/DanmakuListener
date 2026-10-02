@@ -14,7 +14,9 @@
 
 import argparse
 import asyncio
+import json
 import sys
+import time
 
 sys.path.insert(0, ".")
 
@@ -22,21 +24,19 @@ from danmaku_listener.engines.wechat_channels import WechatChannelsEngine
 
 
 async def main(room_name: str, duration: float, dump_all: bool) -> int:
-    eng = WechatChannelsEngine()
-    dump_fh = None
+    dump_fh = open("wxsp_dump.jsonl", "a", encoding="utf-8") if dump_all else None
     n_raw = 0
-    if dump_all:
-        dump_fh = open("wxsp_dump.jsonl", "a", encoding="utf-8")
 
-        def raw_hook(body):
-            nonlocal n_raw
-            n_raw += 1
-            dump_fh.write(json.dumps({"ts": time.time(), "kind": "raw",
-                                      "data": body},
-                                     ensure_ascii=False, default=str) + "\n")
-            dump_fh.flush()
+    def raw_hook(body):
+        nonlocal n_raw
+        n_raw += 1
+        dump_fh.write(json.dumps({"ts": time.time(), "kind": "raw",
+                                  "data": body},
+                                 ensure_ascii=False, default=str) + "\n")
+        dump_fh.flush()
 
-        eng._raw_hook = raw_hook
+    # raw_hook 构造传参（事后属性赋值在引擎异步启动前存在时序风险）
+    eng = WechatChannelsEngine(raw_hook=raw_hook if dump_all else None)
 
     def on_msg(m):
         t = m.get("type")
