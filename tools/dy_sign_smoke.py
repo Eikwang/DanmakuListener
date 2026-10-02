@@ -155,7 +155,7 @@ async def main(rid: str, duration: float, dump_all: bool = False) -> int:
                                       "nick": c.user.nickName,
                                       "content": c.content,
                                       "user_id": c.user.id,
-                                      "msg_id": c.msgId,
+                                      "msg_id": getattr(c, "msgId", None),
                                       "payload_b64": _b64.b64encode(msg.payload).decode()}},
                             ensure_ascii=False, default=str) + "\n")
                         dump_fh.flush()

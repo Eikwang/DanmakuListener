@@ -127,14 +127,15 @@ def test_map_pdd_message_sampled_types():
     assert enter[0]["payload"]["user_name"] == "宋***"
     assert enter[0]["payload"]["user_id"] == "4012262747511"
 
-    # 关注/开团 → 用户裁定不监听（SOCIAL 不映射）
+    # 关注（favorite）→ SOCIAL follow（2026-10-03 裁定更新：恢复关注监听）
     fav = map_pdd_message({
         "message_type": "live_chat_notice",
         "message_data": {"live_chat_notice_list": [
             {"live_chat_notice_type": "favorite",
              "live_chat_notice_data": {"user_list": [{"nickname": "欢***"}]}}]}},
         seq, ts)
-    assert fav == []
+    assert fav and fav[0]["type"] == "SOCIAL"
+    assert fav[0]["payload"]["action"] == "follow"
     go = map_pdd_message({
         "message_type": "live_chat_notice",
         "message_data": {"live_chat_notice_list": [
@@ -151,9 +152,10 @@ def test_map_pdd_message_sampled_types():
             {"sub_type": 120, "body": {"title": "王***",
                                        "content": " 已购买2号商品"}},
         ]}}, seq, ts)
-    assert len(ext) == 1
-    assert ext[0]["type"] == "LIKE"
-    assert ext[0]["payload"]["user_name"] == "最***"
+    kinds = [(m["type"], m["payload"].get("action")) for m in ext]
+    assert ("LIKE", None) in kinds
+    assert ("SOCIAL", "follow") in kinds  # 116 恢复
+    assert ("SOCIAL", None) not in kinds  # 120 购买仍不映射
 
 
 def test_envelope_platform_is_pdd():

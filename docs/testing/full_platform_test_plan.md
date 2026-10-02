@@ -57,7 +57,7 @@ ls cookie/
 ### A1. 斗鱼（douyu）
 
 ```powershell
-python tools/protocol_listen.py douyu 3168536 --duration 180 --dump-all
+python tools/protocol_listen.py douyu 320155 --duration 300 --dump-all
 ```
 - 房间号示例：斗鱼直播间 URL `www.douyu.com/xxxxx` 中的数字
 - 操作：发弹幕 → 送一个礼物
@@ -67,7 +67,7 @@ python tools/protocol_listen.py douyu 3168536 --duration 180 --dump-all
 ### A2. B站（bilibili）
 
 ```powershell
-python tools/protocol_listen.py bilibili 1984345470 --duration 180 --dump-all
+python tools/protocol_listen.py bilibili 1905051217 --duration 300 --dump-all
 ```
 - 操作：发弹幕 → 送礼物 → （有条件的话）购买 SC
 - 预期：`DANMU`、`GIFT`、`SUPER_CHAT`、`ENTER_ROOM`、`ROOM_STATS`
@@ -76,7 +76,7 @@ python tools/protocol_listen.py bilibili 1984345470 --duration 180 --dump-all
 ### A3. 虎牙（huya）
 
 ```powershell
-python tools/protocol_listen.py huya 998 --duration 180
+python tools/protocol_listen.py huya 116864 --duration 300 --dump-all
 ```
 - 操作：发弹幕 → 送礼物
 - 预期：`DANMU`、`GIFT`
@@ -86,7 +86,7 @@ python tools/protocol_listen.py huya 998 --duration 180
 ### A4. 抖音（douyin）
 
 ```powershell
-python tools/dy_sign_smoke.py 66070580592 --duration 180
+python tools/dy_sign_smoke.py 826353906172 --duration 300 --dump-all
 ```
 - 操作：发弹幕 → 点赞 → 送礼物
 - 预期：`DANMU`、`LIKE`、`GIFT`
@@ -95,7 +95,7 @@ python tools/dy_sign_smoke.py 66070580592 --duration 180
 ### B1. 淘宝（taobao）
 
 ```powershell
-python tools/taobao_smoke.py 3962034201331759 --duration 180 --dump-all
+python tools/taobao_smoke.py 2831914503635013 --duration 300 --dump-all
 ```
 - 操作：发弹幕
 - 预期：`DANMU`、`ROOM_STATS`
@@ -104,7 +104,7 @@ python tools/taobao_smoke.py 3962034201331759 --duration 180 --dump-all
 ### B2. 1688
 
 ```powershell
-python tools/live1688_smoke.py "https://live.1688.com/zb/play.html?spm=a261cz.8342334.joy2j0q4.11.5cae6f65t518To&userId=2696879288&feedId=3575790093777340&__pageId__=190453&cms_id=190453&wh_pha=true" --duration 180 --dump-all
+python tools/live1688_smoke.py "https://live.1688.com/zb/play.html?spm=a261cz.8342334.joy2j0q4.6.48216f655F0xPT&userId=2139125419&feedId=2184373990275936&__pageId__=190453&cms_id=190453&wh_pha=true" --duration 300 --dump-all
 ```
 - **注意**：feedId 场次级——下播失效，需重新复制直播间链接
 - 操作：发弹幕（用小号在自己直播间或让朋友发）
@@ -114,7 +114,7 @@ python tools/live1688_smoke.py "https://live.1688.com/zb/play.html?spm=a261cz.83
 ### B3. 小红书（xiaohongshu）
 
 ```powershell
-python tools/xiaohongshu_smoke.py 570478318271695548 --duration 180 --dump-all
+python tools/xiaohongshu_smoke.py 570478706428621902 --duration 300 --dump-all
 ```
 - 链接务必加引号（含 `&`）；直播中发弹幕/点赞/送礼
 - 预期：`DANMU`、`ENTER_ROOM`、`LIKE`(praise)、`GIFT`(gift_dock_and_effect)、`SOCIAL`(follow/share)
@@ -123,7 +123,7 @@ python tools/xiaohongshu_smoke.py 570478318271695548 --duration 180 --dump-all
 ### B4. 京东（jd）
 
 ```powershell
-python tools/jd_smoke.py 48463211 --duration 180 --dump-all
+python tools/jd_smoke.py 48421102 --duration 180 --dump-all
 ```
 - 独立站 `zhibo.jd.com/liveroom?liveId=xxx`，游客可测
 - 操作：发弹幕 → 点赞
@@ -133,7 +133,7 @@ python tools/jd_smoke.py 48463211 --duration 180 --dump-all
 ### B5. 拼多多（pdd）
 
 ```powershell
-python tools/pdd_smoke.py "https://mobile.yangkeduo.com/transac_virtual_card_pwd.html?page_from=601129&mall_id=923938458&refer_share_token=wBfBQkSaaQRsr_1s93GKR5SHS1t8XvG5CD_d6fnfWBA&_live_ext_info=GVQIU42CW4KVXE3E72LAJZAOVAROQ77HT5OCOIQG3SL43MLL2TKUB4F5GR6ETXABLW24JUMKCZSYU&_live_share_token=CRQ46EEGIEMXATU2NPB2SDCKSO66FKYCE664EMXVDFUKYL5JUTT3QWFUH7GKE7JHNJIOGUYKMVSEX4EBJGNNDLTNINZZRERACUX76HROJEGFGFBQ7AT25CKFHJAB5DIB&refer_share_id=ffbd188f3cee45c7b3e886fd1871a3eb&refer_share_uin=5XIIK3QRO5TRHOPKCTMJNNMTF4_GEXDA&refer_share_channel=copy_link&refer_share_form=text" --duration 180 --dump-all
+python tools/pdd_smoke.py "https://mobile.yangkeduo.com/transac_virtual_card_pwd.html?page_from=601129&mall_id=461258830&refer_share_token=0UO32GX76Kd1B4eQztApSJSHS1t8XvG5CD_d6fnfWBA&_live_ext_info=GVQIU42CW4KVXE3E72LAJZAOVCS3LHKP7P4DR47MRQOGV7AJ2Q3D6EZOMTCLIHW4LLVJXEAVZUK4K&_live_share_token=CRQ46EEGIEMXATU2NPB2SDCKSO66FKYCE664EMXVDFUKYL5JUTT3QWFUH7GKE7JHNJIOGUYKMVSEWQLOFN64GT6PK6F45TMNOJJ6EY6EE2N3ENBZ6OIU2VGGL35PMYMG&refer_share_id=ebe21877dee544098e3a046bafbc825f&refer_share_uin=5XIIK3QRO5TRHOPKCTMJNNMTF4_GEXDA&refer_share_channel=copy_link&refer_share_form=text" --duration 300 --dump-all
 ```
 - 首次弹扫码窗口登录（profile 已有登录态则免）；业务消息仅入场/弹幕/点赞（已裁定）
 - 操作：发弹幕 → 点赞
@@ -142,7 +142,7 @@ python tools/pdd_smoke.py "https://mobile.yangkeduo.com/transac_virtual_card_pwd
 ### C1. 快手（kuaishou）
 
 ```powershell
-python tools/protocol_listen.py kuaishou dawang666nb --duration 180 --dump-all
+python tools/protocol_listen.py kuaishou 3xz96kaifhw8ec4 --duration 300 --dump-all
 ```
 - 首次弹扫码登录（登录态持久化）
 - 操作：发弹幕
