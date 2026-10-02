@@ -73,7 +73,7 @@ python tools/protocol_listen.py bilibili 1984345470 --duration 180 --dump-all
 ### A3. 虎牙（huya）
 
 ```powershell
-python tools/protocol_listen.py huya <房间号> --duration 300
+python tools/protocol_listen.py huya 998 --duration 180
 ```
 - 操作：发弹幕 → 送礼物
 - 预期：`DANMU`、`GIFT`
@@ -83,7 +83,7 @@ python tools/protocol_listen.py huya <房间号> --duration 300
 ### A4. 抖音（douyin）
 
 ```powershell
-python tools/dy_sign_smoke.py <直播间链接或ID> --duration 300
+python tools/dy_sign_smoke.py 66070580592 --duration 180
 ```
 - 操作：发弹幕 → 点赞 → 送礼物
 - 预期：`DANMU`、`LIKE`、`GIFT`
@@ -92,7 +92,7 @@ python tools/dy_sign_smoke.py <直播间链接或ID> --duration 300
 ### B1. 淘宝（taobao）
 
 ```powershell
-python tools/taobao_smoke.py "<直播间链接>" --duration 300 --dump-all
+python tools/taobao_smoke.py 3962034201331759 --duration 180 --dump-all
 ```
 - 操作：发弹幕
 - 预期：`DANMU`、`ROOM_STATS`
@@ -101,7 +101,7 @@ python tools/taobao_smoke.py "<直播间链接>" --duration 300 --dump-all
 ### B2. 1688
 
 ```powershell
-python tools/live1688_smoke.py "<feedId或直播间链接>" --duration 300 --dump-all
+python tools/live1688_smoke.py "https://live.1688.com/zb/play.html?spm=a261cz.8342334.joy2j0q4.11.5cae6f65t518To&userId=2696879288&feedId=3575790093777340&__pageId__=190453&cms_id=190453&wh_pha=true" --duration 180 --dump-all
 ```
 - **注意**：feedId 场次级——下播失效，需重新复制直播间链接
 - 操作：发弹幕（用小号在自己直播间或让朋友发）
@@ -111,7 +111,7 @@ python tools/live1688_smoke.py "<feedId或直播间链接>" --duration 300 --dum
 ### B3. 小红书（xiaohongshu）
 
 ```powershell
-python tools/xiaohongshu_smoke.py "<直播间页链接>" --duration 300 --dump-all
+python tools/xiaohongshu_smoke.py 570478318271695548 --duration 180 --dump-all
 ```
 - 链接务必加引号（含 `&`）；直播中发弹幕/点赞/送礼
 - 预期：`DANMU`、`ENTER_ROOM`、`LIKE`(praise)、`GIFT`(gift_dock_and_effect)、`SOCIAL`(follow/share)
@@ -120,7 +120,7 @@ python tools/xiaohongshu_smoke.py "<直播间页链接>" --duration 300 --dump-a
 ### B4. 京东（jd）
 
 ```powershell
-python tools/jd_smoke.py <liveId或zhibo.jd.com链接> --duration 300
+python tools/jd_smoke.py 48463211 --duration 180 --dump-all
 ```
 - 独立站 `zhibo.jd.com/liveroom?liveId=xxx`，游客可测
 - 操作：发弹幕 → 点赞
@@ -130,7 +130,7 @@ python tools/jd_smoke.py <liveId或zhibo.jd.com链接> --duration 300
 ### B5. 拼多多（pdd）
 
 ```powershell
-python tools/pdd_smoke.py "<分享链接>" --duration 300 --dump-all
+python tools/pdd_smoke.py "https://mobile.yangkeduo.com/transac_virtual_card_pwd.html?page_from=601129&mall_id=923938458&refer_share_token=wBfBQkSaaQRsr_1s93GKR5SHS1t8XvG5CD_d6fnfWBA&_live_ext_info=GVQIU42CW4KVXE3E72LAJZAOVAROQ77HT5OCOIQG3SL43MLL2TKUB4F5GR6ETXABLW24JUMKCZSYU&_live_share_token=CRQ46EEGIEMXATU2NPB2SDCKSO66FKYCE664EMXVDFUKYL5JUTT3QWFUH7GKE7JHNJIOGUYKMVSEX4EBJGNNDLTNINZZRERACUX76HROJEGFGFBQ7AT25CKFHJAB5DIB&refer_share_id=ffbd188f3cee45c7b3e886fd1871a3eb&refer_share_uin=5XIIK3QRO5TRHOPKCTMJNNMTF4_GEXDA&refer_share_channel=copy_link&refer_share_form=text" --duration 180 --dump-all
 ```
 - 首次弹扫码窗口登录（profile 已有登录态则免）；业务消息仅入场/弹幕/点赞（已裁定）
 - 操作：发弹幕 → 点赞
@@ -139,7 +139,7 @@ python tools/pdd_smoke.py "<分享链接>" --duration 300 --dump-all
 ### C1. 快手（kuaishou）
 
 ```powershell
-python tools/protocol_listen.py kuaishou <主播ID> --duration 300
+python tools/protocol_listen.py kuaishou dawang666nb --duration 180 --dump-all
 ```
 - 首次弹扫码登录（登录态持久化）
 - 操作：发弹幕
@@ -149,7 +149,7 @@ python tools/protocol_listen.py kuaishou <主播ID> --duration 300
 ### C2. 视频号（wechat_channels）
 
 ```powershell
-python tools/wxsp_smoke.py <备注名> --duration 600
+python tools/wxsp_smoke.py dw --duration 180 --dump-all
 ```
 - **前置：小号开播中**；浏览器窗口保持打开不要关闭（登录态靠存活页面续命）
 - 操作：直播间发弹幕/点赞/送礼/让朋友进出
