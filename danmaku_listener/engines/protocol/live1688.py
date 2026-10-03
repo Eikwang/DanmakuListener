@@ -32,6 +32,9 @@ LIVE_URL_TEMPLATE = "https://live.1688.com/zb/play.html?feedId={feed_id}"
 PULL_API_ANCHOR = "pullnativemsg"
 SILENCE_TIMEOUT = 90.0  # 弹幕接口响应静默阈值（页面统计约 30s 一条）
 
+# 入场横幅文本形态（2026-10-03 探测实证 3 例）："{脱敏昵称} 进入直播间"
+_BANNER_RE = re.compile(r"^(.{1,30}?)\s*进入直播间$")
+
 HEARTBEAT_FRAME = b"\x3a\x02hb"
 
 
@@ -265,14 +268,20 @@ class Live1688Engine(ControlledPageEngine):
         - .msg-text = 内容（恒为纯内容，不含昵称前缀）
         每 2s 全量读取，新指纹条目 emit DANMU。昵称缺失时置空——
         绝不复用内容当昵称（用户实测教训：fallback 曾致 user_name==content）。
+
+        入场横幅（2026-10-03 MutationObserver 探测实证）：pull 通道无入场
+        消息，唯一载体 = DIV.biz-info-message-container（400ms 滑入横幅），
+        文本 `{脱敏昵称} 进入直播间`——解析昵称 emit ENTER_ROOM。
         """
         seen: set = set()  # 已见弹幕指纹（昵称+内容 hash；有界防内存涨）
         seen_list: list = []
+        banner_seen: set = set()  # 已见横幅文本指纹（同一套有界策略）
+        banner_seen_list: list = []
         while not self._stop_flags.get(room_id):
             try:
-                items = await page.evaluate(
+                data = await page.evaluate(
                     """() => {
-                        const out = [];
+                        const danmu = [];
                         document.querySelectorAll(
                             '.pc-living-room-message .comment-message-list .comment-message'
                         ).forEach(el => {
@@ -281,10 +290,18 @@ class Live1688Engine(ControlledPageEngine):
                             const nick = (((fromEl && fromEl.textContent) || '')
                                           .trim().replace(/:$/, '')).trim();
                             const text = (textEl.textContent || '').trim();
-                            if (text) out.push({nick: nick, text: text});
+                            if (text) danmu.push({nick: nick, text: text});
                         });
-                        return out;
+                        const banners = [];
+                        document.querySelectorAll(
+                            '.biz-info-message-container'
+                        ).forEach(el => {
+                            const t = (el.textContent || '').trim();
+                            if (t) banners.push(t);
+                        });
+                        return {danmu: danmu, banners: banners};
                     }""")
+                items = data.get("danmu") or []
                 ts = int(time.time())
                 if items and self._raw_hook is not None:
                     try:
@@ -317,6 +334,30 @@ class Live1688Engine(ControlledPageEngine):
                         "payload": {"type": "DANMU",
                                     "user_name": nick,
                                     "content": content},
+                    }
+                    await self._emit_message(self._envelope(room_id, mapped))
+                # 入场横幅 → ENTER_ROOM（文本指纹去重；昵称脱敏形态与弹幕一致）
+                for text in data.get("banners") or []:
+                    if text in banner_seen:
+                        continue
+                    banner_seen.add(text)
+                    banner_seen_list.append(text)
+                    if len(banner_seen_list) > 200:
+                        banner_seen.discard(banner_seen_list.pop(0))
+                    m = _BANNER_RE.match(text)
+                    if not m:
+                        continue
+                    self.mark_received(room_id, ts)
+                    if self._raw_hook is not None:
+                        try:
+                            self._raw_hook({"source": "banner", "text": text})
+                        except Exception:  # noqa: BLE001
+                            pass
+                    mapped = {
+                        "category": "business", "type": "ENTER_ROOM",
+                        "seq": self.next_seq(room_id), "timestamp": ts,
+                        "payload": {"type": "ENTER_ROOM",
+                                    "user_name": m.group(1).strip()},
                     }
                     await self._emit_message(self._envelope(room_id, mapped))
                 # pull 未映射 60s 汇总（2026-10-03 用户实测 DEBUG 刷屏降噪）

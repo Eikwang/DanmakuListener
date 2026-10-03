@@ -27,6 +27,18 @@ def test_parse_base64_mixed():
     assert objs == [{"nick": "u", "content": "hi"}]
 
 
+def test_banner_regex_enter_room():
+    """入场横幅文本形态（2026-10-03 探测实证 3 例）：脱敏昵称+进入直播间"""
+    from danmaku_listener.engines.protocol.live1688 import _BANNER_RE
+
+    m = _BANNER_RE.match("k***1 进入直播间")
+    assert m and m.group(1).strip() == "k***1"
+    m = _BANNER_RE.match("t***8进入直播间")  # 无空格变体
+    assert m and m.group(1).strip() == "t***8"
+    assert _BANNER_RE.match("主播上架了新商品") is None  # 非入场横幅不解析
+    assert _BANNER_RE.match("进入直播间") is None  # 空昵称拒绝
+
+
 def test_map_chat_by_subtype():
     obj = {"subType": 10001, "nick": "用户A", "userid": "7", "content": "主播好"}
     mapped = Live1688Engine._map_message("123", obj, 1, 1700000000)
@@ -104,11 +116,11 @@ async def test_dom_poll_emits_danmu():
         async def evaluate(self, *_a, **_k):
             FakePage.calls += 1
             if FakePage.calls == 1:
-                return [
+                return {"danmu": [
                     {"nick": "诗***婆", "text": "测试弹幕内容"},   # 脱敏昵称（尾冒号已在 JS 剥离）
                     {"nick": "", "text": "无昵称条目"},            # .from 空 → 昵称置空，不得复用内容
-                ]
-            return []
+                ], "banners": []}
+            return {"danmu": [], "banners": []}
 
     task = asyncio.create_task(eng._poll_dom_danmu("123", FakePage()))
     await asyncio.sleep(0.3)
@@ -143,7 +155,7 @@ async def test_dom_poll_nick_fallback_split():
 
     class FakePage:
         async def evaluate(self, *_a, **_k):
-            return [{"nick": "", "text": "回显用户:回显内容"}]
+            return {"danmu": [{"nick": "", "text": "回显用户:回显内容"}], "banners": []}
 
     task = asyncio.create_task(eng._poll_dom_danmu("123", FakePage()))
     await asyncio.sleep(0.3)
@@ -171,7 +183,7 @@ async def test_dom_poll_no_nick_reuse():
 
     class FakePage:
         async def evaluate(self, *_a, **_k):
-            return [{"nick": "", "text": "这是碳架吗"}]
+            return {"danmu": [{"nick": "", "text": "这是碳架吗"}], "banners": []}
 
     task = asyncio.create_task(eng._poll_dom_danmu("123", FakePage()))
     await asyncio.sleep(0.3)
@@ -200,7 +212,7 @@ async def test_dom_poll_dedup():
 
     class FakePage:
         async def evaluate(self, *_a, **_k):
-            return [{"nick": "", "text": "同一弹幕"}]
+            return {"danmu": [{"nick": "", "text": "同一弹幕"}], "banners": []}
 
     task = asyncio.create_task(eng._poll_dom_danmu("123", FakePage()))
     await asyncio.sleep(0.6)
@@ -210,6 +222,36 @@ async def test_dom_poll_dedup():
     except asyncio.CancelledError:
         pass
     assert len(got_list) == 1
+
+
+@pytest.mark.asyncio
+async def test_dom_poll_banner_enter_room():
+    """入场横幅（DIV.biz-info-message-container）→ ENTER_ROOM，文本指纹去重
+    （2026-10-03 探测实证：pull 通道无入场消息，横幅为唯一载体）"""
+    eng = Live1688Engine()
+    got_list = []
+
+    async def on_msg(m):
+        got_list.append(m)
+
+    eng.on_message(on_msg)
+
+    class FakePage:
+        async def evaluate(self, *_a, **_k):
+            return {"danmu": [],
+                    "banners": ["k***1 进入直播间", "主播上架了新商品"]}
+
+    task = asyncio.create_task(eng._poll_dom_danmu("123", FakePage()))
+    await asyncio.sleep(0.3)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    enters = [m for m in got_list if m["type"] == "ENTER_ROOM"]
+    assert len(enters) == 1  # "主播上架了新商品" 不匹配横幅形态，不 emit
+    assert enters[0]["payload"]["user_name"] == "k***1"
+    assert enters[0]["platform"] == "1688"
 
 
 def test_protocol_version():
