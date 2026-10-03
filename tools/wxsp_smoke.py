@@ -1,15 +1,21 @@
 # -*- coding: utf-8 -*-
-"""视频号直播弹幕冒烟工具
+"""视频号直播弹幕冒烟工具（无头常驻版——与系统监听同引擎同逻辑）
 
 用法：
-    python tools/wxsp_smoke.py <房间备注名> [--duration 180]
+    python tools/wxsp_smoke.py <房间备注名> [--duration 180] [--dump-all]
 
 流程：
-1. 首次运行自动弹出浏览器 → 用微信扫码登录视频号管理后台（channels.weixin.qq.com）
+1. 默认**无头运行**（无浏览器窗口——2026-10-03 无头常驻模式，系统运行即监听）。
+   登录态过期时自动弹出可见浏览器窗口 → 用微信扫码登录视频号管理后台
    （需一个有视频号直播权限的微信小号——监听自己后台，只读不发送）
-2. 登录成功后自动开始监听：在视频号 App 开一场直播，然后在直播间
-   发弹幕/点赞/送礼/进出来对照输出
-3. 登录态持久化（cookie/wechat_channels_state.json），后续免扫码
+   → 扫完自动切回无头继续监听（cookie 热切换实测通过）。
+2. 在视频号 App 开播，然后在直播间发弹幕/点赞/送礼/关注/进出对照输出。
+3. 登录态持久化（cookie/wxsp_profile），后续免扫码。
+
+与系统监听（AUTOlive）的一致性：
+- 同引擎（danmaku_listener.engines.wechat_channels），消息解析完全一致
+- 差异仅在消费端呈现：系统端 LIKE 走 5s 聚合进对话链（"张三、李四 等 N 人
+  点赞"），脚本端逐条打印（细粒度验证昵称/wording 更直观）
 """
 
 import argparse
@@ -46,10 +52,18 @@ async def main(room_name: str, duration: float, dump_all: bool) -> int:
         elif t == "ENTER_ROOM":
             print(f"[ENTER] {p.get('user_name')}")
         elif t == "LIKE":
-            print(f"[LIKE] {p.get('user_name')} x{p.get('count')}")
+            # 新版点赞（20122）：payload.content = "赞了直播"（wording）
+            wording = f" ({p.get('content')})" if p.get("content") else ""
+            print(f"[LIKE] {p.get('user_name') or '有人'}{wording} x{p.get('count')}")
         elif t == "GIFT":
+            value = f" 价值{p.get('gift_value')}(微信豆)" if p.get("gift_value") else ""
             print(f"[GIFT] {p.get('user_name')} → {p.get('gift_name')} "
-                  f"x{p.get('gift_count')}")
+                  f"x{p.get('gift_count')}{value}")
+        elif t == "SOCIAL":
+            action = p.get("action") or ""
+            label = {"follow": "关注了主播"}.get(action, action)
+            print(f"[SOCIAL] {p.get('user_name')} {label}"
+                  + (f" ({p.get('content')})" if p.get("content") else ""))
         elif t in ("LIVE_STATUS_CHANGE", "ENGINE_STATUS"):
             print(f"[{t}] {p}")
         else:
@@ -57,9 +71,10 @@ async def main(room_name: str, duration: float, dump_all: bool) -> int:
 
     eng.on_message(on_msg)
     await eng.start(room_name)
-    print(f"[listen] 监听中 {duration:.0f} 秒（首次运行请先在弹出窗口扫码登录，"
-          "然后在视频号 App 开播并发弹幕/点赞）"
-          + ("（live/msg 原始响应 → wxsp_dump.jsonl）" if dump_all else ""))
+    print(f"[listen] 无头监听中 {duration:.0f} 秒（登录态过期时会自动弹出可见"
+          "窗口，请扫码；扫码后自动切回无头）。请在视频号 App 开播并发"
+          "弹幕/点赞/送礼/关注" + ("（live/msg 原始响应 → wxsp_dump.jsonl）"
+                                   if dump_all else ""))
     await asyncio.sleep(duration)
     await eng.stop(room_name)
     if dump_fh:
