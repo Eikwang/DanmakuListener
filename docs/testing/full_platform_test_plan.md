@@ -149,16 +149,19 @@ python tools/protocol_listen.py kuaishou 3xz96kaifhw8ec4 --duration 300 --dump-a
 - 预期：`DANMU`
 - 校准点：无
 
-### C2. 视频号（wechat_channels）
+### C2. 视频号（wechat_channels）——✅ 验收通过（2026-10-03）
 
 ```powershell
 python tools/wxsp_smoke.py dw --duration 180 --dump-all
 ```
-- **前置：小号开播中**；浏览器窗口保持打开不要关闭（登录态靠存活页面续命）
+- **前置：小号开播中**；无头常驻模式（登录态过期自动弹可见窗口扫码）
 - 操作：直播间发弹幕/点赞/送礼/让朋友进出
-- 预期：`DANMU`、`ENTER_ROOM`、`LIKE`、`GIFT`(含微信币价值)、`SOCIAL`(粉丝等级)、`ROOM_STATS`、`LIVE_STATUS_CHANGE`
-- 校准点：礼物名（payload.content）/价值（微信豆）/关注消息（unhandled msgList type 日志）
-- **dump 已修复**（此前 wxsp_smoke 缺 json/time import 致空文件）——本轮务必带 --dump-all
+- 预期：`DANMU`、`ENTER_ROOM`、`LIKE`、`GIFT`(含微信币价值)、`SOCIAL`(关注/粉丝等级)、`ROOM_STATS`、`LIVE_STATUS_CHANGE`
+- **验收结论**：弹幕/进场/关注/礼物/总点赞量全部正常；点赞人昵称**严格帧
+  驱动**（微信后台偶发推帧，4 次点赞约 1 帧带昵称——协议边界，见 runbook
+  "协议边界"节）；观看人数为当前在线口径（后台无累计字段）
+- 诊断：serve 启动前 `$env:WXSP_RAW_DUMP = "wxsp_serve_dump.jsonl"`
+  → 系统端 live/msg 原始响应落盘
 
 ## 六、系统通道验收（冒烟通过后做）
 
@@ -184,9 +187,8 @@ python tools/ws_listen.py --count 50
 | 斗鱼 | 礼物名/价格 | 送礼对照 dump |
 | 小红书 | 礼物价值（薯币）/连击计数 | --dump-all 后送礼 |
 | 拼多多 | **系统通道弹幕**（cookie_dir 修复后需重启 AUTOlive）| 重启后添加房间 |
-| 视频号 | 礼物名（content 优先）/关注 msgList type/点赞昵称 | --dump-all 后操作 |
-| 京东 | 进场聚合文案 | 记录 content 样例 |
-| 视频号 | 窗口勿关闭（关闭会自动重启，可能需重新扫码） | 观察 ENGINE_STATUS |
+| 视频号 | ✅ 验收通过（2026-10-03）：严格帧驱动点赞 + 在线口径观看数，见 C2 节 | — |
+| 京东 | 进场聚合文案 | 记录 content 样本 |
 
 ## 八、问题反馈模板
 
