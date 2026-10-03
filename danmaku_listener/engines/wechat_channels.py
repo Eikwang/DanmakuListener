@@ -241,6 +241,34 @@ class WechatChannelsEngine(ControlledPageEngine):
             logger.debug(f"[wxsp] 最小化失败（不影响监听）: {e}")
 
     @staticmethod
+    async def _click_any_frame(page, texts, timeout_s: float = 6.0,
+                               exact: bool = True) -> bool:
+        """跨 frame 文本点击（2026-10-03 终极根因：中控页内容在 iframe
+        /micro/live/liveBuild 里——主 document 的 querySelector 永远找不到
+        iframe 内按钮；Playwright frame locator 自动处理 iframe 定位与偏移）"""
+        import asyncio as _asyncio
+
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            for fr in page.frames:
+                for text in texts:
+                    try:
+                        loc = fr.get_by_text(text, exact=exact)
+                        cnt = await loc.count()
+                        # 遍历全部候选：第一个可能不可见（hover 菜单/隐藏态），
+                        # click 抛异常时继续试下一个（v3 实证 clicked[-1] 可见）
+                        for i in range(cnt):
+                            try:
+                                await loc.nth(i).click(timeout=2000)
+                                return True
+                            except Exception:  # noqa: BLE001
+                                continue
+                    except Exception:  # noqa: BLE001
+                        continue
+            await _asyncio.sleep(0.5)
+        return False
+
+    @staticmethod
     async def _click_text_anywhere(page, texts, timeout_s: float = 6.0) -> bool:
         """全页面范围点击文本匹配的最小可见元素（不限侧栏）"""
         import asyncio as _asyncio
@@ -316,13 +344,13 @@ class WechatChannelsEngine(ControlledPageEngine):
         await _asyncio.sleep(2.5)
         logger.info(f"[wxsp] room {room_id} 点直播菜单后 url={page.url[:80]}")
 
-        # 2. 直播管理（菜单展开的子项或页面 tab；可能已在该页）
-        await self._click_text_anywhere(page, ["直播管理"], timeout_s=4.0)
+        # 2. 直播管理（子菜单；跨 frame 文本点击）
+        await self._click_any_frame(page, ["直播管理"], timeout_s=4.0)
         await _asyncio.sleep(2.5)
         logger.info(f"[wxsp] room {room_id} 点直播管理后 url={page.url[:80]}")
 
         # 3. 进入直播间（进行中场次的入口按钮）
-        ok = await self._click_text_anywhere(page, ["进入直播间"], timeout_s=8.0)
+        ok = await self._click_any_frame(page, ["进入直播间"], timeout_s=10.0)
         if ok:
             logger.info(f"[wxsp] room {room_id} 已点击进入直播间，"
                         f"url={page.url[:80]}")
