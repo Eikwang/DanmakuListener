@@ -121,8 +121,15 @@ class DouyinRoomInit:
     def fetch(self, rid: str) -> Dict[str, Any]:
         """返回 {ttwid, ms_token, real_room, uid}；失败抛 DouyinRoomInitError"""
         if self._login_cookies:
-            # 登录态先行注入（room 页以登录身份渲染，uid 即登录 uid）
-            self._session.cookies.update(self._login_cookies)
+            # 只注入身份 cookie；排除 ttwid/msToken（会话级，由 Session 自获——
+            # 2026-10-03 用户实测：登录文件里的 ttwid 与自获 ttwid 域属性不同，
+            # jar 同名共存 → CookieConflictError）。同名残留先删（del 删全部同名）
+            login = {k: v for k, v in self._login_cookies.items()
+                     if k not in ("ttwid", "msToken")}
+            for name in list(login):
+                if name in self._session.cookies:
+                    del self._session.cookies[name]
+            self._session.cookies.update(login)
         try:
             self._session.get("https://live.douyin.com/", timeout=10)
         except Exception as e:  # noqa: BLE001
