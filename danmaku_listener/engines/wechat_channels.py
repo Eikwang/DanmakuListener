@@ -83,7 +83,8 @@ class WechatChannelsEngine(ControlledPageEngine):
         self._session_lifetime = session_lifetime
         self._raw_hook = raw_hook  # 诊断钩子：live/msg 响应 body（分析用）
         self._msglist_types: Dict[str, dict] = {}  # 未处理 msgList type 聚合
-        self._last_live_sig: Dict[str, tuple] = {}  # liveInfo 值签名（变化才 emit）
+        self._last_live_status: Dict[str, Any] = {}  # live_status（状态变化才发 LIVE_STATUS_CHANGE）
+        self._last_stats_vals: Dict[str, tuple] = {}  # (online, like_cnt)（值变化才发 ROOM_STATS）
 
     # ---- 登录与会话（单会话长跑模式——2026-09-30 实测：视频号后台登录态
     #      不支持静置恢复，关闭浏览器后 cookie 快速失效；登录、导航、监听
@@ -381,12 +382,15 @@ class WechatChannelsEngine(ControlledPageEngine):
             like_cnt = (live_info.get("likeCnt")
                         if live_info.get("likeCnt") is not None
                         else live_info.get("like_cnt"))
-            sig = (live_status, online, like_cnt)
-            live_changed = sig != self._last_live_sig.get(room_id)
-            self._last_live_sig[room_id] = sig
+            # 状态变化签名只含 live_status（2026-10-03 用户实测：观看数波动
+            # 0→1→2 会让含 online 的签名频繁变化 → LIVE_STATUS_CHANGE 重复刷）
+            live_changed = live_status != self._last_live_status.get(room_id)
+            self._last_live_status[room_id] = live_status
+            stats_changed = (online, like_cnt) != self._last_stats_vals.get(room_id)
+            self._last_stats_vals[room_id] = (online, like_cnt)
             # 注意：不可 return——同一响应还携带 msgList/appMsgList（弹幕/礼物）
             # 只跳过 liveInfo 部分的 emit
-            if live_changed and live_status is not None:
+            if live_changed and live_status is not None:  # 状态切换才发
                 # 枚举实测（2026-10-03）：开播期间 live_status 恒为 1——
                 # wxlivespy 的 ==4 枚举过时；live=True 判定按 1/4（后续新状态样本再校准）
                 await self._emit_message({
@@ -403,7 +407,7 @@ class WechatChannelsEngine(ControlledPageEngine):
                                 "live": live_status in (1, 4),
                                 "raw_status": live_status},
                 })
-            if live_changed and online is not None:
+            if stats_changed and online is not None:  # 观看/点赞值变化才发
                 await self._emit_message({
                     "contract_version": "1.0.0",
                     "category": Category.BUSINESS.value,
