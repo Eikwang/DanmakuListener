@@ -120,15 +120,16 @@ python tools/xiaohongshu_smoke.py 570478706428621902 --duration 300 --dump-all
 - 预期：`DANMU`、`ENTER_ROOM`、`LIKE`(praise)、`GIFT`(gift_dock_and_effect)、`SOCIAL`(follow/share)
 - 校准点：礼物计数在连击时是否正确
 
-### B4. 京东（jd）
+### B4. 京东（jd）——✅ 验收通过（2026-10-03）
 
 ```powershell
-python tools/jd_smoke.py 48421102 --duration 180 --dump-all
+python tools/jd_smoke.py <liveId> --duration 180 --dump-all
 ```
 - 独立站 `zhibo.jd.com/liveroom?liveId=xxx`，游客可测
 - 操作：发弹幕 → 点赞
-- 预期：`DANMU`(viewer_send_message)、`ENTER_ROOM`(聚合形态)、`LIKE`、`ROOM_STATS`
-- 校准点：进场聚合文案（"xx等N人来了"）是否可接受
+- 预期：`DANMU`(viewer_send_message)、`ENTER_ROOM`(聚合形态)、`LIKE`(thumbs_up)、`ROOM_STATS`
+- **验收结论**：入场/弹幕监听通过（咚咚 IM 明文 JSON，页面自建
+  live-ws4 连接免 liveauth 签名）；点赞帧无昵称（聚合帧协议限制）
 
 ### B5. 拼多多（pdd）——✅ 验收通过（2026-10-03）
 
@@ -191,7 +192,7 @@ python tools/ws_listen.py --count 50
 | 小红书 | 礼物价值（薯币）/连击计数 | --dump-all 后送礼 |
 | 拼多多 | ✅ 验收通过（2026-10-03）：入场/点赞/关注/弹幕/房间信息全通，见 B5 节 | — |
 | 视频号 | ✅ 验收通过（2026-10-03）：严格帧驱动点赞 + 在线口径观看数，见 C2 节 | — |
-| 京东 | 进场聚合文案 | 记录 content 样本 |
+| 京东 | ✅ 验收通过（2026-10-03）：入场/弹幕全通，见 B4 节 | — |
 
 ## 八、问题反馈模板
 
