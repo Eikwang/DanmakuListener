@@ -25,8 +25,22 @@ storage_state 快照模式不可用（实测 34 分钟即失效）。
 
 - data.liveInfo：liveStatus/onlineCnt/likeCnt → LIVE_STATUS_CHANGE / ROOM_STATS
 - data.msgList：type=1 弹幕、type=10005 进房 → DANMU / ENTER_ROOM
-- data.appMsgList：msgType 20009/20013 礼物（base64 payload）、20006 点赞、
-  20031 粉丝等级 → GIFT / LIKE / SOCIAL
+- data.appMsgList：msgType 20009/20013 礼物（base64 payload）、20006/20122
+  点赞（20122 为新版，base64 payload 带 wording；昵称均在 fromUserContact）、
+  20078 关注（base64 payload 带 wording）→ GIFT / LIKE / SOCIAL
+
+## 协议边界（2026-10-03 双通道 dump 实证）
+
+1. **点赞人帧偶发推送**：4 次点赞仅 1 次伴随昵称帧（20006）——点赞人
+   昵称只在微信后台推帧时可得，推送时机由微信控制。用户裁定**严格帧
+   驱动**：无帧时不合成匿名点赞，仅 likeCnt（总点赞量，每次点赞都实时
+   准确）变化。诊断方法：serve 启动前 `set WXSP_RAW_DUMP=path`，系统端
+   live/msg 原始响应落盘。
+2. **观看人数为当前在线口径**：liveInfo 无累计观看字段（App 端"X 人
+   观看"为累计口径，后台不提供）。onlineCnt 波动（如 0↔1）与观众进出
+   吻合，属正常值。
+3. liveInfo 多形态：data.liveInfo（驼峰键）与 data.live_info（小写键）
+   并存于不同响应——解析字段级逐键回退。
 
 ## 网页常驻问题（2026-10-02 用户实测 + 技术方案）
 
