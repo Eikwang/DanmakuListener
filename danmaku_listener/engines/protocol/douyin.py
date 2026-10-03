@@ -40,6 +40,10 @@ from danmaku_listener.engines.protocol.douyin_assets import douyin_pb2 as dy_pb2
 PROTOCOL_VERSION = "douyin-2"
 
 WEB_SOCKET_URIS = [
+    # 2026-10-03 页面 WS 实证端点（webcast100 集群与页面一致，消息集合完整）
+    "wss://webcast100-ws-web-lq.douyin.com/webcast/im/push/v2/",
+    "wss://webcast100-ws-web-lf.douyin.com/webcast/im/push/v2/",
+    "wss://webcast100-ws-web-hl.douyin.com/webcast/im/push/v2/",
     "wss://webcast5-ws-web-lq.douyin.com/webcast/im/push/v2/",
     "wss://webcast5-ws-web-lf.douyin.com/webcast/im/push/v2/",
     "wss://webcast5-ws-web-hl.douyin.com/webcast/im/push/v2/",
@@ -96,8 +100,10 @@ class DouyinSigner:
                 "barrage-fly 上游 release 重新提取（provenance 见引擎 docstring）")
 
     def sign(self, room_id: str, user_unique_id: str) -> str:
+        # webcast_sdk_version 必须与 URL 查询参数逐字一致（服务端按 URL 参数
+        # 重算 MD5 对比签名——2026-10-03 参数对齐 1.0.15 时不同步即 HTTP 200 拒绝）
         param = ("live_id=1,aid=6383,version_code=180800,"
-                 "webcast_sdk_version=1.0.14-beta.0,"
+                 "webcast_sdk_version=1.0.15,"
                  f"room_id={room_id},sub_room_id=,sub_channel_id=,did_rule=3,"
                  f"user_unique_id={user_unique_id},device_platform=web,device_type=,"
                  "ac=,identity=audience")
@@ -288,32 +294,41 @@ class DouyinWebProtocolEngine(BaseEngine):
         from urllib.parse import urlencode
 
         now = int(time.time() * 1000)
+        # 2026-10-03 页面 WS 参数对齐（SDK 1.0.15 实证）：
+        # 1) cursor/internal_ext 大数 = uid 派生（页面实测 r/h/wrds_v 与
+        #    user_unique_id 同前缀——同一基数的 ±10^10 偏移变体，纯随机
+        #    19 位仍被降级：Member/Like/Social 恢复但 RoomStats/Gift 缺失）
+        # 2) 页面 URL 无 web_rid/msToken 参数（msToken 仅在握手 Cookie）
+        try:
+            uid_base = int(ctx["uid"])
+        except (KeyError, ValueError):
+            uid_base = random.randint(10**18, 10**19 - 1)
+
+        def uid_derived() -> str:
+            return str(uid_base + random.randint(-10**11, 10**11))
         qp = [
             ("app_name", "douyin_web"), ("version_code", "180800"),
-            ("webcast_sdk_version", "1.0.14-beta.0"),
-            ("update_version_code", "1.0.14-beta.0"),
+            ("webcast_sdk_version", "1.0.15"),
+            ("update_version_code", "1.0.15"),
             ("compress", "gzip"), ("device_platform", "web"),
             ("cookie_enabled", "true"), ("screen_width", "1280"),
             ("screen_height", "800"), ("browser_language", "zh-CN"),
             ("browser_platform", "Win32"), ("browser_name", "Mozilla"),
             ("browser_version", UA.replace("Mozilla/", "")),
             ("browser_online", "true"), ("tz_name", "Asia/Shanghai"),
-            ("cursor", f"t-{now}_r-1_d-1_u-1_fh-743192"
-                       f"{random.randint(10**12, 10**13 - 1)}"),
+            ("cursor", f"t-{now}_r-{uid_derived()}_d-1_u-1_h-{uid_derived()}"),
             ("internal_ext",
              "internal_src:dim|wss_push_room_id:" + ctx["real_room"] +
              "|wss_push_did:" + ctx["uid"] +
              "|first_req_ms:" + str(now) + "|fetch_time:" + str(now) +
-             "|seq:1|wss_info:0-" + str(now) + "-0-0|wrds_v:743192" +
-             "".join(random.choices("0123456789", k=13))),
+             "|seq:1|wss_info:0-" + str(now) + "-0-0|wrds_v:" + uid_derived()),
             ("host", "https://live.douyin.com"), ("aid", "6383"),
             ("live_id", "1"), ("did_rule", "3"), ("endpoint", "live_pc"),
             ("support_wrds", "1"), ("user_unique_id", ctx["uid"]),
             ("im_path", "/webcast/im/fetch/"), ("identity", "audience"),
             ("need_persist_msg_count", "15"), ("insert_task_id", ""),
             ("live_reason", ""), ("room_id", ctx["real_room"]),
-            ("heartbeatDuration ", "0"), ("signature", sig),
-            ("web_rid", ctx.get("web_rid", "")), ("msToken", ctx["ms_token"]),
+            ("heartbeatDuration", "0"), ("signature", sig),
         ]
         return WEB_SOCKET_URIS[0] + "?" + urlencode(qp)
 
@@ -510,12 +525,17 @@ class DouyinWebProtocolEngine(BaseEngine):
         if method == "WebcastRoomStatsMessage":
             st = dy_pb2.RoomStatsMessage()
             st.ParseFromString(msg.payload)
-            if st.displayType != 0:  # 仅 total 类（displayType 语义未实测前保守过滤）
+            # displayType 语义（2026-10-03 页面 WS 实证 12 例）：1=累计观看
+            # total 类（total=9410 与页面显示一致）——旧过滤"!=0 丢弃"实测
+            # 把全部真实统计滤掉（观看 0 根因）。仅拒已知非 total 变体
+            if st.displayType not in (0, 1):
                 logger.debug(f"[douyin] room {room_id} stats displayType={st.displayType} dropped")
                 return None
             return {
                 "category": "business", "type": "ROOM_STATS", "seq": seq, "timestamp": ts,
-                "payload": {"type": "ROOM_STATS", "total": st.total,
+                "payload": {"type": "ROOM_STATS",
+                            # viewer_count 对齐前端契约键（观看 X 显示）
+                            "viewer_count": st.total,
                             "display_value": st.displayValue,
                             "display_short": st.displayShort},
             }
@@ -523,8 +543,6 @@ class DouyinWebProtocolEngine(BaseEngine):
             ct = dy_pb2.ControlMessage()
             ct.ParseFromString(msg.payload)
             if ct.status == 3:  # 下播（proto 注释：status = 3 下播）
-                import time as _time
-
                 from danmaku_listener.contract import Category
 
                 return {

@@ -17,6 +17,8 @@ import hashlib
 import random
 import re
 import sys
+
+sys.stdout.reconfigure(encoding="utf-8")
 import time
 from urllib.parse import urlencode
 
