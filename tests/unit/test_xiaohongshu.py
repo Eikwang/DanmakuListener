@@ -107,6 +107,59 @@ def test_map_custom_data_types():
     assert map_custom_data({"type": "like", "likeActionCount": 3}, seq, ts) is None
 
 
+def test_praise_nickname_from_nick_cache():
+    """praise 无昵称 → 会话学习表反查（2026-10-03 用户需求"点赞显示实际
+    用户名"）：refresh 观众名单/text 弹幕帧学习，praise 按 user_id 命中"""
+    ts, seq = 1700000000, 1
+    cache: dict = {}
+
+    # refresh 学习在线观众名单
+    r = map_custom_data({
+        "type": "refresh",
+        "room_data": {"viewers": [
+            {"user_id": "5bee6cd6", "nickname": "努力的小wil"},
+            {"user_id": "", "nickname": "空id跳过"},
+            {"user_id": "n1", "nickname": ""},
+        ]},
+    }, seq, ts, cache)
+    assert r is None
+    assert cache == {"5bee6cd6": "努力的小wil"}
+
+    # text 弹幕帧学习
+    map_custom_data({"type": "text", "desc": "好", "profile":
+                     {"nickname": "小明", "user_id": "u9"}}, seq, ts, cache)
+    assert cache["u9"] == "小明"
+
+    # praise 按 user_id 反查命中（观众名单来源）
+    like = map_custom_data({"type": "praise", "praise_info": {"count": 2},
+                            "profile": {"user_id": "5bee6cd6"}}, seq, ts, cache)
+    assert like["payload"]["user_name"] == "努力的小wil"
+    assert like["payload"]["count"] == 2
+
+    # praise 命中（弹幕来源）
+    like2 = map_custom_data({"type": "praise", "praise_info": {"count": 1},
+                             "profile": {"user_id": "u9"}}, seq, ts, cache)
+    assert like2["payload"]["user_name"] == "小明"
+
+    # 未命中 → 置空（前端回退"有人"）
+    like3 = map_custom_data({"type": "praise", "praise_info": {"count": 1},
+                             "profile": {"user_id": "unknown"}}, seq, ts, cache)
+    assert like3["payload"]["user_name"] == ""
+
+    # gift 学习 send_user_info（id/nick_name）
+    map_custom_data({"type": "gift_dock_and_effect",
+                     "send_user_info": {"id": "s1", "nick_name": "送礼人"},
+                     "base_gift_info": {"name": "人气票", "coins": 1},
+                     "gift_action_info": {"count": 1}}, seq, ts, cache)
+    assert cache["s1"] == "送礼人"
+
+
+def test_engine_uses_shared_nick_cache():
+    """引擎持有跨帧学习表并传入 map（praise 反查依赖同实例多帧）"""
+    eng = XiaohongshuEngine()
+    assert eng._nick_cache == {}
+
+
 def test_envelope_platform_is_xiaohongshu():
     eng = XiaohongshuEngine()
     env = eng._envelope(
