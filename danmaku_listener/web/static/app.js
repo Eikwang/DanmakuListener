@@ -121,7 +121,8 @@ class DanmakuApp {
         content = p.live ? "直播开始" : "直播结束";
         break;
       case "ROOM_STATS":
-        content = `观看 ${p.viewer_count ?? "—"} · 点赞 ${p.total_likes ?? "—"}`;
+        // like_count 为引擎字段（wxsp/meituan 等）；total_likes 为历史兼容键
+        content = `观看 ${p.viewer_count ?? "—"} · 点赞 ${p.like_count ?? p.total_likes ?? "—"}`;
         break;
       case "SOCIAL":
         content = `${p.user_name} ${p.action}`;
