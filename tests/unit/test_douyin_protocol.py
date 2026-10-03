@@ -308,5 +308,28 @@ async def test_engine_lifecycle():
     assert eng._stop_flags["12345"] is True
 
 
+def test_map_room_user_seq_online_count():
+    """RoomUserSeq → ROOM_STATS 在线口径（2026-10-03 解码实证：每 2-6s 推送，
+    total=当前在线、totalUser=累计 UV）——在线观众数据来源"""
+    rs = dy_pb2.RoomUserSeqMessage()
+    rs.total = 7677
+    rs.totalUser = 460960
+    m = dy_pb2.Message()
+    m.method = "WebcastRoomUserSeqMessage"
+    m.payload = rs.SerializeToString()
+    eng = dy.DouyinWebProtocolEngine()
+    mapped = eng._map_message("123", m, 1, 1700000000)
+    assert mapped["type"] == "ROOM_STATS"
+    assert mapped["payload"]["online_count"] == 7677
+    assert mapped["payload"]["total_user"] == 460960
+
+    # total=0（异常帧）不 emit
+    rs.total = 0
+    m2 = dy_pb2.Message()
+    m2.method = "WebcastRoomUserSeqMessage"
+    m2.payload = rs.SerializeToString()
+    assert eng._map_message("123", m2, 2, 1700000000) is None
+
+
 def test_protocol_version():
     assert dy.PROTOCOL_VERSION == "douyin-2"

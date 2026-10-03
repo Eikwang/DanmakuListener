@@ -446,6 +446,21 @@ class DouyinWebProtocolEngine(BaseEngine):
                                 "payload_b64": _b64.b64encode(msg.payload).decode()})
             except Exception:  # noqa: BLE001
                 pass
+        # RoomUserSeq（在线人数）值去重：在 next_seq 之前——seq 只在确认
+        # emit 时消耗（跳号会触发 consumer 侧 GAP 等待）。sig 带 "u" 来源
+        # 标记，与 RoomStatsMessage 的去重键空间隔离
+        if method == "WebcastRoomUserSeqMessage":
+            try:
+                rs = dy_pb2.RoomUserSeqMessage()
+                rs.ParseFromString(msg.payload)
+            except Exception:  # noqa: BLE001
+                return
+            if not rs.total:
+                return
+            sig = ("u", rs.total, rs.totalUser)
+            if sig == self._last_room_stats.get(room_id):
+                return
+            self._last_room_stats[room_id] = sig
         mapped = self._map_message(room_id, msg, self.next_seq(room_id), ts)
         if mapped is None:
             stat = self._method_stats.setdefault(room_id, {})
@@ -470,9 +485,9 @@ class DouyinWebProtocolEngine(BaseEngine):
             })
 
     # ---- 上游消息 → 契约 v1（显式清单，与 test_douyin_protocol.py 对齐）----
+    # 实例方法（RoomUserSeq 在线去重需访问 _last_room_stats 实例状态）
 
-    @staticmethod
-    def _map_message(room_id: str, msg, seq: int,
+    def _map_message(self, room_id: str, msg, seq: int,
                      ts: int) -> Optional[Dict[str, Any]]:
         method = msg.method
         if method == "WebcastChatMessage":
@@ -560,6 +575,19 @@ class DouyinWebProtocolEngine(BaseEngine):
                             "viewer_count": st.total,
                             "display_value": st.displayValue,
                             "display_short": st.displayShort},
+            }
+        if method == "WebcastRoomUserSeqMessage":
+            # 房间用户序列（2026-10-03 解码实证：每 2-6s 推送）——
+            # total=当前在线人数、totalUser=累计观看 UV、ranksList=贡献榜
+            rs = dy_pb2.RoomUserSeqMessage()
+            rs.ParseFromString(msg.payload)
+            if not rs.total:
+                return None
+            return {
+                "category": "business", "type": "ROOM_STATS", "seq": seq, "timestamp": ts,
+                "payload": {"type": "ROOM_STATS",
+                            "online_count": rs.total,
+                            "total_user": rs.totalUser},
             }
         if method == "WebcastControlMessage":
             ct = dy_pb2.ControlMessage()

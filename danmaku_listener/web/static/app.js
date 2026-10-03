@@ -120,10 +120,15 @@ class DanmakuApp {
       case "LIVE_STATUS_CHANGE":
         content = p.live ? "直播开始" : "直播结束";
         break;
-      case "ROOM_STATS":
-        // like_count 为引擎字段（wxsp/meituan 等）；total_likes 为历史兼容键
-        content = `观看 ${p.viewer_count ?? "—"} · 点赞 ${p.like_count ?? p.total_likes ?? "—"}`;
+      case "ROOM_STATS": {
+        // like_count 为引擎字段；total_likes 历史兼容；online_count 在线口径（抖音 RoomUserSeq）
+        const parts = [];
+        if (p.online_count != null) parts.push(`在线 ${p.online_count}`);
+        parts.push(`观看 ${p.viewer_count ?? "—"}`);
+        if (p.like_count != null || p.total_likes != null) parts.push(`点赞 ${p.like_count ?? p.total_likes}`);
+        content = parts.join(" · ");
         break;
+      }
       case "SOCIAL":
         content = `${p.user_name} ${p.action}`;
         break;
