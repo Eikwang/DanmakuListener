@@ -15,12 +15,12 @@ WebSocket `framereceived` 帧拦截。观众侧无需登录（设备 cookie a1 �
 | --- | --- | --- |
 | text | DANMU | desc=内容、profile.nickname/user_id |
 | audience_join / audience_join_v2 | ENTER_ROOM | 实测 audience_join_v2 为主 |
-| praise | LIKE | praise_info.count=本次点赞事件聚合数；profile 无 nickname → user_name 空（调研推断的 "like" type 实测不存在） |
+| praise | LIKE | praise_info.count=本次点赞事件聚合数；profile 无 nickname → **会话内 user_id→昵称学习表反查**（refresh 在线观众名单/text/进场/关注/礼物帧学习，2026-10-03 用户实测昵称显示生效；未命中回退"有人"）（调研推断的 "like" type 实测不存在） |
 | gift_dock_and_effect | GIFT | send_user_info.nick_name（下划线命名）/base_gift_info.name/gift_action_info.count |
 | follow_emcee | SOCIAL | action=follow |
 | share | SOCIAL | action=share |
 | gift_comment / gift_settle | 不 emit | 同一次送礼的重复视图（时序实证）——跳过防重复计数 |
-| refresh / letter_refresh | 不 emit | 链路活跃信号（静默检测依据） |
+| refresh / letter_refresh | 不 emit | 链路活跃信号（静默检测依据）；**refresh 的 room_data.viewers[] 为昵称学习主要来源** |
 | light | 不 emit | 进场来源路径（slide/follow_feed），语义待定 |
 | live_banner_resource / goods_rank_entrance_im | 不 emit | 运营位/商品榜 |
 
