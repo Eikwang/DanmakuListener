@@ -130,14 +130,16 @@ python tools/jd_smoke.py 48421102 --duration 180 --dump-all
 - 预期：`DANMU`(viewer_send_message)、`ENTER_ROOM`(聚合形态)、`LIKE`、`ROOM_STATS`
 - 校准点：进场聚合文案（"xx等N人来了"）是否可接受
 
-### B5. 拼多多（pdd）
+### B5. 拼多多（pdd）——✅ 验收通过（2026-10-03）
 
 ```powershell
-python tools/pdd_smoke.py "https://mobile.yangkeduo.com/transac_virtual_card_pwd.html?page_from=601129&mall_id=461258830&refer_share_token=0UO32GX76Kd1B4eQztApSJSHS1t8XvG5CD_d6fnfWBA&_live_ext_info=GVQIU42CW4KVXE3E72LAJZAOVCS3LHKP7P4DR47MRQOGV7AJ2Q3D6EZOMTCLIHW4LLVJXEAVZUK4K&_live_share_token=CRQ46EEGIEMXATU2NPB2SDCKSO66FKYCE664EMXVDFUKYL5JUTT3QWFUH7GKE7JHNJIOGUYKMVSEWQLOFN64GT6PK6F45TMNOJJ6EY6EE2N3ENBZ6OIU2VGGL35PMYMG&refer_share_id=ebe21877dee544098e3a046bafbc825f&refer_share_uin=5XIIK3QRO5TRHOPKCTMJNNMTF4_GEXDA&refer_share_channel=copy_link&refer_share_form=text" --duration 300 --dump-all
+python tools/pdd_smoke.py "<直播间分享链接>" --duration 300 --dump-all
 ```
-- 首次弹扫码窗口登录（profile 已有登录态则免）；业务消息仅入场/弹幕/点赞（已裁定）
-- 操作：发弹幕 → 点赞
-- 预期：`DANMU`(live_chat)、`ENTER_ROOM`、`LIKE`、`ROOM_STATS`(观看/点赞总数)
+- 首次弹扫码窗口登录（profile 已有登录态则免）；业务消息仅入场/弹幕/点赞/关注
+- 操作：发弹幕 → 点赞 → 关注
+- 预期：`DANMU`(live_chat)、`ENTER_ROOM`、`LIKE`、`SOCIAL`(favorite 关注)、`ROOM_STATS`(观看/点赞总数)
+- **验收结论**：入场/点赞/关注/弹幕/房间信息全部监听通过（含系统通道
+  cookie_dir 配置链修复验证）；titan wss 四层解码稳定
 
 ### C1. 快手（kuaishou）——✅ 验收通过（2026-10-03）
 
@@ -187,7 +189,7 @@ python tools/ws_listen.py --count 50
 | 抖音 | 礼物是否出现（method 可观测性）| 送礼观察 + `first-seen method` 行 |
 | 斗鱼 | 礼物名/价格 | 送礼对照 dump |
 | 小红书 | 礼物价值（薯币）/连击计数 | --dump-all 后送礼 |
-| 拼多多 | **系统通道弹幕**（cookie_dir 修复后需重启 AUTOlive）| 重启后添加房间 |
+| 拼多多 | ✅ 验收通过（2026-10-03）：入场/点赞/关注/弹幕/房间信息全通，见 B5 节 | — |
 | 视频号 | ✅ 验收通过（2026-10-03）：严格帧驱动点赞 + 在线口径观看数，见 C2 节 | — |
 | 京东 | 进场聚合文案 | 记录 content 样本 |
 
