@@ -83,14 +83,18 @@ python tools/protocol_listen.py huya 116864 --duration 300 --dump-all
 - **校准点（已知待办）：礼物名当前为类型编号**（如 `1`/`2`）——记录编号与
   实际礼物的对照表，用于补礼物映射
 
-### A4. 抖音（douyin）
+### A4. 抖音（douyin）——✅ 验收通过（2026-10-03）
 
 ```powershell
-python tools/dy_sign_smoke.py 826353906172 --duration 300 --dump-all
+python tools/dy_sign_smoke.py <房间号> --duration 300 --dump-all
 ```
-- 操作：发弹幕 → 点赞 → 送礼物
-- 预期：`DANMU`、`LIKE`、`GIFT`
-- 校准点：签名链路是否仍有效（签名资产失效报三段式）
+- 操作：发弹幕 → 点赞 → 送礼物 → 观察房间信息
+- 预期：`DANMU`、`ENTER_ROOM`、`LIKE`、`SOCIAL`、`GIFT`(102 项映射)、`ROOM_STATS`
+- **验收结论**：入场/弹幕/点赞/关注/礼物/房间信息全通。关键实证：
+  ①SDK 参数对齐页面 WS（1.0.15+uid 派生大数）后消息集合从"仅弹幕"
+  恢复完整；②礼物事件只推登录观众（游客连接 1223 条零礼物铁证）——
+  登录闭环（扫码一次 cookie 持久化）后打通；③displayType=1 为累计
+  观看类，payload 键 viewer_count 对齐前端
 
 ### B1. 淘宝（taobao）—— ✅ 验收通过（2026-10-03）
 

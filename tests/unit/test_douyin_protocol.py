@@ -146,7 +146,16 @@ def test_room_stats_display_type_filter():
     m.payload = st.SerializeToString()
     mapped = eng._map_message("123", m, 1, 1700000000)
     assert mapped["type"] == "ROOM_STATS"
-    assert mapped["payload"]["total"] == 1500
+    assert mapped["payload"]["viewer_count"] == 1500
+
+    # displayType=1（2026-10-03 页面 WS 实证：累计观看 total 类）
+    st.displayType = 1
+    m1 = dy_pb2.Message()
+    m1.method = "WebcastRoomStatsMessage"
+    m1.payload = st.SerializeToString()
+    mapped1 = eng._map_message("123", m1, 3, 1700000000)
+    assert mapped1 is not None
+    assert mapped1["payload"]["viewer_count"] == 1500
 
     st.displayType = 3
     m2 = dy_pb2.Message()
