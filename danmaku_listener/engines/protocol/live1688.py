@@ -123,6 +123,7 @@ class Live1688Engine(ControlledPageEngine):
         self._raw_hook = raw_hook  # 诊断钩子：DOM 弹幕条目/pull 原始响应
         self._unmapped_pull: Dict[str, dict] = {}  # pull 未映射聚合（60s 汇总降噪）
         self._last_unmapped_flush = time.monotonic()
+        self._last_room_stats: Dict[str, tuple] = {}  # ROOM_STATS 值去重（值变化才发）
 
     def validate_room_id(self, room_id: str) -> None:
         """add_room 预校验：feedId 可解析"""
@@ -326,7 +327,7 @@ class Live1688Engine(ControlledPageEngine):
                         total = sum(kv.values())
                         if total:
                             top = sorted(kv.items(), key=lambda x: -x[1])[:3]
-                            logger.debug(
+                            logger.info(
                                 f"[1688] room {rid} unmapped {total} msgs in 60s, "
                                 f"top keys: {[list(k) for k, _ in top]}")
                     self._unmapped_pull = {rid: {} for rid in self._unmapped_pull}
@@ -420,6 +421,18 @@ class Live1688Engine(ControlledPageEngine):
                 for obj in parse_base64_mixed_message(b64):
                     if not isinstance(obj, dict):
                         continue
+                    # ROOM_STATS 值去重（在 next_seq 之前——seq 只在确认
+                    # emit 时消耗，跳号会触发 consumer 侧 GAP 等待）
+                    if ("subType" not in obj
+                            and ("viewCountFormat" in obj
+                                 or "pageViewCount" in obj
+                                 or "totalCount" in obj)):
+                        sig = (obj.get("onlineCount") or 0,
+                               obj.get("totalCount") or 0,
+                               obj.get("pageViewCount") or 0)
+                        if sig == self._last_room_stats.get(room_id):
+                            continue
+                        self._last_room_stats[room_id] = sig
                     mapped = self._map_message(room_id, obj,
                                                self.next_seq(room_id), ts)
                     if mapped:
@@ -455,12 +468,16 @@ class Live1688Engine(ControlledPageEngine):
                                 "gift_name": gift_name,
                                 "gift_count": obj.get("count", obj.get("num", 1))}}
         if "viewCountFormat" in obj or "pageViewCount" in obj or "totalCount" in obj:
-            current = obj.get("onlineCount", obj.get("current_viewers", 0))
-            total = obj.get("totalCount", obj.get("total_viewers", 0))
+            # 语义校准（2026-10-03 用户实测"观看 0"根因）：onlineCount 恒 0
+            # （阿里不暴露在线数）——观看人数回退 totalCount（观看人数 UV），
+            # 累计浏览用 pageViewCount（PV）；两种精简/完整形态实测并存
+            online = obj.get("onlineCount") or 0
+            uv = obj.get("totalCount") or 0
+            pv = obj.get("pageViewCount") or uv or 0
             return {"category": "business", "type": "ROOM_STATS", "seq": seq,
                     "timestamp": ts,
-                    "payload": {"type": "ROOM_STATS", "viewer_count": current,
-                                "total_view_count": total}}
+                    "payload": {"type": "ROOM_STATS", "viewer_count": online or uv,
+                                "total_view_count": pv}}
         if "nick" in obj and "flowSourceText" in obj:
             identify = obj.get("identify") or {}
             fan_level = identify.get("fanLevel", 0)

@@ -39,6 +39,22 @@ def test_map_stats_and_gift():
         "123", {"viewCountFormat": "634 观看", "totalCount": 634, "onlineCount": 88},
         1, 1700000000)
     assert stats["type"] == "ROOM_STATS"
+    # onlineCount 有值时观看人数取在线数
+    assert stats["payload"]["viewer_count"] == 88
+    assert stats["payload"]["total_view_count"] == 634
+
+    # 2026-10-03 语义校准（用户实测"观看 0"根因）：onlineCount 恒 0/缺失 →
+    # 观看人数回退 totalCount（UV），累计浏览 pageViewCount（PV）
+    stats2 = Live1688Engine._map_message(
+        "123", {"onlineCount": 0, "viewCountFormat": "1974 观看",
+                "pageViewCount": 1974, "totalCount": 1193}, 2, 1700000000)
+    assert stats2["payload"]["viewer_count"] == 1193
+    assert stats2["payload"]["total_view_count"] == 1974
+
+    # 精简形态（仅 totalCount）
+    stats3 = Live1688Engine._map_message("123", {"totalCount": 8}, 3, 1700000000)
+    assert stats3["payload"]["viewer_count"] == 8
+    assert stats3["payload"]["total_view_count"] == 8
 
     gift = Live1688Engine._map_message(
         "123", {"subType": 10002, "nick": "土豪", "giftName": "小心心", "count": 3},
