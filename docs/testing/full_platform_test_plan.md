@@ -101,15 +101,18 @@ python tools/taobao_smoke.py 2831914503635013 --duration 300 --dump-all
 - 预期：`DANMU`、`ROOM_STATS`
 - 校准点：无
 
-### B2. 1688
+### B2. 1688 —— ✅ 验收通过（2026-10-03）
 
 ```powershell
-python tools/live1688_smoke.py "https://live.1688.com/zb/play.html?spm=a261cz.8342334.joy2j0q4.6.48216f655F0xPT&userId=2139125419&feedId=2184373990275936&__pageId__=190453&cms_id=190453&wh_pha=true" --duration 300 --dump-all
+python tools/live1688_smoke.py "<直播间链接>" --duration 300 --dump-all
 ```
 - **注意**：feedId 场次级——下播失效，需重新复制直播间链接
-- 操作：发弹幕（用小号在自己直播间或让朋友发）
-- 预期：`DANMU`(昵称/内容分离)、`ROOM_STATS`(观看数)
-- 校准点：昵称是否为脱敏形态（站点行为，正常）
+- 操作：发弹幕 / 让人进出直播间（触发入场横幅）
+- 预期：`DANMU`(昵称/内容分离)、`ROOM_STATS`(观看数)、`ENTER_ROOM`(入场横幅)
+- **验收结论**：弹幕/房间信息/入场全通。房间信息语义校准（onlineCount 恒 0，
+  观看人数取 totalCount/累计浏览取 pageViewCount）；入场唯一载体为 DOM 横幅
+  `DIV.biz-info-message-container`（pull 通道无入场消息，MutationObserver
+  探测实证）；昵称脱敏形态（站点行为，正常）
 
 ### B3. 小红书（xiaohongshu）
 
