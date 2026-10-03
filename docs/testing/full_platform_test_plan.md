@@ -92,14 +92,15 @@ python tools/dy_sign_smoke.py 826353906172 --duration 300 --dump-all
 - 预期：`DANMU`、`LIKE`、`GIFT`
 - 校准点：签名链路是否仍有效（签名资产失效报三段式）
 
-### B1. 淘宝（taobao）
+### B1. 淘宝（taobao）—— ✅ 验收通过（2026-10-03）
 
 ```powershell
-python tools/taobao_smoke.py 2831914503635013 --duration 300 --dump-all
+python tools/taobao_smoke.py <直播间链接或ID> --duration 300 --dump-all
 ```
-- 操作：发弹幕
-- 预期：`DANMU`、`ROOM_STATS`
-- 校准点：无
+- 操作：发弹幕 / 观察房间信息
+- 预期：`DANMU`、`ENTER_ROOM`、`ROOM_STATS`(观看数)
+- **验收结论**：入场/弹幕/房间信息全通（mtop 双通道 powermsg 拉取）；
+  观看数语义校准同 1688（onlineCount 恒 0 → totalCount/pageViewCount）
 
 ### B2. 1688 —— ✅ 验收通过（2026-10-03）
 
