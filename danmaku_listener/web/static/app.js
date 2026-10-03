@@ -191,6 +191,11 @@ class DanmakuApp {
       case "RECOVERED":
         this.showAlert("ok", `引擎已恢复（故障持续 ${p.after_seconds}s）`);
         break;
+      case "LIVE_STATUS_CHANGE":
+        // 直播状态变化（开播/下播）——观看/点赞数据由 ROOM_STATS 承载
+        this.showAlert(p.live ? "ok" : "info",
+                       `直播状态：${p.live ? "直播中" : "未直播"}（raw=${p.raw_status}）`);
+        break;
       default:
         this.showAlert("info", `未知系统消息 ${type}（additive-only，已忽略载荷）`);
     }
