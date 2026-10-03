@@ -46,8 +46,8 @@ PLATFORM_ENGINES = {
 PLATFORM_WARNINGS = {
     "huya": "虎牙 Tars 协议直连（2026-09-28 实测打通：DANMU/GIFT）；礼物名暂为类型编号",
     "kuaishou": "快手 web 直播间已强制游客登录（2026-09 实测）——首次添加弹登录窗口，登录后自动监听",
-    "douyin": "抖音 Web WS 原生直连（2026-09 T0 冒烟通过：DANMU 实测）——无需外部程序；"
-              "签名资产失效或风控升级时报三段式错误",
+    "douyin": "抖音 Web WS 直连（游客可收弹幕/进场/点赞/关注/房间统计）；礼物事件只推"
+              "登录观众（2026-10-03 实证）——首次添加弹登录窗口扫码一次（cookie 持久化）",
     "meituan": "美团 mapi HTTP 轮询直连（无需登录/浏览器）；live_id 场次级——下播失效，"
                "开播后重新复制直播间分享链接；1-2s 轮询延迟",
     "xiaohongshu": "小红书受控页面 WS 帧拦截（观众侧无需登录）；帧结构按开源实现/"
@@ -85,6 +85,14 @@ def build_engine(platform: str, state_store: Optional[RoomStateStore] = None, **
         try:
             from danmaku_listener.engines.kuaishou_login import DEFAULT_STATE_PATH
             kwargs.setdefault("cookie_file", DEFAULT_STATE_PATH)
+        except Exception:
+            pass
+    if platform == "douyin":
+        # 登录 cookie（2026-10-03 实证：礼物事件只推登录观众——登录闭环
+        # douyin_login 保存路径，与引擎 WS 握手/roomInit 注入衔接）
+        try:
+            from danmaku_listener.engines.douyin_login import DEFAULT_COOKIE_FILE
+            kwargs.setdefault("cookie_file", DEFAULT_COOKIE_FILE)
         except Exception:
             pass
     if platform in ("1688", "xiaohongshu", "jd", "pdd", "wechat_channels"):

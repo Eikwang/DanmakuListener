@@ -254,7 +254,10 @@ class TestSharedProxyEngine:
         """douyin:111 + douyin:222 复用同一桥接引擎实例（单 WS 连接多房间）"""
         bridge = _make_bridge_with_mocked_engines()
         app = _create_app_with_bridge(bridge)
-        with patch("danmaku_listener.engines.registry.build_engine",
+        # 2026-10-03 douyin 登录闭环（礼物只推登录观众）——测试 mock 已登录
+        with patch("danmaku_listener.engines.douyin_login.has_login_cookie",
+                   return_value=True), \
+             patch("danmaku_listener.engines.registry.build_engine",
                    return_value=bridge._mock_engine) as mock_build:
             async with TestClient(TestServer(app)) as client:
                 r1 = await client.post("/api/rooms", json={"room": "douyin:111"})

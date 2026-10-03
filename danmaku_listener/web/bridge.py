@@ -132,6 +132,40 @@ class DanmakuBridge:
             logger.error(f"[kuaishou] start after login failed: {e}")
             await self._broadcast_system_status(room_key, f"登录成功但启动失败: {e}")
 
+    async def _douyin_login_then_start(self, room_key: str, room_id: str, engine: Any, cookie_path: str) -> None:
+        """douyin 受控登录闭环：弹窗口→用户扫码→cookie 保存→自动开始监听
+
+        2026-10-03 五轮采样实证：礼物事件（WebcastGiftMessage）只推给登录
+        观众——游客连接缺失全部礼物消息。登录 cookie 注入 roomInit 与
+        WS 握手后消息集合完整。
+        """
+        from danmaku_listener.engines.douyin_login import run_login_flow
+
+        async def status_cb(status: str) -> None:
+            await self._broadcast_system_status(room_key, f"douyin 登录流程: {status}")
+
+        await self._broadcast_system_status(room_key, "登录窗口已打开，请在浏览器中登录抖音账号")
+        result = await run_login_flow(
+            room_id=room_id, cookie_path=cookie_path, headless=False,
+            on_status=lambda s: status_cb(s),
+        )
+        if result.get("status") != "ok":
+            await self._broadcast_system_status(room_key, "登录未完成——抖音礼物监听需要登录态，请重试")
+            self._rooms[room_key]["status"] = "login_failed"
+            return
+
+        # 登录 cookie 热注入引擎（登录窗口保存的 cookie 即时生效）
+        engine._login_cookies = result.get("cookies", {})
+        engine._room_init._login_cookies = engine._login_cookies
+
+        await self._broadcast_system_status(room_key, "登录成功——开始监听")
+        try:
+            await engine.start(room_id)
+            self._rooms[room_key]["status"] = "running"
+        except Exception as e:
+            logger.error(f"[douyin] start after login failed: {e}")
+            await self._broadcast_system_status(room_key, f"登录成功但启动失败: {e}")
+
     async def _broadcast_system_status(self, room_key: str, detail: str) -> None:
         """ENGINE_STATUS 快捷广播（平台/房间从 room_key 解析）"""
         import time as _time
@@ -413,6 +447,29 @@ class DanmakuBridge:
                     "status": "login_required",
                     "room": self._rooms[room_key],
                     "message": "需要登录快手账号（web 直播间已强制登录）：登录窗口已打开，"
+                               "请在弹出的浏览器中扫码/登录；登录后自动开始监听",
+                }
+
+        # douyin：礼物事件只推登录观众（2026-10-03 五轮采样实证）——
+        # 游客可收弹幕/进场/点赞/统计，完整消息流需登录 cookie
+        if spec.platform == "douyin":
+            from danmaku_listener.engines.douyin_login import has_login_cookie
+            cookie_path = getattr(engine, "_cookie_file", None) or \
+                "cookie/douyin_cookies.json"
+            if not has_login_cookie(cookie_path):
+                self._rooms[room_key] = {
+                    "platform": spec.platform,
+                    "room_id": spec.room_id,
+                    "status": "login_required",
+                    "engine_type": "webws:douyin",
+                }
+                asyncio.create_task(self._douyin_login_then_start(
+                    room_key, spec.room_id, engine, cookie_path))
+                return {
+                    "success": True,
+                    "status": "login_required",
+                    "room": self._rooms[room_key],
+                    "message": "需要登录抖音账号（礼物消息只推给登录观众）：登录窗口已打开，"
                                "请在弹出的浏览器中扫码/登录；登录后自动开始监听",
                 }
 

@@ -111,14 +111,18 @@ class DouyinSigner:
 
 
 class DouyinRoomInit:
-    """roomInit（游客 HTTP；T2）"""
+    """roomInit（游客 HTTP；T2）；登录态可用时合并登录 cookie"""
 
-    def __init__(self, user_agent: str = UA):
+    def __init__(self, user_agent: str = UA, login_cookies: Optional[Dict[str, str]] = None):
         self._session = requests.Session()
         self._session.headers.update(_HTTP_HEADERS)
+        self._login_cookies = login_cookies or {}
 
     def fetch(self, rid: str) -> Dict[str, Any]:
         """返回 {ttwid, ms_token, real_room, uid}；失败抛 DouyinRoomInitError"""
+        if self._login_cookies:
+            # 登录态先行注入（room 页以登录身份渲染，uid 即登录 uid）
+            self._session.cookies.update(self._login_cookies)
         try:
             self._session.get("https://live.douyin.com/", timeout=10)
         except Exception as e:  # noqa: BLE001
@@ -160,13 +164,20 @@ class DouyinWebProtocolEngine(BaseEngine):
     platform = "douyin"
 
     def __init__(self, state_store=None, signer: Optional[DouyinSigner] = None,
-                 raw_hook=None):
+                 raw_hook=None, cookie_file: Optional[str] = None):
         super().__init__(state_store=state_store)
         self._signer = signer  # 引擎级单例；默认懒创建（仅 loop 线程）
         self._raw_hook = raw_hook  # 诊断钩子：messageList 原始 method/payload
         self._method_stats: Dict[str, dict] = {}  # 未映射 method 聚合（心跳汇总）
         self._method_stats_seen: Dict[str, dict] = {}  # 全 method 首见记录
-        self._room_init = DouyinRoomInit()
+        # 登录 cookie（2026-10-03 实证：礼物事件只推给登录观众——游客连接
+        # 缺失；sessionid 注入 roomInit 与 WS 握手后消息集合完整）
+        self._cookie_file = cookie_file
+        self._login_cookies: Dict[str, str] = {}
+        if cookie_file:
+            from danmaku_listener.engines.douyin_login import load_login_cookies
+            self._login_cookies = load_login_cookies(cookie_file)
+        self._room_init = DouyinRoomInit(login_cookies=self._login_cookies)
         self._room_tasks: Dict[str, asyncio.Task] = {}
         self._room_ws: Dict[str, Any] = {}
         self._heartbeats: Dict[str, asyncio.Task] = {}
@@ -333,9 +344,13 @@ class DouyinWebProtocolEngine(BaseEngine):
         return WEB_SOCKET_URIS[0] + "?" + urlencode(qp)
 
     async def _serve_room(self, room_id: str, ws_url: str, ctx: Dict[str, Any]) -> None:
+        cookie_pairs = [f"ttwid={ctx['ttwid']}", f"msToken={ctx['ms_token']}"]
+        # 登录 cookie 并入握手（礼物事件只推登录观众——2026-10-03 实证）
+        cookie_pairs += [f"{k}={v}" for k, v in self._login_cookies.items()
+                         if k not in ("ttwid",)]
         headers = {
             "User-Agent": UA,
-            "Cookie": f"ttwid={ctx['ttwid']}; msToken={ctx['ms_token']}",
+            "Cookie": "; ".join(cookie_pairs),
             "Origin": "https://live.douyin.com",
         }
         try:
