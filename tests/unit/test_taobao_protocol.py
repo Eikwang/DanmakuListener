@@ -95,6 +95,16 @@ def test_map_stats_total_count_only():
     assert mapped["payload"]["total_view_count"] == 102835
 
 
+def test_map_stats_online_count_zero_fallback():
+    """onlineCount 恒 0（2026-10-03 用户实测"观看 0"根因，同 1688）——
+    观看人数回退 totalCount（UV），累计浏览 pageViewCount（PV）"""
+    obj = {"onlineCount": 0, "viewCountFormat": "1974 观看",
+           "pageViewCount": 1974, "totalCount": 1193}
+    mapped = TaobaoWebProtocolEngine._map_powermsg("123", obj, 1, 1700000000)
+    assert mapped["payload"]["viewer_count"] == 1193
+    assert mapped["payload"]["total_view_count"] == 1974
+
+
 def test_map_chat_and_gift_by_subtype():
     eng = TaobaoWebProtocolEngine()
     chat = {"subType": 10001, "nick": "用户A", "userid": "7", "content": "主播好"}
