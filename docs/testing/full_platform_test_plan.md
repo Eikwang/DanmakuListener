@@ -139,15 +139,16 @@ python tools/pdd_smoke.py "https://mobile.yangkeduo.com/transac_virtual_card_pwd
 - 操作：发弹幕 → 点赞
 - 预期：`DANMU`(live_chat)、`ENTER_ROOM`、`LIKE`、`ROOM_STATS`(观看/点赞总数)
 
-### C1. 快手（kuaishou）
+### C1. 快手（kuaishou）——✅ 验收通过（2026-10-03）
 
 ```powershell
 python tools/protocol_listen.py kuaishou 3xz96kaifhw8ec4 --duration 300 --dump-all
 ```
 - 首次弹扫码登录（登录态持久化）
-- 操作：发弹幕
-- 预期：`DANMU`
-- 校准点：无
+- 操作：发弹幕/送礼/点赞
+- 预期：`DANMU`、`LIKE`、`GIFT`（名称+快币价值，92 项映射表）
+- **验收结论**：监听通过；新礼物"猎粮"（ID 164，1 快币，原名"猫粮"已改名）
+  映射已补——未知 ID 回退显示编号的机制正常，发现新礼物按此流程补表
 
 ### C2. 视频号（wechat_channels）——✅ 验收通过（2026-10-03）
 
