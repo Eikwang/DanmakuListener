@@ -252,7 +252,14 @@ def test_interact_word_v2_pb_map():
         "INTERACT_WORD_V2", {"pb": base64.b64encode(pb_raw_follow).decode()}, 3, 1700000000)
     assert m2 is not None
     assert m2["type"] == "SOCIAL"
-    assert m2["payload"]["action"] == "follow" 
+    assert m2["payload"]["action"] == "follow"
+
+    # f5=3 分享也归一为 follow（2026-10-04 用户裁定）
+    pb_raw_share = field(2, 2, "青***".encode()) + field(5, 0, varint(3))
+    m3 = codec.map_upstream_message(
+        "INTERACT_WORD_V2", {"pb": base64.b64encode(pb_raw_share).decode()}, 4, 1700000000)
+    assert m3 is not None
+    assert m3["payload"]["action"] == "follow" 
 
 
 def test_entry_effect_map():

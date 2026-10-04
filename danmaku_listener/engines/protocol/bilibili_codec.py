@@ -372,20 +372,12 @@ def _map_interact_word_v2(pb_b64: str, seq: int, ts: int) -> Optional[Dict[str, 
     medal = d.get("f22.f4.f1")
     if medal:
         payload["fan_level"] = int(medal)
-    if d.get("f5") == 2:  # 关注
+    if d.get("f5") in (2, 3):
+        # 关注/分享统一识别为 follow（2026-10-04 用户裁定：监听侧不区分）
         return {
             "category": "business",
             "type": "SOCIAL",
             "payload": {"type": "SOCIAL", "action": "follow",
-                        "user_name": uname},
-            "seq": seq,
-            "timestamp": ts,
-        }
-    if d.get("f5") == 3:  # 分享
-        return {
-            "category": "business",
-            "type": "SOCIAL",
-            "payload": {"type": "SOCIAL", "action": "share",
                         "user_name": uname},
             "seq": seq,
             "timestamp": ts,
