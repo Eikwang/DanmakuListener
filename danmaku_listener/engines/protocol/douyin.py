@@ -189,6 +189,7 @@ class DouyinWebProtocolEngine(BaseEngine):
         self._room_ws: Dict[str, Any] = {}
         self._heartbeats: Dict[str, asyncio.Task] = {}
         self._stop_flags: Dict[str, bool] = {}
+        self._last_room_stats: Dict[str, tuple] = {}  # ROOM_STATS 值去重（在线/累计共用）
 
     @property
     def engine_id(self) -> str:
