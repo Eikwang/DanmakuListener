@@ -422,14 +422,9 @@ class BilibiliProtocolEngine(BaseEngine):
             await ws.send(codec.encode_packet(codec.OP_AUTH, auth_body))
             logger.info(f"[bilibili] room {room_id} auth sent to {ws_url} "
                         f"(uid={ctx.get('uid', 0)} buvid={'yes' if ctx.get('buvid') else 'no'})")
-            if not ctx.get("uid") and self._cookie_file:
-                # 带 cookie 连接却 uid=0 → 登录态已失效（过期/被顶）——
-                # 2026-10-04 用户实测：游客会话缺礼物/进场推送且被服务端
-                # 定期断开（ConnectionClosedError 1000）+ LOG_IN_NOTICE 刷屏
-                logger.warning(
-                    "[bilibili] 登录态已失效（cookie 存在但服务端按游客处理）——"
-                    f"删除 {self._cookie_file} 后重新添加房间即可弹出扫码窗口"
-                    "重新登录；游客会话缺少礼物/进场推送")
+            # uid=0 为正常游客路径（DanmuInfoFetcher 游客 buvid 分支）——
+            # 2026-10-04 实证：游客连接可收全部六类消息（弹幕/进场/点赞/
+            # 礼物/关注/在线）；登录态为可选增强而非必需
 
             hb_task = asyncio.create_task(self._heartbeat(room_id, ws))
             self._heartbeats[room_id] = hb_task
