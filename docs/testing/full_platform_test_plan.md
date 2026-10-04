@@ -73,15 +73,16 @@ python tools/protocol_listen.py bilibili 1905051217 --duration 300 --dump-all
 - 预期：`DANMU`、`GIFT`、`SUPER_CHAT`、`ENTER_ROOM`、`ROOM_STATS`
 - 校准点：SC 金额字段、礼物名
 
-### A3. 虎牙（huya）
+### A3. 虎牙（huya）——✅ 验收通过（2026-10-04）
 
 ```powershell
-python tools/protocol_listen.py huya 116864 --duration 300 --dump-all
+python tools/protocol_listen.py huya <房间号> --duration 300 --dump-all
 ```
-- 操作：发弹幕 → 送礼物
-- 预期：`DANMU`、`GIFT`
-- **校准点（已知待办）：礼物名当前为类型编号**（如 `1`/`2`）——记录编号与
-  实际礼物的对照表，用于补礼物映射
+- 操作：发弹幕 → 送礼物 → 观察贵宾进场（"XXX驾临直播间"）
+- 预期：`DANMU`、`GIFT`(189 项映射+getPropsList 在线表)、`ENTER_ROOM`(6110 贵宾横幅，附 noble 贵族称号/mount 坐骑)
+- **验收结论**：弹幕/礼物/贵宾进场全通（Tars TCP 直连）。VipEnterBanner
+  布局递归解码实证（tag1=昵称/tag3{tag3}=贵族称号/tag15{tag1}=坐骑；
+  tag2 为会话 tid 非用户 uid——不映射）；普通观众无独立进场横幅（协议无此推送）
 
 ### A4. 抖音（douyin）——✅ 验收通过（2026-10-03）
 
