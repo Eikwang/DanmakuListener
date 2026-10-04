@@ -60,7 +60,22 @@ async def main() -> int:
     kwargs = {}
     if args.cookie and args.platform in ("bilibili", "kuaishou"):
         kwargs["cookie_file"] = args.cookie
-    engine = _ENGINES[args.platform](**kwargs)
+
+    def raw_hook(data):
+        # 未映射 cmd 原始 doc 落盘（kind=raw——与 wire 区分，供补映射）
+        if dump_fh:
+            dump_fh.write(json.dumps(
+                {"ts": time.time(), "kind": "raw", "data": data},
+                ensure_ascii=False, default=str) + "\n")
+            dump_fh.flush()
+
+    kwargs["raw_hook"] = raw_hook
+    try:
+        engine = _ENGINES[args.platform](**kwargs)
+    except TypeError:
+        # 平台构造器不支持 raw_hook（如 huya）——退回基础构造
+        kwargs.pop("raw_hook", None)
+        engine = _ENGINES[args.platform](**kwargs)
     t0 = time.perf_counter()
     first = True
     count = 0
