@@ -275,6 +275,7 @@ class BilibiliProtocolEngine(BaseEngine):
         danmu_info_fetcher: Optional[Callable[[int], Dict[str, Any]]] = None,
         cookie_file: Optional[str] = None,
         login_flow: Optional[Any] = None,
+        raw_hook=None,
     ):
         super().__init__(state_store=state_store)
         if reconnect_manager:
@@ -283,6 +284,8 @@ class BilibiliProtocolEngine(BaseEngine):
         self._login_flow = login_flow  # 登录流程注入（测试用）；默认 bilibili_login.run_login_flow
         self._danmu_info = danmu_info_fetcher or DanmuInfoFetcher(cookie_file=cookie_file)
         self._unmapped_cmds: Dict[str, dict] = {}  # 未映射 cmd 聚合（30s 汇总）
+        self._raw_hook = raw_hook  # 诊断钩子：未映射 cmd 原始 doc（2026-10-04 补初始化——
+        # 使用点早已存在但构造器漏声明，首次未映射 cmd 即 AttributeError 炸会话）
         self._room_tasks: Dict[str, asyncio.Task] = {}
         self._room_ws: Dict[str, Any] = {}
         self._heartbeats: Dict[str, asyncio.Task] = {}
