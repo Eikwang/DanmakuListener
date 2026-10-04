@@ -174,6 +174,40 @@ def test_map_upstream_unknown_uri_returns_none():
     assert codec.map_upstream(b"xx", 9999, 1, 1700000000) is None
 
 
+def test_vip_enter_banner_decode_and_map():
+    """VipEnterBanner（uri 6110）解码+映射（2026-10-04 布局实证，
+    29330704 房间：tag1=昵称/tag3{tag3}=贵族称号/tag15{tag1}=坐骑；
+    tag2 是会话 tid 非用户 uid——三条不同昵称样本同值实证，不映射）"""
+    from danmaku_listener.engines.protocol.huya_tars import TarsOutputStream
+
+    os = TarsOutputStream()
+    os.write_int(1531172893, 0)   # tag0 时间戳类
+    os.write_string("青杉【烟雨梦】", 1)  # tag1 昵称
+    os.write_int(1199527588095, 2)  # tag2 会话 tid（不映射 user_id）
+    os.write_struct_begin(3)      # tag3 贵族 struct
+    os.write_string("剑士", 3)
+    os.write_struct_end()
+    os.write_string("https://huyaimg.example/avatar.png", 6)  # tag6 头像
+    os.write_struct_begin(15)     # tag15 坐骑横幅
+    os.write_string("烽烟战马", 1)
+    os.write_string("骑着", 2)
+    os.write_struct_end()
+    payload = os.to_bytes()
+
+    d = codec.decode_vip_enter_banner(payload)
+    assert d["user_name"] == "青杉【烟雨梦】"
+    assert d["noble"] == "剑士"
+    assert d["mount"] == "烽烟战马"
+    assert "user_id" not in d
+
+    mapped = codec.map_upstream(payload, codec.URI_VIP_ENTER_BANNER, 7, 1700000000)
+    assert mapped is not None
+    assert mapped["type"] == "ENTER_ROOM"
+    assert mapped["payload"]["user_name"] == "青杉【烟雨梦】"
+    assert mapped["payload"]["noble"] == "剑士"
+    assert mapped["payload"]["mount"] == "烽烟战马"
+
+
 @pytest.mark.asyncio
 async def test_engine_lifecycle_and_protocol_version():
     engine = HuyaProtocolEngine()
