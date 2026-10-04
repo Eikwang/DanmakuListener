@@ -186,3 +186,75 @@ def test_decompress_consumer_alignment():
             results = codec.parse_text_message(inner_body.decode("utf-8"), 1, 1700000000)
             assert len(results) == 1
             assert results[0]["payload"]["content"] == "弹幕内容"
+
+
+def test_send_gift_v2_pb_map():
+    """SEND_GIFT_V2 pb → GIFT（2026-10-04 dump 14 条样本实证：f2=送礼者、
+    f10{f1=gift_id,f2=礼物名,f3=数量}；pb 样本取自房间 1840119321 真实帧）"""
+    import base64
+    pb = base64.b64encode(bytes.fromhex(
+        "120a e5a4a9 2a2a2a" .replace(" ", "")  # f2="天***"
+    )).decode()
+    # 构造完整 pb：f2 昵称 + f10{f1=gift_id,f2=礼物名,f3=数量}
+    def varint(v):
+        out = b""
+        while True:
+            b7 = v & 0x7F
+            v >>= 7
+            out += bytes([b7 | (0x80 if v else 0)])
+            if not v:
+                return out
+    def field(no, wt, payload):
+        return varint((no << 3) | wt) + (varint(len(payload)) + payload if wt == 2 else payload)
+    inner = (field(1, 0, varint(31036))
+             + field(2, 2, "小花花".encode())
+             + field(3, 0, varint(1)))
+    pb_raw = (field(2, 2, "天***".encode()) + field(10, 2, inner))
+    pb_b64 = base64.b64encode(pb_raw).decode()
+    m = codec.map_upstream_message("SEND_GIFT_V2", {"pb": pb_b64}, 1, 1700000000)
+    assert m is not None
+    assert m["type"] == "GIFT"
+    assert m["payload"]["user_name"] == "天***"
+    assert m["payload"]["gift_name"] == "小花花"
+    assert m["payload"]["gift_id"] == "31036"
+    assert m["payload"]["gift_count"] == 1
+
+
+def test_interact_word_v2_pb_map():
+    """INTERACT_WORD_V2 pb → ENTER_ROOM（f2=昵称、f22.f4.f1=粉丝牌等级）"""
+    import base64
+    def varint(v):
+        out = b""
+        while True:
+            b7 = v & 0x7F
+            v >>= 7
+            out += bytes([b7 | (0x80 if v else 0)])
+            if not v:
+                return out
+    def field(no, wt, payload):
+        return varint((no << 3) | wt) + (varint(len(payload)) + payload if wt == 2 else payload)
+    f22_inner = (field(2, 2, field(1, 2, "青***".encode()))
+                 + field(4, 2, field(1, 0, varint(23))))
+    pb_raw = (field(2, 2, "青***".encode())
+              + field(5, 0, varint(1))
+              + field(6, 0, varint(1840119321))
+              + field(22, 2, f22_inner))
+    m = codec.map_upstream_message(
+        "INTERACT_WORD_V2", {"pb": base64.b64encode(pb_raw).decode()}, 2, 1700000000)
+    assert m is not None
+    assert m["type"] == "ENTER_ROOM"
+    assert m["payload"]["user_name"] == "青***"
+    assert m["payload"]["fan_level"] == 23
+
+
+def test_entry_effect_map():
+    """ENTRY_EFFECT JSON → ENTER_ROOM（copy_writing 昵称全名不打码）"""
+    m = codec.map_upstream_message(
+        "ENTRY_EFFECT",
+        {"uid": 3707022981728419, "copy_writing": "<%青岛即墨小太妹%> 来了"},
+        3, 1700000000)
+    assert m is not None
+    assert m["type"] == "ENTER_ROOM"
+    assert m["payload"]["user_name"] == "青岛即墨小太妹"
+    assert m["payload"]["content"] == "来了"
+    assert m["payload"]["user_id"] == "3707022981728419"
