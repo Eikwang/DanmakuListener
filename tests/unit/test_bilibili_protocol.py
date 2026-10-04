@@ -246,6 +246,14 @@ def test_interact_word_v2_pb_map():
     assert m["payload"]["user_name"] == "青***"
     assert m["payload"]["fan_level"] == 23
 
+    # msg_type=f5=2 → SOCIAL follow（2026-10-04 用户实测关注被误报进场）
+    pb_raw_follow = field(2, 2, "青***".encode()) + field(5, 0, varint(2))
+    m2 = codec.map_upstream_message(
+        "INTERACT_WORD_V2", {"pb": base64.b64encode(pb_raw_follow).decode()}, 3, 1700000000)
+    assert m2 is not None
+    assert m2["type"] == "SOCIAL"
+    assert m2["payload"]["action"] == "follow" 
+
 
 def test_entry_effect_map():
     """ENTRY_EFFECT JSON → ENTER_ROOM（copy_writing 昵称全名不打码）"""

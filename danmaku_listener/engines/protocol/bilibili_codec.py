@@ -356,8 +356,9 @@ def _map_send_gift_v2(pb_b64: str, seq: int, ts: int) -> Optional[Dict[str, Any]
 
 
 def _map_interact_word_v2(pb_b64: str, seq: int, ts: int) -> Optional[Dict[str, Any]]:
-    """INTERACT_WORD_V2（pb）→ ENTER_ROOM——f2=昵称、f6=房间号、
-    f22.f4.f1=粉丝牌等级（2026-10-04 dump 15 条样本实证）"""
+    """INTERACT_WORD_V2（pb）→ ENTER_ROOM / SOCIAL——f2=昵称、f5=msg_type
+    （V1 JSON 语义：1=进场、2=关注、3=分享——2026-10-04 用户实测关注被
+    误报进场，f5 分发修正）、f6=房间号、f22.f4.f1=粉丝牌等级"""
     import base64 as _b64
     try:
         raw = _b64.b64decode(pb_b64 + "=" * (-len(pb_b64) % 4))
@@ -371,6 +372,24 @@ def _map_interact_word_v2(pb_b64: str, seq: int, ts: int) -> Optional[Dict[str, 
     medal = d.get("f22.f4.f1")
     if medal:
         payload["fan_level"] = int(medal)
+    if d.get("f5") == 2:  # 关注
+        return {
+            "category": "business",
+            "type": "SOCIAL",
+            "payload": {"type": "SOCIAL", "action": "follow",
+                        "user_name": uname},
+            "seq": seq,
+            "timestamp": ts,
+        }
+    if d.get("f5") == 3:  # 分享
+        return {
+            "category": "business",
+            "type": "SOCIAL",
+            "payload": {"type": "SOCIAL", "action": "share",
+                        "user_name": uname},
+            "seq": seq,
+            "timestamp": ts,
+        }
     return {
         "category": "business",
         "type": "ENTER_ROOM",
