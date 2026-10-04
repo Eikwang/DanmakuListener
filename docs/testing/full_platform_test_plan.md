@@ -94,7 +94,9 @@ python tools/dy_sign_smoke.py <房间号> --duration 300 --dump-all
   ①SDK 参数对齐页面 WS（1.0.15+uid 派生大数）后消息集合从"仅弹幕"
   恢复完整；②礼物事件只推登录观众（游客连接 1223 条零礼物铁证）——
   登录闭环（扫码一次 cookie 持久化）后打通；③displayType=1 为累计
-  观看类，payload 键 viewer_count 对齐前端
+  观看类，payload 键 viewer_count 对齐前端；④在线观众走
+  RoomUserSeqMessage（每 2-6s，total=在线/totalUser=累计 UV），2026-10-04
+  实测在线显示正常
 
 ### B1. 淘宝（taobao）—— ✅ 验收通过（2026-10-03）
 
