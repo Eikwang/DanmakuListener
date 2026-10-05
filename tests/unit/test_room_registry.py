@@ -243,11 +243,29 @@ class TestOptionModeAdd:
 
     @pytest.mark.asyncio
     async def test_add_with_platform_unextractable_link_400(self):
-        """链接无法提取房号 → RoomError(400)"""
+        """链接无法提取房号 → 整链透传引擎预校验（2026-10-05 美团短链修复）"""
         bridge = _make_bridge()
+        engine = _make_engine()
+        with patch("danmaku_listener.engines.registry.build_engine", return_value=engine):
+            # 美团 dpurl.cn 短链：extract_from_link 不认，但引擎自持解析器
+            result = await bridge.add_room("http://dpurl.cn/FTcRbc2z", platform="meituan")
+        assert result["success"] is True
+        # room_id 为整条短链（引擎运行期 302 解析；场次级语义）
+        assert bridge._rooms["meituan:http://dpurl.cn/FTcRbc2z"]["room_id"] == \
+            "http://dpurl.cn/FTcRbc2z"
+        engine.start.assert_called_once_with("http://dpurl.cn/FTcRbc2z")
+
+    @pytest.mark.asyncio
+    async def test_add_with_platform_unknown_link_rejected_by_validator(self):
+        """引擎 validate_room_id 不认的链接 → 400（拒绝路径不消失）"""
+        bridge = _make_bridge()
+        engine = _make_engine()
+        engine.validate_room_id = MagicMock(
+            side_effect=ValueError("无法解析房间号"))
         from danmaku_listener.web.bridge import RoomError
-        with pytest.raises(RoomError) as ei:
-            await bridge.add_room("https://example.com/x/1", platform="douyin")
+        with patch("danmaku_listener.engines.registry.build_engine", return_value=engine):
+            with pytest.raises(RoomError) as ei:
+                await bridge.add_room("https://example.com/x/1", platform="bilibili")
         assert ei.value.status == 400
 
     @pytest.mark.asyncio

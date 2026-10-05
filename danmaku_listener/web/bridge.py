@@ -506,13 +506,16 @@ class DanmakuBridge:
             platform = platform.strip().lower()
             text = (room_spec or "").strip()
             if "://" in text:
-                # 直播间链接：房号以链接提取为准（提取失败即报错，避免静默存错）
+                # 直播间链接：优先静态正则提取房号（六平台）
                 link_spec = extract_from_link(text)
-                if link_spec is None:
-                    raise RoomError(
-                        "无法从链接中识别房间号——请检查链接完整性，"
-                        "或直接填写房间号", status=400)
-                spec = RoomSpec(platform=platform, room_id=link_spec.room_id)
+                if link_spec is not None:
+                    spec = RoomSpec(platform=platform, room_id=link_spec.room_id)
+                else:
+                    # 未知链接形态：整链透传引擎预校验（2026-10-05 美团
+                    # dpurl.cn 短链修复——live_id 场次级无法手填，引擎
+                    # extract_live_id 自持解析器（302 运行期解析）；引擎
+                    # validate_room_id 不认的链接仍会 400）
+                    spec = RoomSpec(platform=platform, room_id=text)
             else:
                 if not text:
                     raise RoomError("房间号不能为空", status=400)
