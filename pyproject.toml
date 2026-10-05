@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "danmaku-listener"
-version = "0.3.0"
+version = "0.4.0"
 description = "六平台弹幕监听系统（协议直连+统一消息契约+Web 测试控制台，可独立分发）"
 requires-python = ">=3.11"
 readme = "README.md"

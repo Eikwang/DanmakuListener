@@ -17,12 +17,21 @@
 
 ## 支持的平台
 
-| 平台 | 标识 | 引擎模式 | 适配器 |
-|------|------|----------|--------|
-| 抖音 | `douyin` | 代理模式 | `DouyinAdapter` |
-| 斗鱼 | `douyu` | 浏览器模式 | `DouyuAdapter` |
-| B站 | `bilibili` | 浏览器模式 | `BilibiliAdapter` |
-| 其他 | — | 浏览器模式 | `GenericAdapter` |
+| 平台 | 弹幕 | 进场 | 点赞 | 关注 | 礼物 | 房间信息 |
+|------|:----:|:----:|:----:|:----:|:----:|:--------:|
+| B站 | ✅ | ✅ | ✅ | ✅（含分享归一） | ✅ | ✅ 在线 |
+| 斗鱼 | ✅ | ✅ | 协议边界 | 协议边界 | ✅ | ✅ 在线 |
+| 快手 | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| 抖音 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 在线+累计 |
+| 淘宝 | ✅ | ✅ | — | — | — | ✅ 观看数 |
+| 1688 | ✅ | ✅ | — | — | ✅ | ✅ |
+| 美团 | ✅ | — | — | — | — | ✅ |
+| 小红书 | ✅ | ✅ | ✅ 昵称反查 | ✅ | ✅ | — |
+| 拼多多 | ✅ | ✅ | ✅ | ✅ | — | ✅ |
+| 京东 | ✅ | ✅ | ⚠️ 聚合帧 | — | — | — |
+| 视频号 | ✅ | ✅ | ✅ 严格帧驱动 | ✅ | ✅ | ✅ 在线+点赞 |
+
+（"—" = 平台无对应功能或协议未开放；"协议边界" = 采样实证平台不推送，详见 `docs/testing/full_platform_test_plan.md`）
 
 ## 快速开始
 
@@ -33,7 +42,7 @@
 pip install .
 
 # 可选平台依赖
-pip install ".[douyin]"    # 抖音代理引擎（mitmproxy）
+pip install ".[douyin]"    # 抖音（已原生 Web WS 直连，此 extras 现为空——保留兼容）
 pip install ".[wechat]"    # 视频号受控后台（playwright）
 pip install ".[all]"       # 全部
 ```
@@ -61,11 +70,6 @@ async def main():
 
 asyncio.run(main())
 ```
-
-### 抖音例外说明
-
-抖音引擎（proxy:douyin）按 ADR-001 需独立代理进程；Web 单进程模式添加
-`douyin:` 房间一律返回 501。双进程运维见 docs/ops/。
 
 ### 基本用法
 
@@ -102,9 +106,9 @@ if __name__ == "__main__":
 async with DanmakuListener() as listener:
     # 同时监听多个平台
     await listener.start([
-        "douyin:123456",   # 代理模式
-        "bilibili:789012", # 浏览器模式
-        "douyu:345678",    # 浏览器模式
+        "douyin:123456",   # 原生 Web WS 直连
+        "bilibili:789012", # 协议直连
+        "douyu:345678",    # TCP 明文 STT 直连
     ])
 ```
 
@@ -147,29 +151,29 @@ danmaku_listener/
 ├── listener.py          # DanmakuListener 主类
 ├── core.py              # 性能指标收集器
 ├── engines/             # 监听引擎层
-│   ├── base.py          # BaseEngine 抽象基类
-│   ├── proxy_engine.py  # 代理模式实现
-│   └── browser_engine.py # 浏览器模式实现
+|   ├── base.py          # BaseEngine 抽象基类
+|   ├── registry.py      # 引擎注册表（十二平台路由）
+|   └── protocol/        # 十二平台协议直连引擎
 ├── adapters/            # 平台适配器层
-│   ├── base.py          # BaseAdapter 抽象基类
-│   ├── douyin.py        # 抖音适配器
-│   ├── douyu.py         # 斗鱼适配器
-│   ├── bilibili.py      # B站适配器
-│   ├── generic.py       # 通用适配器
-│   └── protocols/       # 协议定义
-│       └── message_types.py
+|   ├── base.py          # BaseAdapter 抽象基类
+|   ├── douyin.py        # 抖音适配器
+|   ├── douyu.py         # 斗鱼适配器
+|   ├── bilibili.py      # B站适配器
+|   ├── generic.py       # 通用适配器
+|   └── protocols/       # 协议定义
+|       └── message_types.py
 ├── bus/                 # 消息总线层
-│   ├── event_bus.py     # 事件分发中心
-│   ├── message.py       # 数据模型
-│   └── dedup_filter.py  # 去重过滤器
+|   ├── event_bus.py     # 事件分发中心
+|   ├── message.py       # 数据模型
+|   └── dedup_filter.py  # 去重过滤器
 ├── managers/            # 资源管理器
-│   ├── certificate_manager.py
-│   ├── cookie_manager.py
-│   ├── reconnect_manager.py
-│   └── heartbeat_monitor.py
+|   ├── certificate_manager.py
+|   ├── cookie_manager.py
+|   ├── reconnect_manager.py
+|   └── heartbeat_monitor.py
 ├── config/              # 配置管理
-│   ├── settings.py      # Pydantic Settings
-│   └── defaults.py      # 默认配置值
+|   ├── settings.py      # Pydantic Settings
+|   └── defaults.py      # 默认配置值
 └── utils/               # 工具函数
     ├── platform_parser.py
     └── logger.py
