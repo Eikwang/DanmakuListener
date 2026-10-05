@@ -24,13 +24,58 @@ const SYSTEM_TYPES = [
   "ENGINE_STATUS", "BACKPRESSURE", "ROUTE_FAILED", "RECOVERED",
 ];
 
+// 平台中文名（2026-10-05 R4："[平台]内容"显示格式）
+const PLATFORM_NAMES = {
+  douyin: "抖音", douyu: "斗鱼", bilibili: "B站", huya: "虎牙",
+  kuaishou: "快手", taobao: "淘宝", "1688": "1688", meituan: "美团",
+  xiaohongshu: "小红书", pdd: "拼多多", jd: "京东", wechat_channels: "视频号",
+};
+
+// SOCIAL 动作中文名
+const ACTION_NAMES = { follow: "关注", share: "分享", favorite: "关注" };
+
+// 房间状态中文名
+const STATUS_NAMES = {
+  running: "监听中", stopped: "已停止", login_required: "待登录",
+  login_failed: "登录失败", error: "异常",
+};
+
+// 直播间链接识别（与后端 platform_parser.LINK_PATTERNS 对齐；仅做平台预选，
+// 后端为解析权威；未收录平台链接由用户手动选平台后直接粘贴）
+const LINK_PATTERNS = [
+  ["douyin", /live\.douyin\.com\/(\d+)/],
+  ["douyu", /douyu\.com\/(\d+)/],
+  ["bilibili", /live\.bilibili\.com\/(\d+)/],
+  ["huya", /huya\.com\/(\d+)/],
+  ["jd", /zhibo\.jd\.com\/liveroom\?[^\s]*liveId=(\d+)/],
+  ["1688", /live\.1688\.com\/zb\/play\.html\?[^\s]*feedId=(\d+)/],
+];
+
+// 三区路由（2026-10-05 R4：左=弹幕 / 右上=礼物点赞关注 / 右下=入场房间信息）
+const ROUTING = {
+  DANMU: "danmaku-container",
+  GIFT: "interactive-container",
+  SUPER_CHAT: "interactive-container",
+  LIKE: "interactive-container",
+  SOCIAL: "interactive-container",
+  ENTER_ROOM: "info-container",
+  ROOM_STATS: "info-container",
+  LIVE_STATUS_CHANGE: "info-container",
+};
+
+// 各容器消息上限
+const MAX_ITEMS = {
+  "danmaku-container": 400,
+  "interactive-container": 200,
+  "info-container": 200,
+};
+
 class DanmakuApp {
   constructor() {
     this.ws = null;
     this.reconnectTimer = null;
     this.reconnectDelay = 3000;
     this.autoScroll = true;
-    this.maxDanmakuItems = 500;
 
     // 契约统计
     this.typeCounts = {};        // type -> count（business）
@@ -48,8 +93,35 @@ class DanmakuApp {
     this.bindEvents();
     this.loadInitialState();
     this.renderTypeFilter();
+    this.renderPlatformSelect();
     // msg/s 滚动窗口刷新（10s 窗口，每秒重算）
     setInterval(() => this.updateRate(), 1000);
+  }
+
+  // 选项式添加（2026-10-05 R2）：平台下拉 + 房间号/链接输入
+  renderPlatformSelect() {
+    const select = document.getElementById("platform-select");
+    if (!select) return;
+    for (const [key, name] of Object.entries(PLATFORM_NAMES)) {
+      const opt = document.createElement("option");
+      opt.value = key;
+      opt.textContent = name;
+      select.appendChild(opt);
+    }
+  }
+
+  // 粘贴链接时自动选中平台（仅预选，后端为解析权威）
+  detectPlatformFromLink() {
+    const input = document.getElementById("room-input");
+    const select = document.getElementById("platform-select");
+    const text = (input?.value || "").trim();
+    if (!text || !text.includes("://")) return;
+    for (const [platform, pattern] of LINK_PATTERNS) {
+      if (pattern.test(text)) {
+        select.value = platform;
+        return;
+      }
+    }
   }
 
   connectWebSocket() {
@@ -102,14 +174,14 @@ class DanmakuApp {
     let extra = "";
     switch (type) {
       case "DANMU":
-        content = `${p.user_name}: ${p.content}`;
+        content = `${p.user_name}：${p.content}`;
         break;
       case "GIFT":
         content = `${p.user_name} 送出 ${p.gift_name} x${p.gift_count}`;
         extra = p.gift_value ? ` (价值 ${p.gift_value})` : "";
         break;
       case "SUPER_CHAT":
-        content = `SC ¥${p.price} ${p.user_name}: ${p.content}`;
+        content = `SC ¥${p.price} ${p.user_name}：${p.content}`;
         break;
       case "ENTER_ROOM":
         content = `${p.user_name} 进入直播间`;
@@ -130,16 +202,17 @@ class DanmakuApp {
         break;
       }
       case "SOCIAL":
-        content = `${p.user_name} ${p.action}`;
+        content = `${p.user_name} ${ACTION_NAMES[p.action] || p.action || ""}`;
         break;
       default:
         content = JSON.stringify(p); // 未知类型透传（additive-only）
     }
 
-    const room = `${msg.platform}:${msg.room_id}`;
+    // "[平台]内容" 显示格式（2026-10-05 R4）
+    const pname = PLATFORM_NAMES[msg.platform] || msg.platform;
     const clockSkew = Math.abs(Math.floor(Date.now() / 1000) - msg.timestamp);
     const skewNote = clockSkew > 5 ? ` (时钟差${clockSkew}s)` : "";
-    this.appendDanmaku(`${room} | ${content}${extra}`, type, msg.timestamp, skewNote);
+    this.appendMessage(msg, `[${pname}]${content}${extra}`, skewNote);
   }
 
   handleSystem(msg) {
@@ -210,25 +283,30 @@ class DanmakuApp {
 
   // ===== 渲染 =====
 
-  appendDanmaku(text, type, ts, skewNote = "") {
-    const container = document.getElementById("danmaku-container");
+  appendMessage(msg, text, skewNote = "") {
+    // 三区路由（2026-10-05 R4）：弹幕/互动/信息各自独立滚动与上限
+    const containerId = ROUTING[msg.type] || "info-container";
+    const container = document.getElementById(containerId);
     document.getElementById("empty-state")?.remove();
 
     const item = document.createElement("div");
     item.className = "danmaku-item";
-    const badge = document.createElement("span");
-    badge.className = "type-badge";
-    badge.textContent = type;
-    badge.style.background = TYPE_COLORS[type] || "var(--text-secondary)";
+    if (msg.type !== "DANMU") {
+      // 互动/信息区行首色点（弹幕区整区皆 DANMU，不加点）
+      const dot = document.createElement("span");
+      dot.className = "type-dot";
+      dot.style.background = TYPE_COLORS[msg.type] || "var(--text-secondary)";
+      dot.title = msg.type;
+      item.appendChild(dot);
+    }
     const body = document.createElement("span");
     body.className = "danmaku-text";
     body.textContent = text + skewNote;
-    item.append(badge, body);
+    item.appendChild(body);
 
-    if (this.autoScroll) container.appendChild(item);
-    else container.appendChild(item);
-
-    while (container.children.length > this.maxDanmakuItems) {
+    container.appendChild(item);
+    const maxItems = MAX_ITEMS[containerId] || 200;
+    while (container.children.length > maxItems) {
       container.removeChild(container.firstChild);
     }
     if (this.autoScroll) container.scrollTop = container.scrollHeight;
@@ -359,6 +437,7 @@ class DanmakuApp {
     document.getElementById("room-input")?.addEventListener("keypress", (e) => {
       if (e.key === "Enter") this.addRoom();
     });
+    document.getElementById("room-input")?.addEventListener("input", () => this.detectPlatformFromLink());
     document.getElementById("stop-all-btn")?.addEventListener("click", () => this.stopAll());
     document.getElementById("scroll-toggle-btn")?.addEventListener("click", (e) => {
       this.autoScroll = !this.autoScroll;
@@ -385,15 +464,18 @@ class DanmakuApp {
   }
 
   async addRoom() {
+    const platform = document.getElementById("platform-select")?.value || "";
     const input = document.getElementById("room-input");
     const errEl = document.getElementById("room-error");
     errEl.classList.add("hidden");
     try {
-      const data = await this.api("/api/rooms", "POST", { room: input.value });
+      // 选项模式（2026-10-05 R2）：{platform, room}；room 可为纯房号或链接
+      const data = await this.api("/api/rooms", "POST", { platform, room: input.value.trim() });
       if (data.status === "login_required") {
         errEl.textContent = data.message || "需要登录：请在弹出的浏览器窗口中登录账号";
         errEl.classList.remove("hidden");
         errEl.classList.add("login-hint");
+        this.loadRooms(); // 待登录房间已入列表（保存），刷新显示状态
         return; // 登录完成后引擎自动开始监听
       }
       input.value = "";
@@ -402,6 +484,12 @@ class DanmakuApp {
       errEl.textContent = "添加失败";
       errEl.classList.remove("hidden");
     }
+  }
+
+  // 单房间启动/停止（2026-10-05 R3：action = "start" | "stop"）
+  async toggleRoom(platform, roomId, action) {
+    await this.api(`/api/rooms/${platform}/${roomId}/${action}`, "POST");
+    this.loadRooms();
   }
 
   async stopAll() {
@@ -459,24 +547,50 @@ class DanmakuApp {
     const data = await this.api("/api/rooms");
     const list = document.getElementById("room-list");
     list.innerHTML = "";
-    const rooms = data.rooms || data || [];
-    for (const key of Object.keys(rooms)) {
+    // 2026-10-05 F1.1 修复：rooms 为数组（api_get_rooms 返回 values() 列表），
+    // 旧实现按对象遍历致列表显示索引、删除按钮解析错误
+    const rooms = data.rooms || [];
+    for (const r of rooms) {
       const li = document.createElement("li");
       li.className = "room-item";
-      li.innerHTML = `<span>${key}</span>`;
+
+      // 平台徽章 + 房号 + 状态
+      const name = document.createElement("span");
+      name.className = "room-name";
+      const pname = PLATFORM_NAMES[r.platform] || r.platform;
+      const tag = document.createElement("span");
+      tag.className = "platform-tag";
+      tag.textContent = pname;
+      const rid = document.createElement("span");
+      rid.textContent = r.room_id;
+      const badge = document.createElement("span");
+      badge.className = `status-badge ${r.status || "stopped"}`;
+      badge.textContent = STATUS_NAMES[r.status] || r.status || "";
+      name.append(tag, rid, badge);
+
+      // 启停/移除按钮组
+      const actions = document.createElement("span");
+      actions.className = "room-actions";
+      const running = r.status === "running";
+      const toggle = document.createElement("button");
+      toggle.textContent = running ? "停止" : "启动";
+      toggle.className = running ? "room-stop-btn" : "room-toggle-btn";
+      toggle.setAttribute("aria-label", `${running ? "停止" : "启动"} ${r.platform}:${r.room_id}`);
+      toggle.onclick = () => this.toggleRoom(r.platform, r.room_id, running ? "stop" : "start");
       const del = document.createElement("button");
       del.textContent = "×";
       del.className = "room-del";
-      del.setAttribute("aria-label", `移除 ${key}`);
-      const [platform, roomId] = key.split(":");
+      del.setAttribute("aria-label", `移除 ${r.platform}:${r.room_id}`);
       del.onclick = async () => {
-        await this.api(`/api/rooms/${platform}/${roomId}`, "DELETE");
+        await this.api(`/api/rooms/${r.platform}/${r.room_id}`, "DELETE");
         this.loadRooms();
       };
-      li.appendChild(del);
+      actions.append(toggle, del);
+
+      li.append(name, actions);
       list.appendChild(li);
     }
-    document.getElementById("stop-all-btn").disabled = Object.keys(rooms).length === 0;
+    document.getElementById("stop-all-btn").disabled = rooms.length === 0;
   }
 
   async loadKeywords() {

@@ -13,6 +13,18 @@ from aiohttp.test_utils import TestClient, TestServer
 from danmaku_listener.web.bridge import DanmakuBridge
 
 
+@pytest.fixture(autouse=True)
+def _isolate_cwd(tmp_path, monkeypatch):
+    """rooms.json 为 cwd 相对路径（2026-10-05 R3 持久化）——
+    chdir 到临时目录隔离读/写；登录门槛统一视为已登录
+    （登录闭环行为由登录专项测试覆盖，本文件聚焦房间路由）"""
+    monkeypatch.chdir(tmp_path)
+    for mod_path in ("danmaku_listener.engines.bilibili_login",
+                     "danmaku_listener.engines.kuaishou_login",
+                     "danmaku_listener.engines.douyin_login"):
+        monkeypatch.setattr(f"{mod_path}.has_login_cookie", lambda p: True)
+
+
 def _create_app_with_bridge(bridge):
     """创建带桥接器的测试 app"""
     from danmaku_listener.web.app import create_app
@@ -195,7 +207,7 @@ class TestStopAll:
 
     @pytest.mark.asyncio
     async def test_stop_all_success(self):
-        """停止所有房间 → 200 → AC-006"""
+        """全部暂停 → 200 → 列表保留、全部 stopped（2026-10-05 R3 语义变化）"""
         bridge = _make_bridge_with_mocked_engines()
         app = _create_app_with_bridge(bridge)
         async with TestClient(TestServer(app)) as client:
@@ -206,9 +218,11 @@ class TestStopAll:
             assert resp.status == 200
             data = await resp.json()
             assert data["success"] is True
-            # 所有房间应被清空
+            # 列表保留（原语义为清空；对齐"按需启动&停止"后全部转 stopped）
             resp2 = await client.get("/api/rooms")
-            assert len((await resp2.json())["rooms"]) == 0
+            rooms = (await resp2.json())["rooms"]
+            assert len(rooms) == 2
+            assert all(r["status"] == "stopped" for r in rooms)
             # registry 引擎 stop 应被调用（每房间一次）
             assert bridge._mock_engine.stop.call_count == 2
 

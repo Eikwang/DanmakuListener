@@ -560,3 +560,96 @@ button:disabled {
     border-radius: 3px;
     padding: 4px 8px;
 }
+
+/* ===== 前端 v6：选项式添加 + 三区显示（2026-10-05） ===== */
+
+/* 中间主区域：弹幕（左）+ 互动/信息（右上下） */
+.center-area {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+}
+
+.side-streams {
+    width: 340px;
+    display: flex;
+    flex-direction: column;
+    border-left: 1px solid var(--border);
+    overflow: hidden;
+}
+
+.stream-section {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.stream-section h2 {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 0;
+}
+
+.stream-interactive { border-bottom: 1px solid var(--border); }
+
+.stream-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px 12px;
+}
+
+/* 添加表单：平台下拉 + 房间号/链接输入 */
+.room-add-form select {
+    padding: 8px 4px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 13px;
+    max-width: 92px;
+}
+
+/* 消息类型色点（互动/信息区行首；弹幕区不加点） */
+.type-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 8px;
+    flex-shrink: 0;
+}
+
+/* 房间行：平台徽章 + 房号 + 状态 + 启停/移除 */
+.room-item .room-name {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    overflow: hidden;
+}
+
+.room-item .room-actions {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.room-actions button {
+    padding: 2px 8px;
+    font-size: 11px;
+    border-radius: 3px;
+}
+
+.room-toggle-btn { background: var(--accent); color: #fff; }
+.room-toggle-btn:hover { background: var(--accent-hover); }
+.room-stop-btn { background: var(--border); color: var(--text-primary); }
+.room-del { background: none; color: var(--danger); font-size: 14px; padding: 0 6px; }
+
+.status-badge.login_required { background-color: var(--warn-login); color: black; }
+.status-badge.login_failed,
+.status-badge.error { background-color: var(--danger); color: white; }
+
+/* 响应式：<1100px 右侧消息流折叠（三区回退单区） */
+@media (max-width: 1100px) {
+    .side-streams { display: none; }
+}

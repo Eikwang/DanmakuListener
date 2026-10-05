@@ -30,28 +30,42 @@
                 <section class="room-section">
                     <h2>房间管理</h2>
                     <div class="room-add-form">
-                        <input type="text" id="room-input" placeholder="bilibili:23058" aria-label="房间标识 平台:房间ID">
+                        <select id="platform-select" aria-label="选择平台"></select>
+                        <input type="text" id="room-input" placeholder="房间号或直播间链接" aria-label="房间号或直播间链接">
                         <button id="add-room-btn">添加</button>
                     </div>
                     <div id="room-error" class="error-msg hidden"></div>
                     <ul id="room-list" class="room-list"></ul>
-                    <button id="stop-all-btn" class="btn-danger" disabled>全部停止</button>
+                    <button id="stop-all-btn" class="btn-danger" disabled>全部暂停</button>
                 </section>
 
             </aside>
 
-            <!-- 中间主区域：系统告警 + 弹幕显示 -->
-            <main class="danmaku-section">
-                <div class="danmaku-header">
-                    <h2>实时弹幕</h2>
-                    <div class="type-filter" id="type-filter" role="group" aria-label="消息类型过滤"></div>
-                    <button id="scroll-toggle-btn">暂停滚动</button>
-                </div>
-                <div id="danmaku-container" class="danmaku-container" aria-live="polite" aria-label="实时弹幕流">
-                    <div class="empty-state" id="empty-state">
-                        <p>暂无消息</p>
-                        <p class="empty-hint">在左侧添加房间（如 bilibili:23058），或用命令行启动回放：<br><code>python -m danmaku_listener serve --replay docs/contract/examples/demo.jsonl</code></p>
+            <!-- 中间主区域：弹幕（左大区）+ 互动/信息（右上下两区） -->
+            <main class="center-area">
+                <section class="danmaku-section">
+                    <div class="danmaku-header">
+                        <h2>弹幕</h2>
+                        <div class="type-filter" id="type-filter" role="group" aria-label="消息类型过滤"></div>
+                        <button id="scroll-toggle-btn">暂停滚动</button>
                     </div>
+                    <div id="danmaku-container" class="danmaku-container" aria-live="polite" aria-label="实时弹幕流">
+                        <div class="empty-state" id="empty-state">
+                            <p>暂无消息</p>
+                            <p class="empty-hint">在左侧选择平台并输入房间号或直播间链接添加监听</p>
+                        </div>
+                    </div>
+                </section>
+
+                <div class="side-streams">
+                    <section class="stream-section stream-interactive">
+                        <h2>礼物 · 点赞 · 关注</h2>
+                        <div id="interactive-container" class="stream-container" aria-label="互动消息流"></div>
+                    </section>
+                    <section class="stream-section stream-info">
+                        <h2>入场 · 房间信息</h2>
+                        <div id="info-container" class="stream-container" aria-label="房间信息流"></div>
+                    </section>
                 </div>
             </main>
 
@@ -117,6 +131,6 @@
         </div>
     </div>
 
-    <script src="/static/app.js?v=5"></script>
+    <script src="/static/app.js?v=6"></script>
 </body>
 </html>
