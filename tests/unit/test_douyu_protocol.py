@@ -91,5 +91,19 @@ def test_map_gift_enter_stats():
     assert stats["payload"]["viewer_count"] == 1024  # 除以 10 口径
 
 
+def test_map_oun_online_count():
+    """oun -> ROOM_STATS 在线口径（2026-10-05 dump 实证：un=当前在线数，
+    每数秒推送实时变化；oni/synexp/ranklist 为贵族分布/主播经验/贡献榜，
+    点赞与关注无房间级 STT 推送——协议边界）"""
+    m = codec.map_upstream({"type": "oun", "un": "2376", "rid": "1126960"}, 1, 1700000000)
+    assert m is not None
+    assert m["type"] == "ROOM_STATS"
+    assert m["payload"]["online_count"] == 2376
+
+    # 异常/零值不 emit
+    assert codec.map_upstream({"type": "oun", "un": "0"}, 2, 1700000000) is None
+    assert codec.map_upstream({"type": "oun", "un": "abc"}, 3, 1700000000) is None
+
+
 def test_map_unknown_returns_none():
     assert codec.map_upstream({"type": "noble_num_info"}, 1, 1700000000) is None
