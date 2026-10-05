@@ -387,6 +387,9 @@ class BilibiliProtocolEngine(BaseEngine):
                 logger.warning(
                     f"[bilibili] room {room_id} error: {type(e).__name__}: {e}"
                 )
+                if self._is_stopping(room_id):
+                    return  # 主动停止中的连接关闭属预期（sent 1000）——不发 GAP/不标 ERROR
+
                 self._set_status(self.status.__class__.ERROR)
                 self.mark_gap_start(room_id)
                 handled = await self._handle_error_with_reconnect(room_id, e)

@@ -98,6 +98,25 @@ class BaseEngine(ABC):
         """
         return room_id
 
+    def _is_stopping(self, room_id: str) -> bool:
+        """房间是否处于主动停止中（2026-10-05 停止语义修复）
+
+        兼容两种停止接口：手写引擎的 ``_stop_flags`` dict 与
+        受控页面基类的 ``_stopped()`` 方法。停止中的连接关闭
+        （``sent 1000 (OK); no close frame received``）是预期行为，
+        _run_room 异常路径据此静默退出——不发 GAP、不标 ERROR、不退避重试。
+        """
+        flags = getattr(self, "_stop_flags", None)
+        if isinstance(flags, dict) and flags.get(room_id):
+            return True
+        meth = getattr(self, "_stopped", None)
+        if callable(meth):
+            try:
+                return bool(meth(room_id))
+            except Exception:  # noqa: BLE001
+                return False
+        return False
+
     @property
     def status(self) -> EngineStatus:
         """获取当前状态"""

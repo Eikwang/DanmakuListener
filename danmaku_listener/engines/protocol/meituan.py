@@ -190,6 +190,9 @@ class MeituanPollEngine(BaseEngine):
                 logger.warning(f"[meituan] room {room_id} poll error: "
                                f"{type(e).__name__}: {str(e)[:80]}")
                 if fail_count == FAIL_THRESHOLD:
+                    if self._is_stopping(room_id):
+                        return  # stop-in-progress close is expected (sent 1000) - no GAP/ERROR
+
                     self._set_status(self.status.__class__.ERROR)
                     self.mark_gap_start(room_id)
                     gap = self.build_gap_message(room_id, GapReason.NETWORK)
