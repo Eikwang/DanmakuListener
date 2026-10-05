@@ -84,6 +84,7 @@ class DanmakuApp {
     this.rateWindow = [];        // 最近 10s 时间戳
     this.currentEngine = "—";
     this.typeFilter = new Set(); // 空集合=全部显示
+    this._lastStatsSig = {};     // 房间统计同值去重（在线统一口径，2026-10-05）
 
     this.init();
   }
@@ -193,12 +194,21 @@ class DanmakuApp {
         content = p.live ? "直播开始" : "直播结束";
         break;
       case "ROOM_STATS": {
-        // like_count 为引擎字段；total_likes 历史兼容；online_count 在线口径（抖音 RoomUserSeq）
+        // 在线统一口径（2026-10-05 用户裁定：在线/观看不分成两类——
+        // online_count 优先（抖音 RoomUserSeq），viewer_count 作为无在线
+        // 口径平台的回退（淘宝/1688 观看数）；同房间同值去重，抖音双源
+        // （RoomUserSeq 在线 + RoomStats 累计）合并为一条流）
         const parts = [];
-        if (p.online_count != null) parts.push(`在线 ${p.online_count}`);
-        parts.push(`观看 ${p.viewer_count ?? "—"}`);
-        if (p.like_count != null || p.total_likes != null) parts.push(`点赞 ${p.like_count ?? p.total_likes}`);
-        content = parts.join(" · ");
+        const online = p.online_count ?? p.viewer_count;
+        const like = p.like_count ?? p.total_likes;
+        if (online != null) parts.push(`在线 ${online}`);
+        if (like != null) parts.push(`点赞 ${like}`);
+        if (!parts.length) break;
+        const statsKey = `${msg.platform}:${msg.room_id}`;
+        const statsSig = parts.join(" · ");
+        if (this._lastStatsSig[statsKey] === statsSig) break; // 同值不重复显示
+        this._lastStatsSig[statsKey] = statsSig;
+        content = statsSig;
         break;
       }
       case "SOCIAL":
