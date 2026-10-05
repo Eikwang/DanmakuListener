@@ -64,14 +64,20 @@ python tools/protocol_listen.py douyu 320155 --duration 300 --dump-all
 - 预期：`DANMU`(user_name/content)、`GIFT`(gift_name/gift_count)
 - 校准点：礼物名是否为可读名称（非类型编号）
 
-### A2. B站（bilibili）
+### A2. B站（bilibili）——✅ 验收通过（2026-10-05）
 
 ```powershell
-python tools/protocol_listen.py bilibili 1905051217 --duration 300 --dump-all
+python tools/protocol_listen.py bilibili <房间号> --duration 300 --dump-all
 ```
-- 操作：发弹幕 → 送礼物 → （有条件的话）购买 SC
-- 预期：`DANMU`、`GIFT`、`SUPER_CHAT`、`ENTER_ROOM`、`ROOM_STATS`
-- 校准点：SC 金额字段、礼物名
+- 操作：发弹幕 → 送礼物 → 关注/分享 → 观察在线观众数
+- 预期：`DANMU`、`GIFT`(SEND_GIFT_V2)、`ENTER_ROOM`(INTERACT_WORD_V2+ENTRY_EFFECT)、
+  `LIKE`(LIKE_INFO_V3_CLICK)、`SOCIAL follow`(f5=2/3 归一)、`ROOM_STATS`(在线)
+- **验收结论**：六类消息全通（游客模式，无需登录）。关键实证：
+  ①B站礼物/进场切 V2 protobuf——无 schema 递归解码器补映射
+  （SEND_GIFT_V2 f10.f2=礼物名协议自带）；②关注与进场共用 INTERACT_WORD
+  族，f5=msg_type 分发（1=进场/2=关注/3=分享，分享按裁定归一为关注）；
+  ③uid=0 为正常游客路径；④comet 服务端定期轮换连接（1000 断开自动重连，
+  正常现象）
 
 ### A3. 虎牙（huya）——✅ 验收通过（2026-10-04）
 
