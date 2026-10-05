@@ -243,17 +243,30 @@ class TestOptionModeAdd:
 
     @pytest.mark.asyncio
     async def test_add_with_platform_unextractable_link_400(self):
-        """链接无法提取房号 → 整链透传引擎预校验（2026-10-05 美团短链修复）"""
+        """链接无法提取房号 → 整链交引擎归一（2026-10-05 按钮失效修复）"""
         bridge = _make_bridge()
         engine = _make_engine()
+        # 美团引擎归一：dpurl.cn 短链 302 → live_id（mock 引擎行为）
+        engine.normalize_room_id = AsyncMock(return_value="14566624")
         with patch("danmaku_listener.engines.registry.build_engine", return_value=engine):
-            # 美团 dpurl.cn 短链：extract_from_link 不认，但引擎自持解析器
             result = await bridge.add_room("http://dpurl.cn/FTcRbc2z", platform="meituan")
         assert result["success"] is True
-        # room_id 为整条短链（引擎运行期 302 解析；场次级语义）
-        assert bridge._rooms["meituan:http://dpurl.cn/FTcRbc2z"]["room_id"] == \
-            "http://dpurl.cn/FTcRbc2z"
-        engine.start.assert_called_once_with("http://dpurl.cn/FTcRbc2z")
+        # 注册表 room_id 为归一后的 live_id（不含 ://，REST 路径安全）
+        assert bridge._rooms["meituan:14566624"]["room_id"] == "14566624"
+        engine.normalize_room_id.assert_awaited_once_with("http://dpurl.cn/FTcRbc2z")
+        engine.start.assert_called_once_with("14566624")
+
+    @pytest.mark.asyncio
+    async def test_add_with_platform_link_normalize_rejected_400(self):
+        """引擎归一失败（短链失效）→ 400"""
+        bridge = _make_bridge()
+        engine = _make_engine()
+        engine.normalize_room_id = AsyncMock(side_effect=ValueError("短链跳转未含 liveid"))
+        from danmaku_listener.web.bridge import RoomError
+        with patch("danmaku_listener.engines.registry.build_engine", return_value=engine):
+            with pytest.raises(RoomError) as ei:
+                await bridge.add_room("http://dpurl.cn/deadlink", platform="meituan")
+        assert ei.value.status == 400
 
     @pytest.mark.asyncio
     async def test_add_with_platform_unknown_link_rejected_by_validator(self):
@@ -286,3 +299,38 @@ class TestOptionModeAdd:
                    return_value=_make_engine()):
             result = await bridge.add_room("douyin:55814568")
         assert result["room"]["platform"] == "douyin"
+
+
+class TestEncodedRoomIdRoute:
+    """链接型 room_id 的 REST 路由匹配（2026-10-05 按钮失效防御层）
+
+    存量注册表可能仍有链接型 room_id（修复前入库）——前端编码
+    （encodeURIComponent）后 aiohttp {room_id} 必须能匹配并解码。
+    """
+
+    @pytest.mark.asyncio
+    async def test_encoded_link_room_id_stop_and_delete(self):
+        from aiohttp import web as _web
+
+        from danmaku_listener.web.app import create_app
+        bridge = _make_bridge()
+        engine = _make_engine()
+        link = "http://dpurl.cn/FTcRbc2z"
+        bridge._rooms[f"meituan:{link}"] = {
+            "platform": "meituan", "room_id": link,
+            "status": "running", "engine_type": "poll:meituan",
+        }
+        bridge._engine_instances["meituan"] = engine
+        app = create_app()
+        app["bridge"] = bridge
+        async with TestClient(TestServer(app)) as client:
+            # 前端 encodeURIComponent 后的形态
+            from urllib.parse import quote
+            encoded = quote(link, safe="")
+            resp = await client.post(f"/api/rooms/meituan/{encoded}/stop")
+            assert resp.status == 200, await resp.text()
+            assert bridge._rooms[f"meituan:{link}"]["status"] == "stopped"
+
+            resp = await client.delete(f"/api/rooms/meituan/{encoded}")
+            assert resp.status == 200
+            assert f"meituan:{link}" not in bridge._rooms

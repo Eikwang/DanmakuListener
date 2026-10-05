@@ -87,6 +87,17 @@ class BaseEngine(ABC):
         """
         return None
 
+    async def normalize_room_id(self, room_id: str) -> str:
+        """房间参数归一（add_room 时调用，2026-10-05）
+
+        链接/短链形态的房间参数解析为**安全的规范化 id** 后入库——
+        注册表 room_id 若含 ``:``/``/``（如美团 dpurl.cn 短链），拼进
+        REST 路径会被斜杠打散致启停/删除全部 404（实测 bug）。
+
+        默认原样返回；平台引擎覆写（网络解析须带超时，失败抛 ValueError）。
+        """
+        return room_id
+
     @property
     def status(self) -> EngineStatus:
         """获取当前状态"""

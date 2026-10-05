@@ -115,6 +115,18 @@ class MeituanPollEngine(BaseEngine):
         except MeituanParseError as e:
             raise ValueError(str(e)) from e
 
+    async def normalize_room_id(self, room_id: str) -> str:
+        """短链/链接归一为 live_id（2026-10-05 按钮失效修复——注册表
+        room_id 含 :// 会让 REST 路径匹配失败，启停/删除全部 404）"""
+        try:
+            spec = extract_live_id(room_id)
+        except MeituanParseError as e:
+            raise ValueError(str(e)) from e
+        try:
+            return await asyncio.wait_for(self._resolve_live_id(spec), timeout=12.0)
+        except MeituanParseError as e:
+            raise ValueError(str(e)) from e
+
     # ---- 公开契约 ----
 
     async def start(self, room_id: str) -> None:

@@ -497,8 +497,9 @@ class DanmakuApp {
   }
 
   // 单房间启动/停止（2026-10-05 R3：action = "start" | "stop"）
+  // room_id 编码进路径（防御：链接型 room_id 含 : / 不编码则路由被斜杠打散）
   async toggleRoom(platform, roomId, action) {
-    await this.api(`/api/rooms/${platform}/${roomId}/${action}`, "POST");
+    await this.api(`/api/rooms/${platform}/${encodeURIComponent(roomId)}/${action}`, "POST");
     this.loadRooms();
   }
 
@@ -592,7 +593,7 @@ class DanmakuApp {
       del.className = "room-del";
       del.setAttribute("aria-label", `移除 ${r.platform}:${r.room_id}`);
       del.onclick = async () => {
-        await this.api(`/api/rooms/${r.platform}/${r.room_id}`, "DELETE");
+        await this.api(`/api/rooms/${r.platform}/${encodeURIComponent(r.room_id)}`, "DELETE");
         this.loadRooms();
       };
       actions.append(toggle, del);

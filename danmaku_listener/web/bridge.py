@@ -511,10 +511,16 @@ class DanmakuBridge:
                 if link_spec is not None:
                     spec = RoomSpec(platform=platform, room_id=link_spec.room_id)
                 else:
-                    # 未知链接形态：整链透传引擎预校验（2026-10-05 美团
-                    # dpurl.cn 短链修复——live_id 场次级无法手填，引擎
-                    # extract_live_id 自持解析器（302 运行期解析）；引擎
-                    # validate_room_id 不认的链接仍会 400）
+                    # 未知链接形态：整链交引擎归一（2026-10-05 按钮失效修复——
+                    # 美团 dpurl.cn 短链 302 归一为 live_id 后入库，注册表
+                    # room_id 永不含 ://；引擎不认的链接仍由 validate 报 400）
+                    engine = self._get_or_build_engine(platform)
+                    try:
+                        text = await engine.normalize_room_id(text)
+                    except ValueError as e:
+                        raise RoomError(str(e), status=400)
+                    except Exception as e:  # noqa: BLE001
+                        raise RoomError(f"链接解析失败: {str(e)[:80]}", status=400)
                     spec = RoomSpec(platform=platform, room_id=text)
             else:
                 if not text:
