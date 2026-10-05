@@ -67,3 +67,14 @@
    验收通过（入场/弹幕，2026-10-03）——**专项初衷已被替代，逆向无必要**。
    历史探测记录存 docs/platforms/jd/runbook.md；若未来受控页面被封，
    可从该记录重启评估（引擎已注册 `page:jd`，无遗留骨架问题）。
+
+2. ~~**美团进场监听（Pike WS 逆向）**（P3, XL）~~ **按协议边界关闭（2026-10-05 用户裁定）**
+   — 四轮采样实证：轮询接口（livestudiobaseinfo.bin，快照恒 10 条增量）
+   无进场形态（1630+ 条全 msgType=2 聊天）；页面进场横幅走独立 Pike IM
+   长连接（wss://pike-room-webhl.meituan.com/pike/?bizId=dzu_live_pike，
+   engine.io v3），登录帧含 H5guard signature 风控签名，且探测期间已触发
+   3D 点选验证码。用户在"受控页面拦帧（拼多多模式，常驻浏览器+过验证）"
+   与"协议边界申报"之间裁定后者。重启评估条件：未来发现免签名进场 HTTP
+   通道，或客户对美团进场有强需求且接受受控页面成本——CDP 级抓帧技术
+   路径已验证可行（playwright page.on("websocket") framereceived，帧格式
+   42["pike",{d:"<json>"}]）。

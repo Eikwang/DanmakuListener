@@ -15,7 +15,16 @@ messageVO.msgs[]，按 commentId 去重后增量 emit。弹幕读取无需登录
 消息映射（一期按实测样本最小集）：
 - imUserDTO+imMsgDTO → DANMU（userName/userId/content/commentId）
 - liveInfoVo.beginTime → 历史场次一次性提示（SYSTEM_STATUS）
-- 其余形态（进入/点赞等 msgType）debug 丢弃——实测样本后校准（TODOS）
+- 其余形态（点赞等 msgType）debug 丢弃——实测样本后校准（TODOS）
+
+**协议边界（2026-10-05 四轮采样实证）：进场消息不进本引擎。**
+用户实测进出直播间（raw_hook 落盘 1630+ 条消息 + 页面 CDP 抓帧）：
+①轮询响应 messageVO.msgs 全部为 msgType=2（聊天，快照恒 10 条增量），
+无任何进场形态；②页面进场横幅"XXX 进入直播间"走独立 Pike IM 长连接
+（wss://pike-room-webhl.meituan.com/pike/?bizId=dzu_live_pike，engine.io
+v3），登录帧含 H5guard signature 风控签名——纯 Python 直连需复现签名
+（treadmill 风险，用户裁定按协议边界申报不做，见 TODOS.md 美团条目）。
+弹幕/房间统计（点赞/热度）不受影响。
 """
 
 import asyncio
