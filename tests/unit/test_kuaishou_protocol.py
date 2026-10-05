@@ -98,3 +98,37 @@ def test_enter_room_frame():
 def test_aes_unsupported_flagged():
     with pytest.raises(ValueError):
         codec.decompress_payload(3, b"xx")
+
+
+def test_parse_display_dirty_formats():
+    """展示计数解析增强（2026-10-05 快手空统计行修复）"""
+    parse = codec._parse_display
+    assert parse("1.2万") == 12000
+    assert parse("1.3万人") == 13000        # 脏后缀
+    assert parse("13,000") == 13000         # 千分位
+    assert parse("13000") == 13000
+    assert parse("1.08亿") == 108000000
+    assert parse("") is None
+    assert parse("--") is None              # 完全无法解析
+    assert parse("万") is None
+
+
+def test_map_feed_push_all_unparsable_no_emit():
+    """display 双解析失败 → 不 emit 空统计帧（前端空行根因）"""
+    push = ks_pb2.SCWebFeedPush()
+    push.displayWatchingCount = "--"
+    push.displayLikeCount = "n/a"
+    results = codec.map_feed_push(push.SerializeToString(), 0, 1700000000)
+    assert not [r for r in results if r["type"] == "ROOM_STATS"]
+
+
+def test_map_feed_push_partial_parsable_emits():
+    """单边解析成功 → 正常 emit（None 侧不带垃圾占位）"""
+    push = ks_pb2.SCWebFeedPush()
+    push.displayWatchingCount = "1.3万人"
+    push.displayLikeCount = ""
+    results = codec.map_feed_push(push.SerializeToString(), 0, 1700000000)
+    stats = [r for r in results if r["type"] == "ROOM_STATS"]
+    assert len(stats) == 1
+    assert stats[0]["payload"]["viewer_count"] == 13000
+    assert stats[0]["payload"]["total_likes"] is None

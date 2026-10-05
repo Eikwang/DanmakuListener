@@ -218,7 +218,9 @@ class DanmakuApp {
         content = JSON.stringify(p); // 未知类型透传（additive-only）
     }
 
-    // "[平台]内容" 显示格式（2026-10-05 R4）
+    // "[平台]内容" 显示格式（2026-10-05 R4）；空内容不渲染（v10 兜底——
+    // 统计帧解析失败等场景不再出现空行，2026-10-05 快手实测）
+    if (!content && !extra) return;
     const pname = PLATFORM_NAMES[msg.platform] || msg.platform;
     const clockSkew = Math.abs(Math.floor(Date.now() / 1000) - msg.timestamp);
     const skewNote = clockSkew > 5 ? ` (时钟差${clockSkew}s)` : "";
