@@ -287,7 +287,10 @@ class DanmakuApp {
     // 三区路由（2026-10-05 R4）：弹幕/互动/信息各自独立滚动与上限
     const containerId = ROUTING[msg.type] || "info-container";
     const container = document.getElementById(containerId);
-    document.getElementById("empty-state")?.remove();
+    // 首条消息移除该区空态（v7 C1：三区各有空态）
+    const empty = document.getElementById(containerId === "danmaku-container" ? "empty-state"
+      : containerId === "interactive-container" ? "empty-interactive" : "empty-info");
+    empty?.remove();
 
     const item = document.createElement("div");
     item.className = "danmaku-item";
@@ -303,6 +306,13 @@ class DanmakuApp {
     body.className = "danmaku-text";
     body.textContent = text + skewNote;
     item.appendChild(body);
+
+    // HH:MM 时间戳（v7 C3：区分消息批次）
+    const time = document.createElement("span");
+    time.className = "msg-time";
+    const d = new Date((msg.timestamp || Math.floor(Date.now() / 1000)) * 1000);
+    time.textContent = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    item.appendChild(time);
 
     container.appendChild(item);
     const maxItems = MAX_ITEMS[containerId] || 200;

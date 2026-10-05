@@ -9,6 +9,19 @@ from unittest.mock import patch, MagicMock
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
+@pytest.fixture(autouse=True)
+def _isolate_cwd(tmp_path, monkeypatch):
+    """rooms.json 为 cwd 相对路径（R3 持久化）——chdir 隔离，
+    防止本机真实注册表（用户正在监听的房间）污染测试；
+    并重置 app._bridge 模块级单例（先前测试在仓库根 cwd 创建的
+    单例会永久携带真实房间，致未注入 bridge 的用例读到脏状态）"""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("danmaku_listener.web.app._bridge", None)
+    for mod_path in ("danmaku_listener.engines.bilibili_login",
+                     "danmaku_listener.engines.kuaishou_login",
+                     "danmaku_listener.engines.douyin_login"):
+        monkeypatch.setattr(f"{mod_path}.has_login_cookie", lambda p: True)
+
 
 def _create_app_with_bridge(bridge=None):
     """创建带桥接器的测试 app"""

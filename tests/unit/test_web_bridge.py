@@ -9,6 +9,16 @@ from unittest.mock import AsyncMock, MagicMock
 
 from danmaku_listener.web.bridge import DanmakuBridge
 
+@pytest.fixture(autouse=True)
+def _isolate_cwd(tmp_path, monkeypatch):
+    """rooms.json 为 cwd 相对路径（R3 持久化）——chdir 隔离，
+    防止本机真实注册表（用户正在监听的房间）污染测试"""
+    monkeypatch.chdir(tmp_path)
+    for mod_path in ("danmaku_listener.engines.bilibili_login",
+                     "danmaku_listener.engines.kuaishou_login",
+                     "danmaku_listener.engines.douyin_login"):
+        monkeypatch.setattr(f"{mod_path}.has_login_cookie", lambda p: True)
+
 
 class TestDanmakuBridgeInitialization:
     """验证 DanmakuBridge 初始化"""

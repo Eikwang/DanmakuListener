@@ -45,9 +45,11 @@
             <main class="center-area">
                 <section class="danmaku-section">
                     <div class="danmaku-header">
-                        <h2>弹幕</h2>
+                        <div class="danmaku-title-row">
+                            <h2>弹幕</h2>
+                            <button id="scroll-toggle-btn">暂停滚动</button>
+                        </div>
                         <div class="type-filter" id="type-filter" role="group" aria-label="消息类型过滤"></div>
-                        <button id="scroll-toggle-btn">暂停滚动</button>
                     </div>
                     <div id="danmaku-container" class="danmaku-container" aria-live="polite" aria-label="实时弹幕流">
                         <div class="empty-state" id="empty-state">
@@ -60,11 +62,15 @@
                 <div class="side-streams">
                     <section class="stream-section stream-interactive">
                         <h2>礼物 · 点赞 · 关注</h2>
-                        <div id="interactive-container" class="stream-container" aria-label="互动消息流"></div>
+                        <div id="interactive-container" class="stream-container" aria-label="互动消息流">
+                            <div class="stream-empty" id="empty-interactive">暂无礼物 / 点赞 / 关注</div>
+                        </div>
                     </section>
                     <section class="stream-section stream-info">
                         <h2>入场 · 房间信息</h2>
-                        <div id="info-container" class="stream-container" aria-label="房间信息流"></div>
+                        <div id="info-container" class="stream-container" aria-label="房间信息流">
+                            <div class="stream-empty" id="empty-info">暂无入场 / 房间信息</div>
+                        </div>
                     </section>
                 </div>
             </main>
@@ -131,6 +137,6 @@
         </div>
     </div>
 
-    <script src="/static/app.js?v=6"></script>
+    <script src="/static/app.js?v=7"></script>
 </body>
 </html>
