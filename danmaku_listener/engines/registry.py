@@ -28,7 +28,7 @@ from danmaku_listener.persistence.room_state_store import RoomStateStore
 PLATFORM_ENGINES = {
     "bilibili": BilibiliProtocolEngine,
     # ADR-001 修订（2026-09-29）：抖音原生 Web WS 直连（T0 冒烟 PASS）——
-    # BarrageGrab 桥接按用户裁定撤销（douyin_grab.py 待 §4C 验证后删除）
+    # BarrageGrab 桥接方案已撤销，douyin_grab.py 已删除（2026-10-05 清理确认）
     "douyin": DouyinWebProtocolEngine,
     "douyu": DouyuProtocolEngine,
     "huya": HuyaProtocolEngine,
