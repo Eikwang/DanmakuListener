@@ -54,15 +54,18 @@ ls cookie/
 
 ## 五、逐平台测试卡片
 
-### A1. 斗鱼（douyu）
+### A1. 斗鱼（douyu）——✅ 验收通过（2026-10-05）
 
 ```powershell
-python tools/protocol_listen.py douyu 320155 --duration 300 --dump-all
+python tools/protocol_listen.py douyu <房间号> --duration 300 --dump-all
 ```
 - 房间号示例：斗鱼直播间 URL `www.douyu.com/xxxxx` 中的数字
-- 操作：发弹幕 → 送一个礼物
-- 预期：`DANMU`(user_name/content)、`GIFT`(gift_name/gift_count)
-- 校准点：礼物名是否为可读名称（非类型编号）
+- 操作：发弹幕 → 送礼物 → 观察在线人数
+- 预期：`DANMU`、`GIFT`、`ENTER_ROOM`(uenter)、`ROOM_STATS`(oun 在线数 + rss 人气值)
+- **验收结论**：弹幕/礼物/进场/在线人数四类全通（TCP 明文 STT 直连）。
+  在线人数载体 `oun.un`（dump 实证实时推送）；**点赞/关注无房间级 STT
+  推送——协议边界**（关系链事件不进弹幕服务器消息流，采样含点赞对照
+  实证）；诊断通道 raw_hook 已就位（未映射 STT 帧落盘）
 
 ### A2. B站（bilibili）——✅ 验收通过（2026-10-05）
 
