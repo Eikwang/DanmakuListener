@@ -156,6 +156,26 @@ def test_map_pdd_message_sampled_types():
     assert ("LIKE", None) in kinds
     assert ("SOCIAL", "follow") in kinds  # 116 恢复
     assert ("SOCIAL", None) not in kinds  # 120 购买仍不映射
+    # 2026-10-05 修编辑事故：121 不再双条 LIKE、116 不再多发 LIKE
+    assert kinds.count(("LIKE", None)) == 1
+    assert kinds.count(("SOCIAL", "follow")) == 1
+
+
+def test_is_degraded_window():
+    """游客降级判定（2026-10-05）：观众活跃但弹幕/点赞类帧全无"""
+    from danmaku_listener.engines.protocol.pdd import is_degraded_window
+    # 窗口未满 → 不判定
+    assert not is_degraded_window(60.0, 10, 500, 0, 0)
+    # 观众不活跃（notice 少）→ 不判定
+    assert not is_degraded_window(120.0, 1, 500, 0, 0)
+    # 冷清房间（观众数低）→ 不判定
+    assert not is_degraded_window(120.0, 10, 50, 0, 0)
+    # 有弹幕 → 不判定
+    assert not is_degraded_window(120.0, 10, 500, 5, 0)
+    # 有点赞/关注帧 → 不判定
+    assert not is_degraded_window(120.0, 10, 500, 0, 2)
+    # 观众活跃 + 互动全无 → 降级
+    assert is_degraded_window(120.0, 10, 500, 0, 0)
 
 
 def test_envelope_platform_is_pdd():

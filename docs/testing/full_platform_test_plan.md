@@ -163,6 +163,11 @@ python tools/pdd_smoke.py "<直播间分享链接>" --duration 300 --dump-all
 - 预期：`DANMU`(live_chat)、`ENTER_ROOM`、`LIKE`、`SOCIAL`(favorite 关注)、`ROOM_STATS`(观看/点赞总数)
 - **验收结论**：入场/点赞/关注/弹幕/房间信息全部监听通过（含系统通道
   cookie_dir 配置链修复验证）；titan wss 四层解码稳定
+- **会话降级语义（2026-10-05 补）**：登录会话被服务端作废后（cookie 文件
+  仍在）服务端降级为游客推送——只剩 live_audience_num/live_chat_notice(enter)，
+  弹幕/点赞/关注/点赞总数全部停推（raw_hook 113 条实证）。引擎已加降级
+  检测（观众活跃+互动帧全无 90s 判定）→ 自动弹可见窗口重登；重登检测
+  改为 cookie 值变化判定。
 
 ### C1. 快手（kuaishou）——✅ 验收通过（2026-10-03）
 
