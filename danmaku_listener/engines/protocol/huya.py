@@ -18,6 +18,7 @@ import websockets
 from loguru import logger
 
 from danmaku_listener.contract.models import GapReason
+from danmaku_listener.engines import login_gate as LOGIN_GATE
 from danmaku_listener.engines.base import BaseEngine
 from danmaku_listener.engines.protocol import huya_codec as codec
 from danmaku_listener.engines.protocol.huya_tars import TarsError
@@ -42,6 +43,9 @@ class HuyaProtocolEngine(BaseEngine):
         self._room_tasks: Dict[str, asyncio.Task] = {}
         self._stop_flags: Dict[str, bool] = {}
         self._gift_items: dict = {}  # 礼物 ID 表（getPropsList 响应，引擎级共享）
+        # 登录闭环状态（2026-10-06 平台登录计划；cookie 文件形态——login_gate）
+        self._login_budgets: Dict[str, int] = {}
+        self._budget_warned: set = set()
 
     @property
     def engine_id(self) -> str:
@@ -82,6 +86,13 @@ class HuyaProtocolEngine(BaseEngine):
         )
         resp.raise_for_status()
         body = resp.text
+        # 房间状态判定（2026-10-06 用户实测：未开播房间 tid 字段全 0/缺失——
+        # 原"房间不存在或页面结构变更"误导；区分未开播与不存在）
+        m_state = re.search(
+            r'TT_ROOM_DATA\s*=\s*\{[^}]*"isOn"\s*:\s*(true|false)', body)
+        if m_state and m_state.group(1) == "false":
+            raise ValueError(
+                f"虎牙房间 {room_id} 未开播——开播后引擎将自动开始监听（持续重试中）")
         m = re.search(r'"tid"\s*:\s*(\d+)', body) or re.search(
             r'"lChannelId"\s*:\s*"?(\d+)', body
         )
@@ -97,6 +108,25 @@ class HuyaProtocolEngine(BaseEngine):
     # ---- 房间任务主循环 ----
 
     async def _run_room(self, room_id: str) -> None:
+        # 登录门槛（2026-10-06 平台登录计划，用户裁定 B）：cookie 文件登录态
+        # 判定→弹窗→存档。诚实边界：登录态不进当前 Tars 协议连接（协议无注入路径）。
+        try:
+            from danmaku_listener.config.settings import get_settings
+            import os as _os
+            cookie_path = _os.path.join(get_settings().cookie_dir,
+                                        f"{self.platform}_login_cookies.json")
+            outcome = await LOGIN_GATE.ensure_cookie_file_login(
+                room_id, self.platform, "https://www.huya.com/",
+                cookie_path,
+                self._stop_flags, self._login_budgets, self._budget_warned,
+                lambda detail: self._emit_system_status(room_id, detail))
+            if outcome == "stopped":
+                return
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001  登录门槛故障不阻塞监听（降级游客）
+            logger.warning(f"[huya] room {room_id} login gate error: "
+                           f"{type(e).__name__}: {str(e)[:80]}")
         logger.info(f"[huya] room {room_id} connecting")
         while not self._stop_flags.get(room_id):
             try:

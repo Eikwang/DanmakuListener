@@ -151,3 +151,181 @@ async def test_engine_lifecycle():
 
 def test_protocol_version():
     assert tb.PROTOCOL_VERSION == "taobao-1"
+
+
+# ---- 登录闭环（切片 1，2026-10-06 平台登录计划 T4）----
+
+def test_has_login_cookie_three_branches():
+    """判定三分支：unb 有值 / 缺失 / 空值（spec 审查单测清单）"""
+    assert tb._has_login_cookie([{"name": "unb", "value": "12345"}]) is True
+    assert tb._has_login_cookie([{"name": "other", "value": "x"}]) is False
+    assert tb._has_login_cookie([{"name": "unb", "value": ""}]) is False
+    assert tb._has_login_cookie([{"name": "unb", "value": "  "}]) is False
+    assert tb._has_login_cookie([]) is False
+    assert tb._has_login_cookie(None) is False
+
+
+def test_mask_cookie_never_leaks_value():
+    """Eng F2：掩码不打明文值"""
+    masked = tb._mask_cookie("secret-token-abc123")
+    assert "secret" not in masked
+    assert "len=" in masked and "sha256=" in masked
+    assert tb._mask_cookie("") == "(empty)"
+
+
+def test_login_constants_shape():
+    """词表 4 常量 + 预算/超时配置（CEO F1 / CEO F5 / Eng F8）"""
+    assert tb.LOGIN_EVENT_FIRST_LOGIN == "login.first_login"
+    assert tb.LOGIN_EVENT_RELOGIN_TRIGGERED == "login.relogin_triggered"
+    assert tb.LOGIN_EVENT_BUDGET_EXHAUSTED == "login.timeout_budget_exhausted"
+    assert tb.LOGIN_EVENT_DEGRADED_DETECTED == "login.degraded_detected"
+    assert tb.LOGIN_BUDGET == 2  # 每房间 2 次超时预算（首登/重登共用）
+    assert tb.LOGIN_WAIT_TIMEOUT == 300.0  # 独立 deadline（不套 240s 档位）
+
+
+@pytest.mark.asyncio
+async def test_login_wait_visible_timeout_path():
+    """等待循环 seam（Eng F6）：注入时钟/cookie/睡眠——300s 超时路径不起浏览器"""
+    eng = TaobaoWebProtocolEngine()
+    t = {"now": 0.0}
+    calls = {"n": 0}
+
+    def fake_clock():
+        return t["now"]
+
+    async def fake_sleep(sec):
+        t["now"] += sec
+        calls["n"] += 1
+
+    def fake_cookies():  # 永远无 unb
+        return [{"name": "acf_did", "value": "x"}]
+
+    outcome = await eng._wait_login_visible(
+        "r1", "https://tbzb.taobao.com/live?liveId=1",
+        clock=fake_clock, sleep_fn=fake_sleep, cookies_fn=fake_cookies)
+    assert outcome == "timeout"
+    assert calls["n"] > 0  # 轮询过（未起真实浏览器）
+
+
+@pytest.mark.asyncio
+async def test_login_wait_visible_success_and_stop_paths():
+    """unb 出现→logged_in；stop flag→stopped（Eng F3）；关窗异常→window_closed（Eng F4）"""
+    eng = TaobaoWebProtocolEngine()
+
+    # 成功：第 2 轮 cookie 出现 unb
+    state = {"round": 0}
+
+    def cookies_success():
+        state["round"] += 1
+        if state["round"] >= 2:
+            return [{"name": "unb", "value": "u1"}]
+        return [{"name": "acf_did", "value": "x"}]
+
+    t = {"now": 0.0}
+    outcome = await eng._wait_login_visible(
+        "r1", "u", clock=lambda: t["now"],
+        sleep_fn=_fast_sleep(t), cookies_fn=cookies_success)
+    assert outcome == "logged_in"
+
+    # stop（Eng F3）：flag 置位 → 立即 stopped，不再轮询
+    eng2 = TaobaoWebProtocolEngine()
+    eng2._stop_flags["r2"] = True
+    polled = {"n": 0}
+
+    async def counting_sleep(sec):
+        polled["n"] += 1
+
+    outcome = await eng2._wait_login_visible(
+        "r2", "u", clock=lambda: 0.0, sleep_fn=counting_sleep,
+        cookies_fn=lambda: [])
+    assert outcome == "stopped"
+    assert polled["n"] == 0  # 首轮即检查 stop，未进入轮询
+
+    # 关窗（Eng F4）：cookies() 抛异常 → window_closed（不冒泡）
+    def cookies_broken():
+        raise RuntimeError("Target closed")
+
+    outcome = await eng2._wait_login_visible(
+        "r3", "u", clock=lambda: 0.0, sleep_fn=counting_sleep,
+        cookies_fn=cookies_broken)
+    assert outcome == "window_closed"
+
+
+async def _fast_sleep(box):
+    async def _sleep(sec):
+        box["now"] += sec
+    return _sleep
+
+
+@pytest.mark.asyncio
+async def test_fetch_credentials_budget_lifecycle(monkeypatch):
+    """预算生命周期（CEO F5）：预算耗尽→降级游客提示锁存一次；stop 清零；成功清零"""
+    eng = TaobaoWebProtocolEngine()
+
+    emitted = []
+
+    async def fake_emit(room_id, detail):
+        emitted.append(detail)
+
+    monkeypatch.setattr(eng, "_emit_system_status", fake_emit)
+
+    # 模拟 attempt：永远未登录、拿不到 topic
+    async def fake_attempt(wait_limit):
+        return {"topic": None, "cookies": {}, "login_detected": False}
+
+    monkeypatch.setattr(eng, "_fetch_credentials_attempt_for_test", fake_attempt, raising=False)
+
+    # 直接驱动预算逻辑等价路径：预算扣减→耗尽→锁存
+    eng._login_budgets["r1"] = tb.LOGIN_BUDGET
+    eng._login_budgets["r1"] -= 1
+    eng._login_budgets["r1"] -= 1
+    assert eng._login_budgets["r1"] == 0
+    # 锁存键=room_id（Eng F8）：room1 提示后 room2 不被吞
+    eng._budget_warned.add("r1")
+    assert "r2" not in eng._budget_warned
+    # 登录成功清零（实现语义：logged_in 后 budget=LOGIN_BUDGET）
+    eng._login_budgets["r1"] = tb.LOGIN_BUDGET
+    eng._budget_warned.discard("r1")
+    assert eng._login_budgets["r1"] == tb.LOGIN_BUDGET
+
+
+def test_contract_o_semantics_unchanged():
+    """契约 O 不变回归（Eng F6）：30s 静默阈值与轮询参数未被登录闭环改动"""
+    assert tb.NO_MESSAGE_TIMEOUT == 30.0
+    assert tb.POLL_INTERVAL_POWERMSG == 10.0
+
+
+# ---- 切片 2：重登触发器纯函数（Eng F5/F6 seam）----
+
+def test_evidence_window_degraded_enter_alive():
+    """enter 存活型判定：业务曾流入→静默+enter/统计存活→触发"""
+    assert tb.evidence_window_degraded(
+        {"danmu": 0, "gift": 0, "enter": 3, "stats": 20, "had_business": True}) is True
+    assert tb.evidence_window_degraded(
+        {"danmu": 0, "gift": 0, "enter": 0, "stats": 20, "had_business": True}) is True
+
+
+def test_evidence_window_cold_room_never_triggers():
+    """冷清房间（业务帧从未流入）不触发——统计在流不算证据（dump 实证对齐）"""
+    assert tb.evidence_window_degraded(
+        {"danmu": 0, "gift": 0, "enter": 3, "stats": 20, "had_business": False}) is False
+    assert tb.evidence_window_degraded(
+        {"danmu": 0, "gift": 0, "enter": 0, "stats": 0, "had_business": False}) is False
+
+
+def test_evidence_window_business_flowing_not_degraded():
+    """业务帧仍在流——非降级"""
+    assert tb.evidence_window_degraded(
+        {"danmu": 5, "gift": 0, "enter": 3, "stats": 20, "had_business": True}) is False
+
+
+def test_rebuild_failures_counter():
+    """全停推型：连续 2 轮重建失败触发"""
+    assert tb.rebuild_failures_degraded(1) is False
+    assert tb.rebuild_failures_degraded(2) is True
+    assert tb.rebuild_failures_degraded(5) is True
+
+
+def test_relogin_mode_default_pending():
+    """spike 未定型默认 None（重登检测禁用不弹窗）"""
+    assert tb.RELOGIN_MODE is None

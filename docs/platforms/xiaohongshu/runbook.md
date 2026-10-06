@@ -17,10 +17,10 @@ WebSocket `framereceived` 帧拦截。观众侧无需登录（设备 cookie a1 �
 | audience_join / audience_join_v2 | ENTER_ROOM | 实测 audience_join_v2 为主 |
 | praise | LIKE | praise_info.count=本次点赞事件聚合数；profile 无 nickname → **会话内 user_id→昵称学习表反查**（refresh 在线观众名单/text/进场/关注/礼物帧学习，2026-10-03 用户实测昵称显示生效；未命中回退"有人"）（调研推断的 "like" type 实测不存在） |
 | gift_dock_and_effect | GIFT | send_user_info.nick_name（下划线命名）/base_gift_info.name/gift_action_info.count |
-| follow_emcee | SOCIAL | action=follow |
+| follow_emcee | SOCIAL | action=follow；**2026-10-06 加宽 "follow" 变体匹配**（调研名未在实测采样命中，用户实测收不到关注——复测点关注时看引擎未识别类型首见日志确认真实 type 名） |
 | share | SOCIAL | action=share |
 | gift_comment / gift_settle | 不 emit | 同一次送礼的重复视图（时序实证）——跳过防重复计数 |
-| refresh / letter_refresh | 不 emit | 链路活跃信号（静默检测依据）；**refresh 的 room_data.viewers[] 为昵称学习主要来源** |
+| refresh / letter_refresh | ROOM_STATS（refresh 专用）/ 不 emit | letter_refresh 仍为活跃信号；**refresh 的 room_data.viewers[] 双职责（2026-10-06 补齐）：①昵称学习主要来源 ②在线人数映射（viewer_count=名单原长，名单为空跳过——防"观看 0"误导）；引擎层同值去重（名单数不变不重复 emit）** |
 | light | 不 emit | 进场来源路径（slide/follow_feed），语义待定 |
 | live_banner_resource / goods_rank_entrance_im | 不 emit | 运营位/商品榜 |
 

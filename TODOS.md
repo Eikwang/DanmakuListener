@@ -78,3 +78,28 @@
    通道，或客户对美团进场有强需求且接受受控页面成本——CDP 级抓帧技术
    路径已验证可行（playwright page.on("websocket") framereceived，帧格式
    42["pike",{d:"<json>"}]）。
+
+## P3: 登录健康度面板（前端 UI）
+- **What**: 前端显示各平台登录态/预算/过期状态（数据源=ENGINE_STATUS 登录生命周期词表 4 事件）。
+- **Why**: 0G 决议 #4（CEO review 2026-10-06 defer）——词表已为面板铺路。
+- **Effort**: human M / CC S | **Depends on**: 登录词表落地（切片 1/2）
+
+## P3: 登录超时重试按钮（前端）
+- **What**: login_required/降级房间的手动重试入口。
+- **Why**: 0G 决议 #4 defer；目前逃生路径=停止后重新添加。
+- **Effort**: human S / CC S | **Depends on**: 无
+
+## P3: cookie 目录 README
+- **What**: cookie/ 下各 profile/storage_state 文件用途说明。
+- **Why**: 0G 决议 #4 defer；新部署排查成本高。
+- **Effort**: human S / CC S | **Depends on**: 无
+
+## P3: 前端内嵌二维码替代 OS 弹窗
+- **What**: 扫码登录二选一呈现（AUTOlive 扫码面板/浏览器窗口）。
+- **Why**: CEO F10 战略备忘（2026-10-06）；与视频号 NEEDS_LOGIN 面板形态同址。
+- **Effort**: human M / CC M | **Depends on**: 登录健康度面板
+
+## P3: 淘宝开放平台/官方弹幕通道评估
+- **What**: 评估官方通道替代受控页面抓取（长线抗风控）。
+- **Why**: CEO F10 战略备忘——淘宝反爬升级最快，长期维护成本最高模块的正解。
+- **Effort**: human L / CC M（调研为主） | **Depends on**: 无

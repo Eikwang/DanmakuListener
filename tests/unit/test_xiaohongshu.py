@@ -100,9 +100,16 @@ def test_map_custom_data_types():
     assert share["type"] == "SOCIAL" and share["payload"]["action"] == "share"
 
     # 实测不 emit：活跃信号/送礼重复视图（防重复计数）/运营位/来源路径
-    for t in ("refresh", "letter_refresh", "gift_comment", "gift_settle",
+    # （refresh 例外：2026-10-06 起带 viewers 名单时映射 ROOM_STATS 在线人数）
+    for t in ("letter_refresh", "gift_comment", "gift_settle",
               "light", "live_banner_resource", "goods_rank_entrance_im"):
         assert map_custom_data({"type": t}, seq, ts) is None
+    # refresh：无名单 → None；有名单 → ROOM_STATS（见 test_refresh_viewers_maps_room_stats）
+    assert map_custom_data({"type": "refresh"}, seq, ts) is None
+    with_viewers = map_custom_data(
+        {"type": "refresh",
+         "room_data": {"viewers": [{"user_id": "u1", "nickname": "甲"}]}}, seq, ts)
+    assert with_viewers["type"] == "ROOM_STATS"
     # 调研推断的旧枚举实测不存在——防御保留（映射不到即 None）
     assert map_custom_data({"type": "like", "likeActionCount": 3}, seq, ts) is None
 
@@ -113,7 +120,7 @@ def test_praise_nickname_from_nick_cache():
     ts, seq = 1700000000, 1
     cache: dict = {}
 
-    # refresh 学习在线观众名单
+    # refresh 学习在线观众名单（2026-10-06 起同时映射 ROOM_STATS 在线人数）
     r = map_custom_data({
         "type": "refresh",
         "room_data": {"viewers": [
@@ -122,7 +129,8 @@ def test_praise_nickname_from_nick_cache():
             {"user_id": "n1", "nickname": ""},
         ]},
     }, seq, ts, cache)
-    assert r is None
+    assert r is not None and r["type"] == "ROOM_STATS"
+    assert r["payload"]["viewer_count"] == 3  # 平台口径=名单原长（含未带昵称项）
     assert cache == {"5bee6cd6": "努力的小wil"}
 
     # text 弹幕帧学习
@@ -204,3 +212,60 @@ async def test_on_ws_frame_emits_and_touches_silence_timer():
 
 def test_engine_id():
     assert XiaohongshuEngine().engine_id == "page:xiaohongshu"
+
+
+# ---- 关注/在线人数映射补齐（2026-10-06 用户实测缺口）----
+
+def test_refresh_viewers_maps_room_stats():
+    """在线人数补齐：refresh 的 viewers 名单非空 → ROOM_STATS(viewer_count=len)"""
+    cd = {"type": "refresh",
+          "room_data": {"viewers": [{"user_id": "u1", "nickname": "甲"},
+                                    {"user_id": "u2", "nickname": "乙"}]}}
+    cache = {}
+    msg = map_custom_data(cd, 1, 1000, cache)
+    assert msg is not None and msg["type"] == "ROOM_STATS"
+    assert msg["payload"]["viewer_count"] == 2
+    # 昵称学习保持（online 名单同时是 praise 反查来源）
+    assert cache["u1"] == "甲"
+
+
+def test_refresh_empty_viewers_skips_room_stats():
+    """名单为空跳过（避免"观看 0"误导——对齐 taobao 语义校准教训）"""
+    cd = {"type": "refresh", "room_data": {"viewers": []}}
+    assert map_custom_data(cd, 1, 1000, {}) is None
+    cd2 = {"type": "refresh"}
+    assert map_custom_data(cd2, 1, 1000, {}) is None
+
+
+def test_follow_variant_widened():
+    """关注匹配加宽：follow_emcee（调研名）与 follow 变体均映射 SOCIAL"""
+    for t in ("follow_emcee", "follow"):
+        cd = {"type": t, "profile": {"nickname": "粉丝", "user_id": "u9"}}
+        msg = map_custom_data(cd, 2, 1000, {})
+        assert msg is not None and msg["type"] == "SOCIAL"
+        assert msg["payload"]["action"] == "follow"
+
+
+@pytest.mark.asyncio
+async def test_room_stats_dedup_engine_level():
+    """引擎层同值去重：viewer_count 不变的 refresh 不重复 emit（对齐 taobao）"""
+    eng = XiaohongshuEngine()
+    emitted = []
+
+    async def fake_emit(msg):
+        emitted.append(msg)
+
+    eng._emit_message = fake_emit
+    cd = {"type": "refresh",
+          "room_data": {"viewers": [{"user_id": "u1", "nickname": "甲"},
+                                    {"user_id": "u2", "nickname": "乙"}]}}
+    await eng._on_ws_frame("r1", {"payload": json.dumps({"t": 4, "b": {"d": {"b": []}}})})
+    # 直接驱动 _on_ws_frame 的映射路径（绕过 WS 解析，聚焦去重逻辑）
+    eng._last_room_stats.clear()
+    msg = map_custom_data(cd, eng.next_seq("r1"), 1000, eng._nick_cache)
+    # 模拟 _on_ws_frame 的去重段
+    sig = (msg["payload"]["viewer_count"],)
+    first_time = sig != eng._last_room_stats.get("r1")
+    eng._last_room_stats["r1"] = sig
+    second_time = sig != eng._last_room_stats.get("r1")
+    assert first_time is True and second_time is False

@@ -28,6 +28,7 @@ from typing import Any, Dict, List, Optional
 from loguru import logger
 
 from danmaku_listener.contract.models import GapReason
+from danmaku_listener.engines import login_gate as LOGIN_GATE
 from danmaku_listener.engines.protocol.controlled_base import ControlledPageEngine
 from danmaku_listener.engines.protocol.xhs_gift_prices import lookup_price
 
@@ -137,6 +138,16 @@ def map_custom_data(cd: Dict[str, Any], seq: int, ts: int,
             vid, vnick = str(v.get("user_id", "")), str(v.get("nickname", ""))
             if vid and vnick:
                 cache[vid] = vnick
+        # 在线人数（2026-10-06 用户实测缺口补齐）：refresh 的 room_data.viewers
+        # 为在线观众全量名单——名单非空时映射 ROOM_STATS（viewer_count=名单长度；
+        # 名单为空跳过——空名单可能意味着名单机制未启用而非 0 人，避免"观看 0"
+        # 误导，对齐 taobao 2026-10-03 语义校准教训）。引擎层做同值去重。
+        viewers = (cd.get("room_data") or {}).get("viewers") or []
+        if viewers:
+            return {**base, "type": "ROOM_STATS",
+                    "payload": {"type": "ROOM_STATS",
+                                "viewer_count": len(viewers),
+                                "total_view_count": 0}}
         return None
     if user_id and user_name:
         cache[user_id] = user_name
@@ -182,7 +193,10 @@ def map_custom_data(cd: Dict[str, Any], seq: int, ts: int,
                             "user_id": send_id,
                             "gift_name": gift_name, "gift_count": count,
                             "gift_value": unit * count}}
-    if cd_type == "follow_emcee":
+    if cd_type in ("follow_emcee", "follow"):
+        # follow_emcee 为调研推断名（未在 2026-09-30 采样中实测命中——采样期间
+        # 无关注动作）；2026-10-06 用户实测收不到关注事件，加宽匹配 "follow"
+        # 变体容错，未识别 type 由引擎层首见日志校准（复测点一次关注即可确认）
         return {**base, "type": "SOCIAL",
                 "payload": {"type": "SOCIAL", "action": "follow",
                             "user_name": user_name, "user_id": user_id}}
@@ -209,6 +223,10 @@ class XiaohongshuEngine(ControlledPageEngine):
         # 会话内 user_id→nickname 学习表（refresh 观众名单/弹幕/进场/关注/
         # 礼物帧学习；praise 帧无昵称靠它反查——2026-10-03 用户需求）
         self._nick_cache: Dict[str, str] = {}
+        # ROOM_STATS 同值去重（refresh 高频——viewer_count 不变时跳过 emit）
+        self._last_room_stats: Dict[str, tuple] = {}
+        # 未识别 customData 类型首见集合（校准日志——follow 真实 type 名确认用）
+        self._unmapped_seen: set = set()
 
     def validate_room_id(self, room_id: str) -> None:
         try:
@@ -230,6 +248,22 @@ class XiaohongshuEngine(ControlledPageEngine):
             try:
                 await self._run_session(room_id, room_key, goto_url)
                 backoff = 15.0
+            except self.NeedLoginVisible as sig:
+                # 登录闭环（2026-10-06 平台登录计划，用户裁定 B）：撕裂会话弹可见
+                # 窗口（live1688 NeedLoginVisible 同款时序）；预算在检测点扣减
+                logger.info(f"[xhs] room {room_id} login gate triggered")
+                await self._emit_system_status(
+                    room_id,
+                    f"{LOGIN_GATE.LOGIN_EVENT_FIRST_LOGIN}: 小红书直播间登录增强——"
+                    "已弹出浏览器，请登录小红书账号（可跳过，游客可收弹幕）")
+                outcome = await self._wait_login_visible(
+                    room_id, sig.goto_url, LOGIN_GATE.LOGIN_COOKIE_NAMES["xiaohongshu"])
+                if outcome == "logged_in":
+                    self._login_budgets[room_id] = LOGIN_GATE.LOGIN_BUDGET  # 成功清零
+                    self._budget_warned.discard(room_id)
+                    await self._emit_system_status(room_id, "登录成功——恢复监听")
+                backoff = 15.0
+                continue  # 重开会话（登录态已入 profile / 或降级游客继续）
             except asyncio.CancelledError:
                 raise
             except XiaohongshuParseError as e:
@@ -277,6 +311,22 @@ class XiaohongshuEngine(ControlledPageEngine):
                     logger.debug(f"[xhs] room {room_id} goto warning: {e}")
 
                 logger.info(f"[xhs] room {room_id} live page ready")
+
+                # 登录门槛（2026-10-06 用户裁定 B：web_session 判定→弹窗；
+                # 预算在弹出前扣减——taobao 同款语义；预算未尽才撕裂会话）
+                cookies = await context.cookies()
+                if not LOGIN_GATE.has_login_cookie(
+                        cookies, LOGIN_GATE.LOGIN_COOKIE_NAMES["xiaohongshu"]):
+                    if self._consume_login_budget(room_id):
+                        raise self.NeedLoginVisible(goto_url)
+                    if room_id not in self._budget_warned:
+                        self._budget_warned.add(room_id)
+                        await self._emit_system_status(
+                            room_id,
+                            f"{LOGIN_GATE.LOGIN_EVENT_BUDGET_EXHAUSTED}: 登录未完成——"
+                            "已按游客模式继续（游客可收弹幕）；停止该房间后重新添加"
+                            "可再次触发登录窗口")
+
                 self._set_status(self.status.__class__.RUNNING)
 
                 # 有界会话 + 业务帧静默检测（t==4 帧含 refresh 心跳，正常持续流动）
@@ -307,5 +357,20 @@ class XiaohongshuEngine(ControlledPageEngine):
                     pass
             mapped = map_custom_data(cd, self.next_seq(room_id), int(time.time()),
                                      self._nick_cache)
-            if mapped:
-                await self._emit_message(self._envelope(room_id, mapped))
+            if not mapped:
+                # 未识别类型首见日志（2026-10-06 关注事件缺口校准——复测点关注
+                # 即可从日志确认真实 type 名，对齐 pdd/taobao 校准模式）
+                cd_type = cd.get("type", "")
+                if cd_type and cd_type not in self._unmapped_seen:
+                    self._unmapped_seen.add(cd_type)
+                    logger.info(f"[xhs] room {room_id} unmapped customData type "
+                                f"first seen: {cd_type!r} keys={sorted(cd.keys())[:8]}")
+                continue
+            # ROOM_STATS 同值去重（refresh 高频，名单数不变时跳过 emit——
+            # 对齐 taobao _last_room_stats 模式；seq 已消耗同现状无害）
+            if mapped["type"] == "ROOM_STATS":
+                sig = (mapped["payload"].get("viewer_count", 0),)
+                if sig == self._last_room_stats.get(room_id):
+                    continue
+                self._last_room_stats[room_id] = sig
+            await self._emit_message(self._envelope(room_id, mapped))

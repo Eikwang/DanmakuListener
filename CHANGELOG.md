@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.5.0 (2026-10-06)
+
+十二平台登录闭环全覆盖（/autoplan 双阶段审查 + 实机 probe 校准）+ 实测缺陷修复三连。
+
+### 新增
+- 登录闭环全覆盖：十二平台登录策略矩阵落全（7 平台已有闭环 + 淘宝/京东/小红书新增引擎层闭环 + 斗鱼/虎牙新增 cookie 文件形态检测闭环 + 美团豁免）——首次添加自动检测登录态并弹登录窗口，登录后自动开始监听
+- 登录共享基建：engines/login_gate.py（判定/掩码/预算/cookie 文件形态闭环）；BaseEngine._emit_system_status（ENGINE_STATUS 快捷通道）
+- 登录生命周期事件词表：login.first_login / relogin_triggered / timeout_budget_exhausted / degraded_detected（前端/健康面板数据源）
+- 登录窗口预算语义：每房间 2 次超时预算（首登/重登共用、内存态、重启清零、锁存键=room_id、每会话一次提示）；stop 立即关窗；关窗异常按用户关窗分支（不冒泡 topic_failed）
+- 淘宝会话失效重登框架：spike 驱动定型（enter 存活型证据窗口 / 全停推型重建计数，RELOGIN_MODE 由 T0 spike 实测激活）；触发时证据快照随日志带出
+- 实机 cookie 校准工具：tools/douyu_cookie_probe.py / xhs_cookie_probe.py / login_spike_taobao.py（登录前后差异集实证，杜绝调研猜测名）
+
+### 实测校准（cookie 判定名全部实机 probe 实证）
+- 斗鱼：dedeuserid 不存在——真实登录态 acf_uid/acf_auth 家族
+- 小红书：游客即自带 web_session（匿名会话）——登录判定改 id_token（登录后新增 JWT）
+- 虎牙：候选 yyuid/hiido_ui/u_db_uid 实测命中；淘宝/1688 unb（阿里系同源）保持
+
+### 修复（用户实测三连）
+- 抖音 quickjs 运行环境缺装（依赖已入 requirements，属环境项）；bilibili 停止时内层 WARNING 噪音（_is_stopping 短路补齐）
+- 京东/小红书登录窗闪退：_cookies() 少 await（coroutine TypeError → 误判关窗）——controlled_base/taobao 两处
+- 斗鱼/虎牙登录门槛 AttributeError（BaseEngine 无 _emit_system_status）
+- 斗鱼登录页 302 误导（douyu.com/login → 直播间页）：登录入口改 passport.douyu.com；登录后关窗丢登录态（关窗异常分支补 last_cookies 存档）
+- 虎牙未开播房间误报"房间不存在"：TT_ROOM_DATA 开播状态判定，未开播明确提示等开播
+- 小红书在线人数补映射（refresh 帧 viewers 名单 → ROOM_STATS，同值去重）；关注匹配加宽 follow 变体 + 未识别类型首见日志
+- huya lifecycle 单测真实弹登录窗致 pytest 挂起（stub 门槛）；测试基线 557→566
+
+### 变更
+- registry.PLATFORM_WARNINGS 十二平台登录声明全量补齐（taobao/1688/douyu 新增 + 四平台登录增强声明）
+- 测试文档登录盘点表：判定依据 + 实测日期（声明过时可追溯）
 ## v0.4.0 (2026-10-05)
 
 十二平台全量交付（全部实测验收）+ 前端控制台成熟版（多平台运营监控台形态）。

@@ -4,6 +4,7 @@ import asyncio
 
 import pytest
 
+from danmaku_listener.engines import login_gate as LOGIN_GATE
 from danmaku_listener.engines.protocol import huya_codec as codec
 from danmaku_listener.engines.protocol.huya import HuyaProtocolEngine
 from danmaku_listener.engines.protocol.huya_tars import TarsInputStream, TarsOutputStream
@@ -209,9 +210,18 @@ def test_vip_enter_banner_decode_and_map():
 
 
 @pytest.mark.asyncio
-async def test_engine_lifecycle_and_protocol_version():
+async def test_engine_lifecycle_and_protocol_version(monkeypatch):
     engine = HuyaProtocolEngine()
     assert engine.engine_id == "protocol:huya"
+
+    # 2026-10-06 登录门槛加入 _run_room——单测不起真浏览器/不弹登录窗
+    # （stop 的 cancel 落在 playwright launch 各位置会泄漏 chromium 子进程，
+    #  pytest 退出挂起——用户实测 14:15 复现路径的单测版）
+    async def fake_login(room_id, platform, *a, **k):
+        return "logged_in"
+
+    monkeypatch.setattr(LOGIN_GATE, "ensure_cookie_file_login", fake_login)
+
     await engine.start("23058")
     await asyncio.sleep(0.1)
     assert not engine._room_tasks["23058"].done() or True  # 连接失败走重连循环是合法状态
