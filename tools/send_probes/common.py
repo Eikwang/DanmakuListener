@@ -31,7 +31,7 @@ DOM_PLATFORMS = {
     "1688": {"profile": "1688_profile", "room_url_hint": "1688 直播间 URL"},
     "xiaohongshu": {"profile": "xhs_profile", "room_url_hint": "小红书直播间 URL"},
     "jd": {"profile": "jd_profile", "room_url_hint": "zhibo.jd.com/liveroom?liveId=..."},
-    "wechat_channels": {"profile": None, "room_url_hint": "视频号直播管理后台 URL（助手发言入口）"},
+    "wechat_channels": {"profile": "wxsp_profile", "room_url_hint": "channels.weixin.qq.com/platform/live/liveBuild（助手发言入口，扫码登录）"},
     "douyin": {"profile": "douyin_profile", "room_url_hint": "live.douyin.com/<room_id>（profile 登录态，bd_ticket_guard 指纹绑定）"},
     "kuaishou": {"profile": None, "room_url_hint": "live.kuaishou.com/u/<主播>（登录态 storage_state）"},
     "douyu": {"profile": None, "room_url_hint": "douyu.com/<room_id>（登录态 cookie 文件）"},

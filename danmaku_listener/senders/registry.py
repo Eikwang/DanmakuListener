@@ -50,7 +50,10 @@ class EngineHookSender(BaseSender):
         self._room_checker = room_checker
 
     async def send(self, room_id: str, content: str) -> SendResult:
-        if not self._room_checker(room_id):
+        checker_result = self._room_checker(room_id)
+        logger.info(f"[send-registry] {self.platform}:{room_id} room_checker={checker_result} "
+                    f"hook={hasattr(self._engine, 'send_danmu')}")
+        if not checker_result:
             return SendResult(SendStatus.FAILED, SendRejectReason.ROOM_NOT_LISTENED.value,
                               fix_hint="先在控制台添加并启动该房间监听",
                               docs_anchor="docs/ops/adr-002-danmu-send-constraint-revision.md")
