@@ -1,5 +1,37 @@
 # Changelog
 
+## v0.6.0 (2026-10-07)
+
+弹幕发送修复计划（/autoplan 全管线 82 项裁定）——淘宝 mtop 新路线 + 抖音常驻会话 + 三平台接线，10 平台 sender 全接线交付。
+
+### 新增
+- **淘宝 mtop page-eval sender（T2）**：页面 mtop 库调用（`mtop.taobao.iliad.comment.publish`）——页面 JS 现生成 bx-ua，纯 HTTP 重放被 RGV587 拒（T1 抓包探针三模式实证：capture/replay 重新签名/page-eval）；ret 五路径映射（SUCCESS/RGV587 风控/未登录/参数/未知码透传——禁止一律落 NEEDS_LOGIN 误导排障）；实发 sent 管线级实证；DOM 钩子 deprecated 保留
+- **抖音常驻发送会话（T3/ResidentSendSession）**：headless=new 无桌面形态（CEO-F5 探针推翻"必须有头"——bd_ticket_guard 检测的是旧 headless 特征）；per-room page/同锁空闲关闭+锁内二次校验（ENG-1）/30s 操作超时会话重置/健康检查自动拉起（CEO-F8）/SingletonLock 撞锁独立错误（ENG-6）/close 超时 psutil 清理自愈（DX-D7）/生命周期日志（ENG-12）/aclose 退出钩子（ENG-4）；实发 sent×2（6.2s/6.8s）；CEO-F7 冷启动 <15s 阈值
+- **快手/斗鱼/虎牙三平台接线（T6/X1）**：DomTransientSender 瞬态注入公共基类（凭证只读导入/候选选择器/逐键配方/get_by_text 穿透回显）+ KuaishouStateSender（storage_state）+ DouyuCookieSender（acf_* cookie）+ HuyaResidentSender（ResidentSendSession 第二实例，headed minimized）；快手 sent×2 + 虎牙 sent×2 实发实证
+- **guard per-platform 限速覆写**：内置默认 `{"huya": 35}`（10-14s 实测失败、35s 补发全过）+ INI JSON 按键合并（DX-D3，损坏 JSON 兜底）——guard.check 实测虎牙 31s 拒/36s 过
+- **DX-D1 凭证 CLI**：`python -m danmaku_listener.engines.kuaishou_login`（__main__ 补齐）+ `send_login douyu/huya`（新增）——三平台从零配置闭环
+- **配置三件套**（[send] 节）：send_session_idle_timeout_seconds（1800）/ send_window_mode（默认 headless_new）/ send_min_interval_overrides
+- 探针工具三件：taobao_mtop_capture.py（capture/replay/page-eval 三模式+离线自检）/ douyin_f5_probe.py（CEO-F5 双探针）/ douyin_soak.py（浸泡验收）
+
+### 修复（实测四连）
+- playwright timeout 单位 bug：秒传成毫秒→goto 30ms 超时→异常冒泡致子进程泄漏→loop 关不净→python 退出挂起（修+挂页失败清理）
+- 回显判定升级 get_by_text 穿透 shadow DOM：聊天流 2026-10-07 起陆续 shadow 化，page.content() 搜索失效（视频号/抖音同款盲区）
+- storage_state 导出覆盖事故防护：_inject_credentials 误用 context.storage_state(path=)（导出语义）致 kuaishou_storage_state.json 被空 context 覆盖（cookies 17→9）——改只读导入+add_cookies+防护单测
+- 斗鱼选择器：泛 input[placeholder] first 误选顶部搜索框（截图实锤）——placeholder 精确特征前置
+- 虎牙渲染等待：goto 后 SPA 输入框延迟挂载（1s 即查假阴性）——10×2s 等待循环
+
+### 实测校准（判定手段全部截图/回环实证）
+- 淘宝：RGV587 风控语义（纯 HTTP 重放 0/3 拒——页面 JS 现生成 bx-ua 2/2 过）
+- 抖音：headless=new 实发成功（f5-diag 截图聊天流'(我)'标记）；登录失效信号=页面"需先登录"文本
+- 快手：旧 headless 被风控（"请求过快"/"错误代码22"）→ headless=new 对齐抖音形态后打通
+- 虎牙：#pub_msg_input 延迟挂载；35s 冷却 guard.check 实测 31s 拒/36s 过
+- 探针矩阵五行终判更新（docs/testing/m0-send-probe-cards.md）
+
+### 变更
+- wiring：淘宝移出 E5 DOM 循环改注册 TaobaoMtopSender；三平台注册——10 平台 sender 全接线
+- send-runbook.md 全量更新：凭证 CLI 表/配置三键/每周运维节奏（mtop 重放+成功率周报+政策监控）/选择器失效自查/cookie 语义
+- TODOS 落盘：X2 1688 mtop 同构化 defer + CEO-F11 官方开放平台商业评估
+- 测试基线 607→631（新增 resident_session 8 + t6_senders 16 中净增）
 ## v0.5.0 (2026-10-06)
 
 十二平台登录闭环全覆盖（/autoplan 双阶段审查 + 实机 probe 校准）+ 实测缺陷修复三连。
