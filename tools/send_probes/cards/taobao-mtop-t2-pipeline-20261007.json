@@ -1,0 +1,20 @@
+{
+  "platform": "taobao-mtop",
+  "mode": "t2-pipeline-sender",
+  "room_id": "1335724816613540",
+  "content": "[M0] t2-pipeline 165555",
+  "result": {
+    "status": "sent",
+    "sent_at": 1791363006
+  },
+  "engine": "TaobaoWebProtocolEngine（真实实例，E5 借 _profile_lock）",
+  "chain": "send→锁 3s→瞬态页 goto→topic 锚定(iliad 请求)→mtop 库探测→evaluate publish→ret SUCCESS→SENT",
+  "unit_tests": "tests/unit/test_taobao_mtop_sender.py 9/9（ret 五路径/锁 busy/库缺失/topic 缺失/reject 透传）",
+  "regression": "tests/unit 607 passed（监听侧零破坏）",
+  "verdict": "SUCCESS——管线级 TaobaoMtopSender 实发 sent；T2 交付完成",
+  "notes": [
+    "wiring 已替换：E5 循环移除 taobao，注册 TaobaoMtopSender(engine)；taobao.py DOM 钩子 deprecated 保留（T4 参照）",
+    "ENG-2/15 由页面 mtop 库天然解决（token 单实例/single-flight）——无需自建",
+    "T1 三卡片：capture/replay(0/3 RGV587)/pageeval(2/2 SUCCESS)"
+  ]
+}

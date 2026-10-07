@@ -1,0 +1,23 @@
+{
+  "platform": "taobao-mtop",
+  "mode": "page-eval",
+  "api": "mtop.taobao.iliad.comment.publish",
+  "version": "1.0",
+  "appKey": "34675810",
+  "topic": "0fd5dd2d-a1f9-41...",
+  "sends": [
+    {
+      "seq": 1,
+      "verdict": "UNKNOWN",
+      "detail": "Error: Page.evaluate: Object"
+    },
+    {
+      "seq": 2,
+      "verdict": "UNKNOWN",
+      "detail": "Error: Page.evaluate: Object"
+    }
+  ],
+  "started": "2026-10-07 16:27:39",
+  "verdicts_summary": "SUCCESS=0/2",
+  "verdict": "NO_GO——页面上下文调用仍被风控/失败：转 T4 兜底（ENG-9 时间盒用毕）"
+}

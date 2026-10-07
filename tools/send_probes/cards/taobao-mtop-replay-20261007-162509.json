@@ -1,0 +1,34 @@
+{
+  "platform": "taobao-mtop",
+  "mode": "replay",
+  "template": "persistence_data/taobao-mtop-template.json",
+  "api": "mtop.taobao.iliad.comment.publish",
+  "version": "1.0",
+  "appKey": "34675810",
+  "sends": [
+    {
+      "seq": 1,
+      "http": 200,
+      "ret": "FAIL_SYS_USER_VALIDATE; RGV587_ERROR::SM::哎哟喂,被挤爆啦,请稍后重试",
+      "verdict": "FAIL",
+      "content": "[M0] replay 1/162443"
+    },
+    {
+      "seq": 2,
+      "http": 200,
+      "ret": "FAIL_SYS_USER_VALIDATE; RGV587_ERROR::SM::哎哟喂,被挤爆啦,请稍后重试",
+      "verdict": "FAIL",
+      "content": "[M0] replay 2/162457"
+    },
+    {
+      "seq": 3,
+      "http": 200,
+      "ret": "FAIL_SYS_USER_VALIDATE; RGV587_ERROR::SM::哎哟喂,被挤爆啦,请稍后重试",
+      "verdict": "FAIL",
+      "content": "[M0] replay 3/162509"
+    }
+  ],
+  "started": "2026-10-07 16:25:09",
+  "verdicts_summary": "SUCCESS=0/3",
+  "verdict": "NO_GO——重放未全过：按 ret 码判别（风控头要求→T4 兜底/ENG-9 时间盒；token/参数错误→核对模板与 profile 登录态）"
+}

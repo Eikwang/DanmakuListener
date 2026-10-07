@@ -147,6 +147,11 @@ class TaobaoWebProtocolEngine(BaseEngine):
     async def send_danmu(self, room_id: str, content: str):
         """AutoDanmu send 钩子（E5）：引擎 profile 锁内瞬态 context → 直播间 DOM 发送
 
+        .. deprecated:: T2（2026-10-07）——TaobaoMtopSender（mtop page-eval）已接管淘宝发送。
+        本 DOM 钩子 deprecated 保留：T4 兜底参照+回退路径（wiring 回切步骤见计划 T4）。
+        T1 判定：页面 mtop 库调用（page-eval）为唯一可行 API 形态（纯 HTTP 重放被
+        RGV587 拒）；DOM 路线的滑块风控问题（headless 3/5 触发）保留原状。
+
         与凭证提取/登录窗口共用 _profile_lock（persistent context 单实例串行）；
         acquire 带超时（S4-1，超时回执 busy）；异常不出引擎边界（E5 隔离）。
         """

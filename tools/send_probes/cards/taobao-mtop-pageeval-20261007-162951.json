@@ -1,0 +1,23 @@
+{
+  "platform": "taobao-mtop",
+  "mode": "page-eval",
+  "api": "mtop.taobao.iliad.comment.publish",
+  "version": "1.0",
+  "appKey": "34675810",
+  "topic": "0fd5dd2d-a1f9-41...",
+  "sends": [
+    {
+      "seq": 1,
+      "ret": "SUCCESS::调用成功",
+      "verdict": "SUCCESS"
+    },
+    {
+      "seq": 2,
+      "ret": "SUCCESS::调用成功",
+      "verdict": "SUCCESS"
+    }
+  ],
+  "started": "2026-10-07 16:29:33",
+  "verdicts_summary": "SUCCESS=2/2",
+  "verdict": "GO_T2_PAGE_EVAL——页面上下文 mtop 库调用通过：T2 形态=sender 经页面 evaluate 调 iliad.comment.publish（页面 JS 现生成 bx-ua；需页面宿主=引擎瞬态页或常驻会话）"
+}
