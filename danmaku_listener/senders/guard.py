@@ -14,10 +14,30 @@ import hashlib
 import time
 from typing import Dict, Optional, Tuple
 
+import json
+
 from loguru import logger
 
 from danmaku_listener.config.settings import Settings
 from danmaku_listener.contract.models import SendRejectReason
+
+#: per-platform 限速覆写内置默认（T6 裁定：虎牙 35s——10-14s 实测失败、35s 补发全过，
+#: 默认 30s 无裕量；代码内置=出厂即安全，INI 同键值合并覆写优先——DX-D3/ENG-3）
+DEFAULT_MIN_INTERVAL_OVERRIDES = {"huya": 35.0}
+
+
+def load_min_interval_overrides(raw: str) -> dict:
+    """解析 INI overrides JSON 并按键合并进内置默认（未覆写平台保留默认值）"""
+    merged = dict(DEFAULT_MIN_INTERVAL_OVERRIDES)
+    raw = (raw or "").strip()
+    if raw:
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                merged.update({k: float(v) for k, v in parsed.items()})
+        except (json.JSONDecodeError, ValueError, TypeError) as e:
+            logger.warning(f"[send-guard] send_min_interval_overrides 解析失败（忽略）: {e}")
+    return merged
 
 
 class SendGuard:
@@ -34,6 +54,9 @@ class SendGuard:
         # 熔断状态（F3/R10）：platform → 连续失败计数 + 是否熔断
         self._fail_streak: Dict[str, int] = {}
         self._tripped: Dict[str, bool] = {}
+        # per-platform 限速覆写（T6/X1：按键合并，内置默认兜底——DX-D3/ENG-3）
+        self._interval_overrides = load_min_interval_overrides(
+            getattr(settings, "send_min_interval_overrides", "") or "")
 
     # ---- 开关与状态 ----
 
@@ -102,10 +125,11 @@ class SendGuard:
         if last is not None and now - last < window:
             return False, SendRejectReason.DUPLICATE.value, None
 
-        # 限速（F4：键口径 per-platform / per-platform_room）
+        # 限速（F4：键口径 per-platform / per-platform_room；T6：per-platform 间隔覆写）
         key = self._rate_key(platform, room_id)
         last = self._last_send.get(key)
-        if last is not None and now - last < self._settings.send_min_interval_seconds:
+        min_interval = self._interval_overrides.get(platform, self._settings.send_min_interval_seconds)
+        if last is not None and now - last < min_interval:
             return False, SendRejectReason.RATE_LIMITED.value, None
 
         return True, None, sanitized

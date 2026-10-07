@@ -60,19 +60,40 @@ def get_send_pipeline() -> DanmuCommandPipeline:
 
     registry = SenderRegistry(room_checker=room_listened)
     # E5：受控页面平台——sender=引擎实例 send 钩子适配器（禁止另开同 profile context）
-    for plat in ("taobao", "1688", "xiaohongshu", "jd", "wechat_channels"):
+    # taobao 移出 E5 循环（T2 裁定）：TaobaoMtopSender（mtop page-eval）替换 DOM 钩子——
+    # T1 判定（cards/taobao-mtop-pageeval-20261007）：纯 HTTP 重放被 RGV587 拒，
+    # 页面 mtop 库调用是唯一可行 API 形态；taobao.py DOM 钩子 deprecated 保留作 T4 参照
+    for plat in ("1688", "xiaohongshu", "jd", "wechat_channels"):
         try:
             engine = bridge._get_or_build_engine(plat)
             registry.register(EngineHookSender(plat, engine,
                                                lambda rid, _p=plat: room_listened(_p, rid)))
         except Exception as e:  # noqa: BLE001  引擎构造失败不阻塞其余 sender
             logger.warning(f"[send-wiring] engine build failed for {plat}: {e}")
+    # 淘宝 mtop page-eval sender（T2——E5 借引擎 _profile_lock；页面 JS 现生成 bx-ua）
+    try:
+        taobao_engine = bridge._get_or_build_engine("taobao")
+        from danmaku_listener.senders.taobao_mtop import TaobaoMtopSender
+        registry.register(TaobaoMtopSender(taobao_engine))
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[send-wiring] taobao mtop sender register failed: {e}")
+    # 三平台接线（T6/X1）：快手 storage_state 注入/斗鱼 cookie 注入（瞬态基类）+
+    # 虎牙 ResidentSendSession 第二实例（headed minimized；35s 覆写由 guard 内置默认兜底）
+    try:
+        from danmaku_listener.senders.huya import HuyaResidentSender
+        from danmaku_listener.senders.kuaishou_douyu import (DouyuCookieSender,
+                                                             KuaishouStateSender)
+        registry.register(KuaishouStateSender())
+        registry.register(DouyuCookieSender())
+        registry.register(HuyaResidentSender(settings=settings))
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[send-wiring] 3-platform senders register failed: {e}")
     # E4：bilibili 直连 sender（复用引擎 cookie 解析器）
     registry.register(BilibiliSender(cookie_file=_pick_bilibili_cookie_file(settings)))
-    # 抖音 profile DOM sender（M0 实测：headless 敏感→有头窗口；profile 登录态）
+    # 抖音常驻会话 sender（T3——headless_new 形态；DX-D9 三件套配置；旧瞬态路径 deprecated 保留）
     try:
         from danmaku_listener.senders.douyin import DouyinProfileSender
-        registry.register(DouyinProfileSender())
+        registry.register(DouyinProfileSender(settings=settings))
     except Exception as e:  # noqa: BLE001
         logger.warning(f"[send-wiring] douyin sender register failed: {e}")
 

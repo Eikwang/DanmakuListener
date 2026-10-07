@@ -1,0 +1,25 @@
+{
+  "platform": "kuaishou/douyu/huya",
+  "mode": "t6-3platform-wiring",
+  "deliverables": [
+    "senders/dom_transient.py（瞬态注入公共基类：凭证导入只读+add_cookies/候选选择器/逐键配方/get_by_text 穿透回显/滑块+登录信号）",
+    "senders/kuaishou_douyu.py（KuaishouStateSender storage_state 注入 + DouyuCookieSender acf_* 注入）",
+    "senders/huya.py（HuyaResidentSender——ResidentSendSession 第二实例，headed minimized）",
+    "senders/guard.py（per-platform 限速覆写：内置默认 {huya:35}+INI JSON 按键合并，损坏 JSON 兜底）",
+    "wiring 三平台注册（10 平台 sender 全接线）",
+    "DX-D1 凭证 CLI：kuaishou_login __main__ 补齐+send_login douyu/huya 新增"
+  ],
+  "unit_tests": "test_t6_senders.py 16/16（三 sender 成功/凭证缺失/登录信号/风控信号+覆写合并四语义+window_mode 贯通+storage_state 导出防护）+ 全量 631 绿",
+  "incident": {
+    "what": "kuaishou_storage_state.json 被覆盖损坏（cookies 17→9）",
+    "root_cause": "_inject_credentials 误用 context.storage_state(path=)（playwright 导出语义）——空 context 状态回写凭证文件",
+    "fix": "改为只读文件+add_cookies；加导出防护单测（storage_state 导出调用=测试失败）",
+    "impact": "快手凭证需重扫码（kuaishou_login CLI）；cookie/ 在 gitignore 无 git 备份"
+  },
+  "live_test": {
+    "kuaishou": "✅ **实发 sent×2**（XFZ11200，10.4s+二次复现）——headless=new 判定验证：旧 headless 被平台风控（'请求过快'/'错误代码22'），升级后打通",
+    "huya": "✅ **实发 sent×2**（518518，6.8s/6.1s 常驻会话复用页+35s 冷却间隔）——渲染等待修复（goto 后 SPA 输入框延迟挂载，1s 即查假阴性）后打通",
+    "douyu": "⚠️ 待真开播房间——71415 标题挂'直播中'但播放器'童子暂未开播'（挂机）；12249 已关闭。**选择器 bug 修复**：泛 input[placeholder] first 误选顶部搜索框（T6 实测截图实锤）——候选精确特征前置（placeholder*=说/未拥有），泛匹配降级最后"
+  },
+  "verdict": "CODE_DONE——三平台 sender+guard 覆写+CLI 交付；实发：快手 SUCCESS×2 + 虎牙 sent×2 实证；斗鱼代码就绪（选择器修复），待真开播房间闭环回显验证"
+}
