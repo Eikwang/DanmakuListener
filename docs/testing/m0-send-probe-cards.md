@@ -16,7 +16,7 @@
 | jd | DOM | ⏳ 待运行（profile 就绪） | — | — | zhibo.jd.com 独立站 |
 | wechat_channels | DOM | ⏳ 待运行（后台会话） | — | — | 助手发言身份（用户已实测可发送） |
 | douyin | DOM | ⏳ 待运行（cookie 注入） | — | — | R23 结论：发送=sign_url 级签名，DOM 优先（R22 验证） |
-| kuaishou | DOM | ⏳ 待运行（storage_state 注入） | — | — | 同上 |
+| kuaishou | DOM | ✅ **实发 SUCCESS×3**（2026-10-07 实测，指定文案） | 高（终判） | cards/kuaishou-20261007-095159.json | storage_state 注入 17 cookie；textarea+text=发送 命中；无风控信号（R22 判断验证：DOM 路线直达） |
 | douyu | DOM(+R19) | ✅ **实发 SUCCESS×3**（2026-10-07 实测，指定文案） | 高（终判） | cards/douyu-20261007-094617.json | cookie 注入 24 条（acf_* 会话充分，R19 断言验证）；.ChatSend-input 已不可见（UI 变更）→通用 input[placeholder] 命中；.ChatSend-button 正常；无风控信号 |
 | huya | DOM | ⚠️ R19 缺字段 | 前置未满足 | — | 先跑登录窗口补齐（login_gate 语义）再探针 |
 
