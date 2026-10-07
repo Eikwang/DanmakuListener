@@ -70,7 +70,7 @@ async def discover(page, candidates: list[str], generic: list[str], kind: str) -
     return None, tried
 
 
-async def find_echo(page, marker: str, timeout_s: float = 6.0) -> bool:
+async def find_echo(page, marker: str, timeout_s: float = 12.0) -> bool:
     """F5 判定：marker 回显于页面聊天流（轮询 content 搜索——虚拟列表低成本首查）"""
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
@@ -131,11 +131,18 @@ async def run(args: argparse.Namespace) -> None:
                 entry: dict = {"seq": i, "marker": marker, "verdict": "UNKNOWN", "detail": ""}
                 try:
                     loc = page.locator(input_sel).first
-                    await loc.fill(marker)
-                    if btn_sel:
-                        await page.locator(btn_sel).first.click()
-                    else:
+                    if args.platform == "1688":
+                        # 1688 实证：fill 的 DOM 值不进框架 state、发送 div 点击不可靠——
+                        # 唯一可靠配方 = click 聚焦 + 逐键输入 + Enter 提交
+                        await loc.click()
+                        await loc.press_sequentially(marker, delay=40)
                         await loc.press("Enter")
+                    else:
+                        await loc.fill(marker)
+                        if btn_sel:
+                            await page.locator(btn_sel).first.click()
+                        else:
+                            await loc.press("Enter")
                     await asyncio.sleep(1.5)
                     risk = await observe_risk_signals(page)
                     if risk:
@@ -145,6 +152,10 @@ async def run(args: argparse.Namespace) -> None:
                         entry["verdict"] = "SUCCESS"; entry["detail"] = "marker 回显于聊天流"
                     else:
                         entry["verdict"] = "UNKNOWN"; entry["detail"] = "无回显且无显式错误（虚拟列表/慢渲染可能）"
+                        try:
+                            await page.screenshot(path=str(CARDS_DIR / f"{args.platform}-unknown-{i}.png"))
+                        except Exception:  # noqa: BLE001
+                            pass
                 except Exception as e:  # noqa: BLE001
                     entry["verdict"] = "FAIL"; entry["detail"] = f"{type(e).__name__}: {str(e)[:120]}"
                 card["sends"].append(entry)

@@ -1,0 +1,32 @@
+{
+  "platform": "1688",
+  "room_url": "https://live.1688.com/zb/play.html?feedId=1046432359049687&userId=2215019443839&__pageId__=190453&cms_id=190453&wh_pha=true",
+  "sends_planned": 1,
+  "started": "2026-10-07 10:19:27",
+  "route": "DOM（R22 探针）",
+  "sends": [
+    {
+      "seq": 1,
+      "marker": "主播辛苦了",
+      "verdict": "UNKNOWN",
+      "detail": "无回显且无显式错误（虚拟列表/慢渲染可能）"
+    }
+  ],
+  "risk_signals": [],
+  "selector_notes": {
+    "input": {
+      "found": "input[placeholder*=说]",
+      "tried": [
+        "textarea(不可见/不存在)"
+      ]
+    },
+    "button": {
+      "found": "text=发送",
+      "tried": [
+        "button:has-text(\"发送\")(不可见/不存在)"
+      ]
+    }
+  },
+  "verdicts_summary": "UNKNOWN=1",
+  "blocked_reason": null
+}

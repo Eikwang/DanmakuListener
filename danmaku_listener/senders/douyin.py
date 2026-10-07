@@ -86,8 +86,13 @@ class DouyinProfileSender(BaseSender):
                     else:
                         await page.locator(input_sel).first.press("Enter")
                     await asyncio.sleep(2.5)
-                    body = await page.content()
-                    if content in body:
+                    echo_deadline = time.monotonic() + 8  # 1688 实证：聊天列表渲染延迟可达数秒
+                    sent_echo = False
+                    while time.monotonic() < echo_deadline:
+                        if content in await page.content():
+                            sent_echo = True; break
+                        await asyncio.sleep(1.5)
+                    if sent_echo:
                         return SendResult(SendStatus.SENT, sent_at=int(time.time()))
                     return SendResult(SendStatus.UNKNOWN, SendRejectReason.SEND_TIMEOUT.value,
                                       detail="无回显无显式错误（虚拟列表/慢渲染）")

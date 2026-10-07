@@ -11,7 +11,7 @@
 |------|------|------|------|------|------|
 | bilibili | API | ✅ **实发 SUCCESS×2**（2026-10-07 实测） | 高（终判） | cards/bilibili-20261007-091159.json | HTTP 200/code=0；管线实发 sent ✓ 幂等 ✓ 去重 ✓；F8 回环数据链路就绪 |
 | taobao | DOM | ⚠️ **受限可行**（2026-10-07 实测 5 发） | 中（终判） | 截图 persistence_data/taobao-send-unknown.png | 技术链路全通（E5 钩子/发现模式选择器 chatInputCenter*/BtnSend div/滑块 iframe 感知检测+单次自动滑动）；风控滑块 headless 实发频发（3/5）且自动滑动未通过——需可见窗口/降频/风控冷却后重试 |
-| 1688 | DOM | ⏳ 待运行（profile 就绪） | — | — | 需直播间开播 |
+| 1688 | DOM | ✅ **实发 SUCCESS**（2026-10-07 实测；前两条已入聊天区截图实证） | 高（终判） | cards/1688-enter-test.png | 关键发现：fill 的 DOM 值不进框架 state、发送 div 点击不可靠——唯一可靠配方=**click 聚焦+逐键输入(press_sequentially)+Enter**；回显延迟大→input 清空为第二判据；引擎钩子已按配方覆写 |
 | xiaohongshu | DOM | ⏳ 待运行（profile 就绪） | — | — | 需直播间开播；监听侧帧结构同待校准 |
 | jd | DOM | ⏳ 待运行（profile 就绪） | — | — | zhibo.jd.com 独立站 |
 | wechat_channels | DOM | ⏳ 待运行（后台会话） | — | — | 助手发言身份（用户已实测可发送） |

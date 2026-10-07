@@ -115,8 +115,71 @@ def parse_base64_mixed_message(base64_data: str) -> list:
 class Live1688Engine(ControlledPageEngine):
     """1688 直播受控页面引擎（AutoDanmu send 钩子同 E5 纪律——选择器待 M0 校准）"""
 
-    SEND_INPUT_SELECTORS = ["textarea", "input[placeholder*=说]", "div[contenteditable=true]"]
-    SEND_BUTTON_SELECTORS = ['button:has-text("发送")', 'text=发送']
+    # 1688 实证（2026-10-07）：fill 的 DOM 值不进框架 state、发送 div 点击不可靠——
+    # 覆写钩子用唯一可靠配方 = click 聚焦 + 逐键输入 + Enter 提交
+    SEND_INPUT_SELECTORS = ["input[placeholder*=说]", "input.input-box"]
+
+    async def send_danmu(self, room_id: str, content: str):
+        from danmaku_listener.contract.models import SendRejectReason, SendStatus
+        from danmaku_listener.senders.base import SendResult
+
+        try:
+            await asyncio.wait_for(self._profile_lock.acquire(), timeout=3.0)
+        except asyncio.TimeoutError:
+            return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
+                              fix_hint="profile 锁被监听操作占用——稍后重试（busy）")
+        try:
+            from playwright.async_api import async_playwright
+
+            async with async_playwright() as pw:
+                context = await self._launch(pw, headless=True)
+                try:
+                    page = context.pages[0] if context.pages else await context.new_page()
+                    try:
+                        await page.goto(self._send_room_url(room_id), timeout=45000,
+                                        wait_until="domcontentloaded")
+                    except Exception as e:  # noqa: BLE001
+                        return SendResult(SendStatus.UNKNOWN, SendRejectReason.SEND_TIMEOUT.value,
+                                          detail=f"goto: {type(e).__name__}")
+                    await asyncio.sleep(5)
+                    input_sel = None
+                    for sel in self.SEND_INPUT_SELECTORS:
+                        try:
+                            loc = page.locator(sel).first
+                            if await loc.count() > 0 and await loc.is_visible():
+                                input_sel = sel; break
+                        except Exception:  # noqa: BLE001
+                            continue
+                    if input_sel is None:
+                        return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
+                                          fix_hint="未发现聊天输入框（页面结构/未登录）——重跑 M0 探针")
+                    loc = page.locator(input_sel).first
+                    await loc.click()
+                    await loc.press_sequentially(content, delay=40)
+                    await loc.press("Enter")
+                    await asyncio.sleep(4)
+                    echo = time.monotonic() + 8
+                    while time.monotonic() < echo:
+                        if content in await page.content():
+                            return SendResult(SendStatus.SENT, sent_at=int(time.time()))
+                        await asyncio.sleep(1.5)
+                    # 1688 回显延迟大：input 已清空 = 服务端受理（第二判据）
+                    if not (await loc.input_value()).strip():
+                        return SendResult(SendStatus.SENT, sent_at=int(time.time()),
+                                          detail="input cleared（回显延迟）")
+                    return SendResult(SendStatus.UNKNOWN, SendRejectReason.SEND_TIMEOUT.value,
+                                      detail="无回显且 input 未清空")
+                finally:
+                    try:
+                        await context.close()
+                    except Exception:  # noqa: BLE001
+                        pass
+        except Exception as e:  # noqa: BLE001  E5 隔离
+            logger.warning(f"[1688] send_danmu error: {type(e).__name__}: {str(e)[:100]}")
+            return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
+                              detail=f"{type(e).__name__}: {str(e)[:100]}")
+        finally:
+            self._profile_lock.release()
 
     def _send_room_url(self, room_id: str) -> str:
         return LIVE_URL_TEMPLATE.format(feed_id=room_id)

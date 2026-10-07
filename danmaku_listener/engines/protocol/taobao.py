@@ -240,8 +240,13 @@ class TaobaoWebProtocolEngine(BaseEngine):
                             return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
                                               fix_hint="风控滑块拦截（自动滑动未通过）——降低发送频率，稍后重试",
                                               detail=f"auto_slide={slid}")
-                    body = await page.content()
-                    if content in body:
+                    echo_deadline = time.monotonic() + 8  # 1688 实证：聊天列表渲染延迟可达数秒
+                    sent_echo = False
+                    while time.monotonic() < echo_deadline:
+                        if content in await page.content():
+                            sent_echo = True; break
+                        await asyncio.sleep(1.5)
+                    if sent_echo:
                         return SendResult(SendStatus.SENT, sent_at=int(time.time()))
                     for sel in ("text=禁言", "text=验证码", "text=操作过于频繁"):
                         try:
