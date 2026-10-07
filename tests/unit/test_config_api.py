@@ -44,7 +44,9 @@ async def test_get_config_returns_whitelist(client, config_file):
                 "send_jitter_seconds", "send_rate_key", "send_circuit_threshold",
                 "send_dedup_window_seconds", "send_max_length",
                 "send_lock_timeout_seconds", "send_audit_file",
-                "send_idempotency_index"}
+                "send_idempotency_index",
+                "send_session_idle_timeout_seconds", "send_window_mode",
+                "send_min_interval_overrides"}
     assert set(data["config"].keys()) == expected
     assert data["all_require_restart"] is True
 

@@ -1,0 +1,27 @@
+{
+  "platform": "douyin",
+  "mode": "t3-resident-session",
+  "room_id": "964657735367",
+  "f5_probe": "CEO-F5 双探针：headless=new 面板渲染✓+实发成功✓（f5-diag 截图聊天流'[M0] f5-diag'(我)）；bd_ticket_guard 检测的是旧 headless 特征——常驻会话可无桌面运行",
+  "judge_upgrade": "回显判定升级=get_by_text 穿透 shadow DOM（聊天流 2026-10-07 下午起移入 shadow DOM，page.content() 失效——视频号同款盲区）；登录失效信号='需先登录'文本（f5-shadow2 截图实证）",
+  "deliverables": [
+    "senders/resident_session.py（ENG-1 同锁空闲关闭+30s 操作超时重置/CEO-F8 健康自愈/ENG-6 撞锁独立错误/DX-D7 psutil 清理自愈/ENG-12 生命周期日志/ENG-4 aclose）",
+    "senders/douyin.py 重构（常驻会话+shadow DOM 判定+登录信号+逐键配方；旧瞬态路径 deprecated 保留）",
+    "douyin_login.py __main__ CLI（死代码补齐）",
+    "配置三件套 send_session_idle_timeout_seconds/send_window_mode(默认 headless_new)/send_min_interval_overrides"
+  ],
+  "verify": "实发 sent×2（首条 6.2s 含启动+挂页，第二条 6.8s）——EXIT-OK 干净退出",
+  "bugfix": "playwright timeout 单位 bug（30s 传成 30ms→goto 立即超时→异常冒泡致 pw 子进程泄漏→loop 关不净→python 退出挂起）——已修+挂页异常清理",
+  "unit_tests": "test_resident_session.py 8/8 + test_taobao_mtop_sender.py 9/9 + 全量 615 绿",
+  "verdict": "SUCCESS——T3 交付完成；浸泡验收后台运行中（2h/10min 一发）",
+  "ceo_f7_coldstart": {
+    "measurement": "常驻会话首条发送端到端延迟（含懒启动+挂页）",
+    "value": "6.2s（首条）/ 6.8s（第二条）——< 15s 阈值 ✓",
+    "conclusion": "默认 1800s 空闲超时无需调整；冷启动全链路（launch+goto+回显）在预算内"
+  },
+  "soak_acceptance": {
+    "status": "STOPPED_BY_USER——2h 浸泡验收被用户手动停止（未完成 DX-D2 判定）",
+    "tool": "tools/send_probes/douyin_soak.py（可随时重跑：--duration-hours 2 --interval-min 10）",
+    "note": "如实记录：浸泡未完成≠验收通过；发布前建议补跑"
+  }
+}

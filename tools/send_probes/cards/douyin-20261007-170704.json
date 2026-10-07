@@ -1,0 +1,33 @@
+{
+  "platform": "douyin",
+  "room_url": "https://live.douyin.com/964657735367",
+  "sends_planned": 1,
+  "started": "2026-10-07 17:06:46",
+  "route": "DOM（R22 探针）",
+  "sends": [
+    {
+      "seq": 1,
+      "marker": "[M0] 发送探针 1/170650",
+      "verdict": "UNKNOWN",
+      "detail": "无回显且无显式错误（虚拟列表/慢渲染可能）"
+    }
+  ],
+  "risk_signals": [],
+  "selector_notes": {
+    "input": {
+      "found": "div[contenteditable=true]",
+      "tried": []
+    },
+    "button": {
+      "found": "[class*=send]",
+      "tried": [
+        "button:has-text(\"发送\")(不可见/不存在)",
+        "div[role=button]:has-text(\"发送\")(不可见/不存在)",
+        "button:has-text(\"发送\")(不可见/不存在)",
+        "text=发送(不可见/不存在)"
+      ]
+    }
+  },
+  "verdicts_summary": "UNKNOWN=1",
+  "blocked_reason": null
+}

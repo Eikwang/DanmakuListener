@@ -1,0 +1,23 @@
+{
+  "platform": "douyin",
+  "probe": "CEO-F5 双探针",
+  "room_url": "https://live.douyin.com/964657735367",
+  "started": "2026-10-07 17:00:26",
+  "headless_new": {
+    "mode": "headless=new",
+    "input_found": true,
+    "notes": [
+      "聊天面板在第 3 轮可见"
+    ],
+    "title": "柔柔的抖音直播间 - 抖音直播",
+    "visibilityState": "visible"
+  },
+  "cdp_attach": {
+    "mode": "cdp-attach",
+    "reachable": false,
+    "notes": [
+      "端点不可达（ConnectionError）——用户 Chrome 未以 --remote-debugging-port 启动；可行性=依赖用户配合启动参数，运维成本高于常驻会话"
+    ]
+  },
+  "verdict": "GO_HEADLESS_NEW——新无头模式聊天面板出现：常驻有头窗口方案降级为备选，常驻会话可用 headless=new 形态（无桌面要求）"
+}

@@ -37,6 +37,10 @@ FIELD_TO_TOML: Dict[str, Optional[tuple]] = {
     "send_lock_timeout_seconds": ("send", "lock_timeout_seconds"),
     "send_audit_file": ("send", "audit_file"),
     "send_idempotency_index": ("send", "idempotency_index"),
+    # 抖音常驻发送会话（T3；[send] 节）
+    "send_session_idle_timeout_seconds": ("send", "session_idle_timeout_seconds"),
+    "send_window_mode": ("send", "window_mode"),
+    "send_min_interval_overrides": ("send", "min_interval_overrides"),
 }
 
 #: 白名单（可经 /api/config 修改的字段）

@@ -205,3 +205,30 @@ async def run_profile_login_flow(
                 await context.close()
             except Exception:  # noqa: BLE001
                 pass
+
+
+# ---- CLI 入口（T3 死代码补齐——runbook 所述命令对齐；ENG-6 撞锁=SingletonLock 天然语义） ----
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="抖音 profile 扫码登录（douyin_profile 指纹绑定；发送会话/协议登录共用）")
+    parser.add_argument("room_id", nargs="?", default="",
+                        help="直播间 ID（可选——登录后打开该直播间页）")
+    parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT,
+                        help=f"扫码等待超时（秒，默认 {DEFAULT_TIMEOUT}）")
+    args = parser.parse_args()
+
+    async def _cli_login() -> None:
+        def _status(status: str) -> None:
+            print(f"[status] {status}")
+
+        result = await run_profile_login_flow(
+            room_id=args.room_id, headless=False, timeout=args.timeout,
+            on_status=_status)
+        print(f"[result] {json.dumps(result, ensure_ascii=False)}")
+        if result.get("status") != "ok":
+            raise SystemExit(1)
+
+    asyncio.run(_cli_login())

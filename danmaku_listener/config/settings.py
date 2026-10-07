@@ -93,6 +93,10 @@ class Settings(BaseSettings):
     send_lock_timeout_seconds: float = 3.0  # per-profile 锁 acquire 超时（S4-1，超时回执 busy）
     send_audit_file: str = "./persistence_data/send_audit.jsonl"  # 发送审计（权威对账，R6/R25）
     send_idempotency_index: str = "./persistence_data/send_idempotency.json"  # request_id→结果索引（F9）
+    # 抖音常驻发送会话（T3/ResidentSendSession；CEO-F3/DX-D9/ENG-1）
+    send_session_idle_timeout_seconds: int = 1800  # 常驻会话空闲自动关闭（秒）
+    send_window_mode: str = "headless_new"  # 抖音会话形态：headless_new（T1 探针实证可用，无桌面）/ minimized / foreground
+    send_min_interval_overrides: str = ""  # per-platform 限速覆写 JSON（如 {"huya": 35}；空=无覆写）
 
     @model_validator(mode="after")
     def _validate_bounds(self) -> "Settings":
