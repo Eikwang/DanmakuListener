@@ -103,3 +103,22 @@
 - **What**: 评估官方通道替代受控页面抓取（长线抗风控）。
 - **Why**: CEO F10 战略备忘——淘宝反爬升级最快，长期维护成本最高模块的正解。
 - **Effort**: human L / CC M（调研为主） | **Depends on**: 无
+
+
+## P3: 1688 mtop API 同构化（X2 defer，2026-10-07）
+- **What**: T2 的 MtopClient.post+页面 mtop 库调用能力落地后，1688（同协议异域名，mtop.py 直接支持）复制淘宝 mtop page-eval 路线——探针一次抓 1688 发送端点（iliad 同族）。
+- **Why**: 1688 DOM 路线已达标（M0 SUCCESS，无风控信号），无痛点驱动；但 mtop 化可消除 DOM 选择器维护面（长期债）。
+- **Pros**: 与淘宝 sender 同构（低成本复制）；消除选择器维护。
+- **Cons**: 无实测痛点支撑；探针+sender 复制 ~1h CC。
+- **Context**: 淘宝 T2 判定（cards/taobao-mtop-pageeval）——页面 mtop 库调用是唯一可行 API 形态；1688 引擎同用 MtopClient。1688 DOM sender（EngineHookSender）继续工作，本条目为优化非修复。
+- **Effort**: human S / CC S | **Depends on**: 无（T2 已交付前置）
+- 来源: /autoplan 修复计划 0G 裁定 X2（2026-10-07，defer 决策）
+
+## P3: 官方开放平台互动 API 商业评估（CEO-F11，2026-10-07）
+- **What**: 30 分钟商业评估——B站/抖音等官方开放平台互动 API 的资质门槛实际高度、公司主体是否可申请、成本收益；结果决定是否立项"长线最合规路线"。
+- **Why**: R24 当时因"企业资质门槛"一票否决是工程层正确；若 AUTOlive 数字人商业化，资质是一次性成本，换双平台合规稳定发送+免除 DOM/mtop 军备的永久维护税——可能是 10x 路径（CEO 声部 F11：用既往裁定代替分析是盲区）。
+- **Pros**: 合规稳定、免军备维护、解除账号连坐尾部风险。
+- **Cons**: 资质成本未知（评估前）；覆盖面可能不满足 12 平台统一底座。
+- **Context**: R24 否决记录（前置计划）+ ADR-002 替代方案节；2026-10-07 检索确认官方 taobao.live.comments.publish 等存在但需资质。评估产出=立项/不立项决议（记录于 ADR 或新 ADR）。
+- **Effort**: human S（30min 评估）/ CC XS | **Depends on**: 无
+- 来源: /autoplan CEO 声部 F11（2026-10-07，defer 决策）
