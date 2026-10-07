@@ -1,0 +1,29 @@
+{
+  "platform": "bilibili",
+  "route": "API（msg/send）",
+  "room_id": 1756754520,
+  "sends": [
+    {
+      "seq": 1,
+      "marker": "[M0] 发送探针 1/091147",
+      "http": 200,
+      "code": 0,
+      "msg": "",
+      "verdict": "SUCCESS"
+    },
+    {
+      "seq": 2,
+      "marker": "[M0] 发送探针 2/091158",
+      "http": 200,
+      "code": 0,
+      "msg": "",
+      "verdict": "SUCCESS"
+    }
+  ],
+  "started": "2026-10-07 09:11:47",
+  "room_info": {
+    "code": 0,
+    "live_status": 1
+  },
+  "verdicts_summary": "SUCCESS=2"
+}

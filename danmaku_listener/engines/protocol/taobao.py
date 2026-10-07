@@ -136,8 +136,140 @@ class TaobaoWebProtocolEngine(BaseEngine):
     选择器为候选集，M0 探针（tools/send_probes/）校准后修订。
     """
 
-    SEND_INPUT_SELECTORS = ["textarea", "input[placeholder*=说]", "div[contenteditable=true]"]
-    SEND_BUTTON_SELECTORS = ['button:has-text("发送")', 'text=发送']
+    # M0 发现模式实证（2026-10-07 dom_discover：聊天输入=右下 textarea，发送=BtnSend div
+    # 无文本非 button——搜索框 ph='点击更换，喜欢就搜吧' 是误选陷阱，置于候选尾位防回退）
+    SEND_INPUT_SELECTORS = ["textarea[class*=chatInputCenterTextarea]",
+                            "textarea[placeholder*=说点什么]", "textarea"]
+    SEND_BUTTON_SELECTORS = ["div[class*=chatInputCenterBtnSend]",
+                             "div[class*=chatInputSendIcon]",
+                             'button:has-text("发送")', 'text=发送']
+
+    async def send_danmu(self, room_id: str, content: str):
+        """AutoDanmu send 钩子（E5）：引擎 profile 锁内瞬态 context → 直播间 DOM 发送
+
+        与凭证提取/登录窗口共用 _profile_lock（persistent context 单实例串行）；
+        acquire 带超时（S4-1，超时回执 busy）；异常不出引擎边界（E5 隔离）。
+        """
+        from danmaku_listener.contract.models import SendRejectReason, SendStatus
+        from danmaku_listener.senders.base import SendResult
+
+        try:
+            await asyncio.wait_for(self._profile_lock.acquire(), timeout=3.0)
+        except asyncio.TimeoutError:
+            return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
+                              fix_hint="profile 锁被监听操作占用——稍后重试（busy）")
+        try:
+            from playwright.async_api import async_playwright
+
+            live_id = self._extract_live_id(room_id)
+            live_url = self.LIVE_URL_TEMPLATE.format(live_id=live_id)
+            async with async_playwright() as pw:
+                context = await pw.chromium.launch_persistent_context(
+                    self._profile_dir(),
+                    headless=True,
+                    user_agent=UA,
+                    viewport={"width": 1280, "height": 800},
+                    args=["--disable-blink-features=AutomationControlled",
+                          "--disable-setuid-sandbox",
+                          "--hide-crash-restore-bubble"],
+                )
+                try:
+                    await context.add_init_script(
+                        "Object.defineProperty(navigator, 'webdriver', "
+                        "{get: () => undefined});")
+                    page = context.pages[0] if context.pages else await context.new_page()
+                    try:
+                        await page.goto(live_url, timeout=45000, wait_until="domcontentloaded")
+                    except Exception as e:  # noqa: BLE001
+                        return SendResult(SendStatus.UNKNOWN, SendRejectReason.SEND_TIMEOUT.value,
+                                          detail=f"goto: {type(e).__name__}")
+                    await asyncio.sleep(3)
+                    input_sel, btn_sel = None, None
+                    for sel in self.SEND_INPUT_SELECTORS:
+                        try:
+                            loc = page.locator(sel).first
+                            if await loc.count() > 0 and await loc.is_visible():
+                                input_sel = sel; break
+                        except Exception:  # noqa: BLE001
+                            continue
+                    if input_sel is None:
+                        return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
+                                          fix_hint="未发现发送输入框（页面结构/未登录）——重跑 M0 探针校准选择器")
+                    for sel in self.SEND_BUTTON_SELECTORS:
+                        try:
+                            if await page.locator(sel).first.count() > 0:
+                                btn_sel = sel; break
+                        except Exception:  # noqa: BLE001
+                            continue
+                    async def _fill_and_send() -> None:
+                        await page.locator(input_sel).first.fill(content)
+                        clicked = False
+                        if btn_sel:
+                            try:
+                                # React 受控组件灰态/遮挡 → force click + 短超时（Enter 兜底）
+                                await page.locator(btn_sel).first.click(timeout=5000, force=True)
+                                clicked = True
+                            except Exception as e:  # noqa: BLE001
+                                logger.debug(f"[taobao] send click fallback: {e}")
+                        if not clicked:
+                            await page.locator(input_sel).first.press("Enter")
+
+                    async def _slider_blocked() -> bool:
+                        # noCaptcha 惯例在 iframe 内——page.locator 不穿透，须遍历 frames
+                        for frame in page.frames:
+                            for sel in ("text=拖动下方滑块", "text=完成验证",
+                                        "text=请按住滑块", "text=安全验证",
+                                        ".nc-container", "[class*=nc_wrapper]"):
+                                try:
+                                    if await frame.locator(sel).first.count() > 0:
+                                        return True
+                                except Exception:  # noqa: BLE001
+                                    continue
+                        return False
+
+                    await _fill_and_send()
+                    await asyncio.sleep(2)
+                    # R17 风控信号：滑块验证 → 单次自动滑动（登录 spike 同款助手）→ 重发一次
+                    if await _slider_blocked():
+                        logger.warning(f"[taobao] send slider captcha — auto-slide once")
+                        slid = await self._try_auto_slide(page)
+                        await asyncio.sleep(2)
+                        await _fill_and_send()  # 滑块吞掉了第一次发送——重填重发
+                        await asyncio.sleep(2)
+                        if await _slider_blocked():
+                            return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
+                                              fix_hint="风控滑块拦截（自动滑动未通过）——降低发送频率，稍后重试",
+                                              detail=f"auto_slide={slid}")
+                    body = await page.content()
+                    if content in body:
+                        return SendResult(SendStatus.SENT, sent_at=int(time.time()))
+                    for sel in ("text=禁言", "text=验证码", "text=操作过于频繁"):
+                        try:
+                            if await page.locator(sel).first.count() > 0 and await page.locator(sel).first.is_visible():
+                                return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
+                                                  fix_hint=f"平台风控信号：{sel}", detail=sel)
+                        except Exception:  # noqa: BLE001
+                            continue
+                    try:
+                        from pathlib import Path as _P
+                        _shot = _P("persistence_data/taobao-send-unknown.png")
+                        await page.screenshot(path=str(_shot))
+                        logger.info(f"[taobao] unknown-state screenshot: {_shot}")
+                    except Exception:  # noqa: BLE001
+                        pass
+                    return SendResult(SendStatus.UNKNOWN, SendRejectReason.SEND_TIMEOUT.value,
+                                      detail="无回显无显式错误（虚拟列表/慢渲染）")
+                finally:
+                    try:
+                        await context.close()
+                    except Exception:  # noqa: BLE001
+                        pass
+        except Exception as e:  # noqa: BLE001  E5 隔离
+            logger.warning(f"[taobao] send_danmu error: {type(e).__name__}: {str(e)[:100]}")
+            return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
+                              detail=f"{type(e).__name__}: {str(e)[:100]}")
+        finally:
+            self._profile_lock.release()
 
     def _send_room_url(self, room_id: str) -> str:
         return self.LIVE_URL_TEMPLATE.format(live_id=room_id)

@@ -9,8 +9,8 @@
 
 | 平台 | 路线 | 状态 | 判定 | 卡片 | 备注 |
 |------|------|------|------|------|------|
-| bilibili | API | ✅ auth 预检通过（离线，2026-10-06） | 待实发 | — | SESSDATA+bili_jct 有效，nav_code=0；开播后 `--room-id` 实发 |
-| taobao | DOM | ⏳ 待运行（profile 就绪） | — | — | 需直播间开播 |
+| bilibili | API | ✅ **实发 SUCCESS×2**（2026-10-07 实测） | 高（终判） | cards/bilibili-20261007-091159.json | HTTP 200/code=0；管线实发 sent ✓ 幂等 ✓ 去重 ✓；F8 回环数据链路就绪 |
+| taobao | DOM | ⚠️ **受限可行**（2026-10-07 实测 5 发） | 中（终判） | 截图 persistence_data/taobao-send-unknown.png | 技术链路全通（E5 钩子/发现模式选择器 chatInputCenter*/BtnSend div/滑块 iframe 感知检测+单次自动滑动）；风控滑块 headless 实发频发（3/5）且自动滑动未通过——需可见窗口/降频/风控冷却后重试 |
 | 1688 | DOM | ⏳ 待运行（profile 就绪） | — | — | 需直播间开播 |
 | xiaohongshu | DOM | ⏳ 待运行（profile 就绪） | — | — | 需直播间开播；监听侧帧结构同待校准 |
 | jd | DOM | ⏳ 待运行（profile 就绪） | — | — | zhibo.jd.com 独立站 |

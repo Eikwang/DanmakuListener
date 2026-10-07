@@ -36,9 +36,15 @@ async def test_get_config_returns_whitelist(client, config_file):
     resp = await c.get("/api/config")
     assert resp.status == 200
     data = await resp.json()
-    expected = {"ws_port", "web_port", "max_rooms", "fast_retry_max",
+    expected = {"ws_port", "ws_token_file", "web_port", "max_rooms", "fast_retry_max",
                 "slow_retry_cap_seconds", "bus_ring_capacity",
-                "bus_dedup_window_seconds", "session_lifetime_seconds"}
+                "bus_dedup_window_seconds", "session_lifetime_seconds",
+                # AutoDanmu [send] 白名单（ADR-002 T5）
+                "send_enabled_platforms", "send_dry_run", "send_min_interval_seconds",
+                "send_jitter_seconds", "send_rate_key", "send_circuit_threshold",
+                "send_dedup_window_seconds", "send_max_length",
+                "send_lock_timeout_seconds", "send_audit_file",
+                "send_idempotency_index"}
     assert set(data["config"].keys()) == expected
     assert data["all_require_restart"] is True
 
