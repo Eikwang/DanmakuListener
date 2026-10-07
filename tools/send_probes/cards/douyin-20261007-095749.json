@@ -1,0 +1,35 @@
+{
+  "platform": "douyin",
+  "room_url": "https://live.douyin.com/964657735367",
+  "sends_planned": 3,
+  "started": "2026-10-07 09:57:44",
+  "route": "DOM（R22 探针）",
+  "sends": [],
+  "risk_signals": [],
+  "selector_notes": {
+    "input": {
+      "found": null,
+      "tried": [
+        "div[contenteditable=true](不可见/不存在)",
+        "textarea[placeholder*=弹幕](不可见/不存在)",
+        "input[placeholder*=说点什么](不可见/不存在)",
+        "textarea(不可见/不存在)",
+        "input[placeholder](不可见/不存在)",
+        "div[contenteditable=true](不可见/不存在)"
+      ]
+    },
+    "button": {
+      "found": null,
+      "tried": [
+        "button:has-text(\"发送\")(不可见/不存在)",
+        "div[role=button]:has-text(\"发送\")(不可见/不存在)",
+        "button:has-text(\"发送\")(不可见/不存在)",
+        "text=发送(不可见/不存在)",
+        "[class*=send](不可见/不存在)"
+      ]
+    }
+  },
+  "verdicts_summary": "无发送",
+  "blocked_reason": "未发现可用输入框——选择器候选已 dump（selector_notes.input.tried）",
+  "cookie_injection": "已注入 53 条 cookie"
+}

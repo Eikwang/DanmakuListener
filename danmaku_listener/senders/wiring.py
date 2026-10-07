@@ -69,6 +69,12 @@ def get_send_pipeline() -> DanmuCommandPipeline:
             logger.warning(f"[send-wiring] engine build failed for {plat}: {e}")
     # E4：bilibili 直连 sender（复用引擎 cookie 解析器）
     registry.register(BilibiliSender(cookie_file=_pick_bilibili_cookie_file(settings)))
+    # 抖音 profile DOM sender（M0 实测：headless 敏感→有头窗口；profile 登录态）
+    try:
+        from danmaku_listener.senders.douyin import DouyinProfileSender
+        registry.register(DouyinProfileSender())
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[send-wiring] douyin sender register failed: {e}")
 
     guard = SendGuard(settings, blocked_keywords=list(bridge._blocked_keywords))
     audit = SendAuditLog(settings.send_audit_file, settings.send_idempotency_index)

@@ -38,5 +38,8 @@
 - **B站**：cookie 需 SESSDATA+bili_jct；登录失效回执 PLATFORM_REJECTED(code=-101)→重登
 - **受控页面组（淘宝/1688/小红书/京东/视频号）**：发送经由监听引擎实例（E5）——
   与监听共享 profile；发送期间监听可能瞬时不稳定属预期（F11，实测卡片有专项）
-- **抖音/快手/斗鱼/虎牙**：路线待 M0 探针终判（tools/send_probes/）——
-  回执 ROUTE_UNVERIFIED=探针未完成
+- **抖音**：**发送必须有头窗口**（headless 下聊天面板不出现——bd_ticket_guard 会话
+  对 headless 敏感，2026-10-07 实测）+ profile 登录态（cookie/douyin_profile，扫码
+  一次：`python -m danmaku_listener.engines.douyin_login <room_id>`）；登录失效回执
+  PLATFORM_REJECTED→重扫码；每次发送可见窗口闪烁属预期
+- **快手/斗鱼**：DOM 直发已实证（cookie 注入即可）；**虎牙**：先跑登录窗口补 R19 字段

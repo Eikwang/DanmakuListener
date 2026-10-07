@@ -119,3 +119,89 @@ async def run_login_flow(
             return {"status": "ok", "cookies": cookie_dict}
         finally:
             await browser.close()
+
+
+# ============ AutoDanmu profile 登录闭环（2026-10-07——cookie 文件注入被
+# bd_ticket_guard 指纹绑定拒绝；persistent profile 指纹匹配才能建立网页登录态） ============
+
+PROFILE_DIR = "cookie/douyin_profile"
+
+
+def has_profile_login(profile_dir: str = PROFILE_DIR) -> bool:
+    """profile 是否已有登录态（Chromium Cookies SQLite 存在性即初判；
+    会话失效需行为证据——login_gate 同款边界）"""
+    from pathlib import Path
+
+    d = Path(profile_dir)
+    return (d / "Default" / "Network" / "Cookies").is_file() or            (d / "Default" / "Cookies").is_file()
+
+
+async def run_profile_login_flow(
+    room_id: str = "",
+    profile_dir: str = PROFILE_DIR,
+    headless: bool = False,
+    timeout: float = DEFAULT_TIMEOUT,
+    on_status: Optional[Callable[[str], Any]] = None,
+) -> Dict[str, Any]:
+    """可见窗口扫码登录进 persistent profile：sessionid 出现即成功（指纹随之绑定）
+
+    Returns:
+        {"status": "ok" | "timeout_or_closed", "profile_dir": profile_dir}
+    """
+    from playwright.async_api import async_playwright
+
+    os.makedirs(profile_dir, exist_ok=True)
+    url = f"https://live.douyin.com/{room_id}" if room_id else LOGIN_PAGE_URL
+
+    def notify(status: str) -> None:
+        if on_status:
+            try:
+                result = on_status(status)
+                if asyncio.iscoroutine(result):
+                    asyncio.ensure_future(result)
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"login status callback error: {e}")
+
+    async with async_playwright() as pw:
+        context = await pw.chromium.launch_persistent_context(
+            profile_dir,
+            headless=headless,
+            viewport={"width": 1280, "height": 800},
+            args=["--disable-blink-features=AutomationControlled",
+                  "--disable-setuid-sandbox",
+                  "--hide-crash-restore-bubble"],
+        )
+        try:
+            page = context.pages[0] if context.pages else await context.new_page()
+            notify("login_page_opened")
+            try:
+                await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"[douyin-login] goto warning: {e}")
+
+            deadline = time.monotonic() + timeout
+            logged_in = False
+            while time.monotonic() < deadline:
+                try:
+                    cookies = await context.cookies()
+                except Exception:  # noqa: BLE001  窗口被用户关闭
+                    break
+                names = {c["name"] for c in cookies if c.get("value")}
+                if LOGIN_MARKER_COOKIES & names:
+                    logged_in = True
+                    break
+                if page.is_closed():
+                    break
+                await asyncio.sleep(2)
+
+            if not logged_in:
+                notify("login_timeout_or_closed")
+                return {"status": "timeout_or_closed", "profile_dir": profile_dir}
+            notify("login_ok")
+            logger.info(f"[douyin-login] profile login OK → {profile_dir}")
+            return {"status": "ok", "profile_dir": profile_dir}
+        finally:
+            try:
+                await context.close()
+            except Exception:  # noqa: BLE001
+                pass
