@@ -126,7 +126,8 @@ async def run(args: argparse.Namespace) -> None:
                     await asyncio.sleep(gap)
                 if card["blocked_reason"]:
                     break
-                marker = marker_content(i)
+                marker = (args.custom_messages[i - 1] if getattr(args, "custom_messages", None)
+                          else marker_content(i))
                 entry: dict = {"seq": i, "marker": marker, "verdict": "UNKNOWN", "detail": ""}
                 try:
                     loc = page.locator(input_sel).first
@@ -193,8 +194,13 @@ def main() -> None:
     ap.add_argument("--platform", required=True, choices=sorted(DOM_PLATFORMS))
     ap.add_argument("--room-url", required=True, help=DOM_PLATFORMS.get("", {}).get("room_url_hint", "直播间 URL"))
     ap.add_argument("--sends", type=int, default=3, help="连续发送次数（默认 3，R17）")
+    ap.add_argument("--messages", default=None,
+                    help="自定义内容列表（分号分隔），如 --messages '甲；乙；丙'——提供时覆盖自动 marker")
     ap.add_argument("--headed", action="store_true", help="可见窗口（默认 attended 可见）")
     args = ap.parse_args()
+    args.custom_messages = [m.strip() for m in args.messages.split("；") if m.strip()] if args.messages else None
+    if args.custom_messages:
+        args.sends = len(args.custom_messages)
     asyncio.run(run(args))
 
 

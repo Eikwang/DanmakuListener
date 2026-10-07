@@ -1,0 +1,46 @@
+{
+  "platform": "douyu",
+  "room_url": "https://www.douyu.com/24422",
+  "sends_planned": 3,
+  "started": "2026-10-07 09:45:44",
+  "route": "DOM（R22 探针）",
+  "sends": [
+    {
+      "seq": 1,
+      "marker": "主播早上好啊",
+      "verdict": "SUCCESS",
+      "detail": "marker 回显于聊天流"
+    },
+    {
+      "seq": 2,
+      "marker": "吃早饭了吗？",
+      "verdict": "SUCCESS",
+      "detail": "marker 回显于聊天流"
+    },
+    {
+      "seq": 3,
+      "marker": "主播辛苦了",
+      "verdict": "SUCCESS",
+      "detail": "marker 回显于聊天流"
+    }
+  ],
+  "risk_signals": [],
+  "selector_notes": {
+    "input": {
+      "found": "input[placeholder]",
+      "tried": [
+        ".ChatSend-input(不可见/不存在)",
+        "textarea.chat-input(不可见/不存在)",
+        "input[placeholder*=弹幕](不可见/不存在)",
+        "textarea(不可见/不存在)"
+      ]
+    },
+    "button": {
+      "found": ".ChatSend-button",
+      "tried": []
+    }
+  },
+  "verdicts_summary": "SUCCESS=3",
+  "blocked_reason": null,
+  "cookie_injection": "已注入 24 条 cookie"
+}
