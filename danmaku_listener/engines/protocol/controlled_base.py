@@ -220,6 +220,107 @@ class ControlledPageEngine(BaseEngine):
     def _launch_args(self) -> list:
         return []
 
+    # ---- AutoDanmu send 钩子（E5/S4-1/F5——引擎唯一新增出口，异常边界隔离） ----
+
+    #: 发送 UI 选择器（子类按 M0 探针结论覆写；None=探针未完成→ROUTE_UNVERIFIED）
+    SEND_INPUT_SELECTORS: list = []
+    SEND_BUTTON_SELECTORS: list = []
+
+    def _send_room_url(self, room_id: str) -> str:
+        """发送导航 URL（子类实现：由房间号重建直播间 URL）"""
+        raise NotImplementedError
+
+    async def _send_navigate(self, page, room_id: str) -> None:
+        """发送导航扩展位（默认 no-op；视频号等后台型平台覆写为进入直播间面板）"""
+        return None
+
+    async def send_danmu(self, room_id: str, content: str):
+        """在引擎持有的 profile 上发送弹幕（E5：与监听/重登共用 per-profile Lock 串行）
+
+        瞬态 context（与登录/凭证提取同款模式）→ 导航直播间 → DOM 发送 → 回显判定（F5）。
+        锁 acquire 带超时（S4-1：监听重登长动作不饿死发送，超时回执 busy）。
+        """
+        from danmaku_listener.contract.models import SendRejectReason, SendStatus
+        from danmaku_listener.senders.base import SendResult
+
+        if not self.SEND_INPUT_SELECTORS:
+            return SendResult(SendStatus.FAILED, SendRejectReason.ROUTE_UNVERIFIED.value,
+                              fix_hint="该平台发送选择器未经 M0 探针验证——先跑 tools/send_probes/",
+                              docs_anchor="docs/testing/m0-send-probe-cards.md")
+        try:
+            await asyncio.wait_for(self._profile_lock.acquire(),
+                                   timeout=3.0)  # S4-1/R14
+        except asyncio.TimeoutError:
+            return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
+                              fix_hint="profile 锁被监听操作占用——稍后重试（busy）")
+        try:
+            from playwright.async_api import async_playwright
+
+            url = self._send_room_url(room_id)
+            async with async_playwright() as pw:
+                context = await self._launch(pw, headless=True)
+                try:
+                    page = context.pages[0] if context.pages else await context.new_page()
+                    try:
+                        await page.goto(url, timeout=45000, wait_until="domcontentloaded")
+                    except Exception as e:  # noqa: BLE001
+                        return SendResult(SendStatus.UNKNOWN, SendRejectReason.SEND_TIMEOUT.value,
+                                          detail=f"goto: {type(e).__name__}")
+                    await asyncio.sleep(3)
+                    try:
+                        await self._send_navigate(page, room_id)  # 后台型平台扩展位（视频号）
+                        await asyncio.sleep(1)
+                    except Exception as e:  # noqa: BLE001
+                        logger.debug(f"[{self.platform}] send navigate warning: {e}")
+                    # 输入框发现（发现模式：候选序+可见性）
+                    input_sel, btn_sel = None, None
+                    for sel in self.SEND_INPUT_SELECTORS:
+                        try:
+                            loc = page.locator(sel).first
+                            if await loc.count() > 0 and await loc.is_visible():
+                                input_sel = sel; break
+                        except Exception:  # noqa: BLE001
+                            continue
+                    if input_sel is None:
+                        return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
+                                          fix_hint="未发现发送输入框（页面结构变更/未登录）——重跑 M0 探针")
+                    for sel in self.SEND_BUTTON_SELECTORS:
+                        try:
+                            if await page.locator(sel).first.count() > 0:
+                                btn_sel = sel; break
+                        except Exception:  # noqa: BLE001
+                            continue
+                    await page.locator(input_sel).first.fill(content)
+                    if btn_sel:
+                        await page.locator(btn_sel).first.click()
+                    else:
+                        await page.locator(input_sel).first.press("Enter")
+                    await asyncio.sleep(2)
+                    # F5 判定：回显于页面聊天流=SUCCESS；风控信号=FAIL；否则 UNKNOWN
+                    body = await page.content()
+                    if content in body:
+                        return SendResult(SendStatus.SENT, sent_at=int(time.time()))
+                    for sel in ("text=禁言", "text=验证码", "text=操作过于频繁"):
+                        try:
+                            if await page.locator(sel).first.count() > 0 and await page.locator(sel).first.is_visible():
+                                return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
+                                                  fix_hint=f"平台风控信号：{sel}", detail=sel)
+                        except Exception:  # noqa: BLE001
+                            continue
+                    return SendResult(SendStatus.UNKNOWN, SendRejectReason.SEND_TIMEOUT.value,
+                                      detail="无回显无显式错误（虚拟列表/慢渲染）")
+                finally:
+                    try:
+                        await context.close()
+                    except Exception:  # noqa: BLE001
+                        pass
+        except Exception as e:  # noqa: BLE001  E5 隔离：异常不出引擎边界
+            logger.warning(f"[{self.platform}] send_danmu error: {type(e).__name__}: {str(e)[:100]}")
+            return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
+                              detail=f"{type(e).__name__}: {str(e)[:100]}")
+        finally:
+            self._profile_lock.release()
+
     # ---- 拦截接线 ----
 
     def _wire_ws_intercept(self, room_id: str, page) -> None:

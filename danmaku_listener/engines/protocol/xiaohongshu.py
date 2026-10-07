@@ -210,6 +210,14 @@ def map_custom_data(cd: Dict[str, Any], seq: int, ts: int,
 
 
 class XiaohongshuEngine(ControlledPageEngine):
+    """小红书受控页面引擎（AutoDanmu send 钩子同 E5 纪律——选择器待 M0 校准）"""
+
+    SEND_INPUT_SELECTORS = ["textarea", "div[contenteditable=true]", "input[placeholder*=说]"]
+    SEND_BUTTON_SELECTORS = ['button:has-text("发送")', 'text=发送']
+
+    def _send_room_url(self, room_id: str) -> str:
+        return LIVE_URL_TEMPLATE.format(room_id=room_id)
+
     """小红书直播弹幕引擎（受控页面 WS 帧拦截，独立平台）"""
 
     platform = "xiaohongshu"

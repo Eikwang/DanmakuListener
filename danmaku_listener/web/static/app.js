@@ -476,6 +476,8 @@ class DanmakuApp {
     document.getElementById("keyword-toggle")?.addEventListener("change", (e) => {
       this.api("/api/keywords/toggle", "PUT", { enabled: e.target.checked }).then(() => this.loadKeywords());
     });
+    document.getElementById("send-test-btn")?.addEventListener("click", () => this.sendTestDanmu());
+    });
   }
 
   async api(path, method = "GET", body = null) {
@@ -646,7 +648,62 @@ class DanmakuApp {
       if (status.message_count != null) {
         document.getElementById("stats-rate").textContent = `累计 ${status.message_count} 条`;
       }
+      this.renderSendStatus(status.send);
     } catch (e) { /* status 可选 */ }
+  }
+
+  renderSendStatus(send) {
+    // T7 day-1 状态行：开关/dry-run/熔断三态（S8-1）
+    const el = document.getElementById("send-status-line");
+    if (!el) return;
+    if (!send) { el.textContent = "发送：未配置（[send] send_enabled_platforms 为空）"; return; }
+    const parts = [];
+    for (const [plat, st] of Object.entries(send.platforms || {})) {
+      parts.push(plat + (st.enabled ? (st.circuit_open ? "⚠熔断" : "✓") : "✗"));
+    }
+    el.textContent = "发送：" + (parts.length ? parts.join(" / ") : "全部关闭")
+      + " · " + (send.dry_run ? "dry-run 开（只记录不实发）" : "实发模式");
+  }
+
+  async sendTestDanmu() {
+    // 魔法时刻（DX 0D）：控制台 dry-run 发送测试——10 秒内见回执
+    const line = document.getElementById("send-result-line");
+    const platform = document.getElementById("send-platform-input")?.value.trim();
+    const room_id = document.getElementById("send-room-input")?.value.trim();
+    const content = document.getElementById("send-content-input")?.value.trim();
+    if (!platform || !room_id || !content) {
+      line.textContent = "发送：平台/房间号/内容均必填";
+      return;
+    }
+    line.textContent = "发送：处理中…";
+    let sendToken = localStorage.getItem("send_token");
+    if (!sendToken) {
+      sendToken = window.prompt("输入发送 token（persistence_data/send_token.txt 内容）:") || "";
+      if (!sendToken.trim()) { line.textContent = "发送：已取消（需要 token）"; return; }
+      localStorage.setItem("send_token", sendToken.trim());
+    }
+    try {
+      const resp = await fetch("/api/send-danmu", {
+        method: "POST",
+        headers: { "Content-Type": "application/json",
+                   "Authorization": "Bearer " + localStorage.getItem("send_token") },
+        body: JSON.stringify({ platform, room_id, content, request_id: "ui-" + Date.now() }),
+      });
+      if (resp.status === 401) {
+        localStorage.removeItem("send_token");
+        line.textContent = "发送：token 无效——已清除，请重试";
+        return;
+      }
+      const respData = await resp.json();
+      const r = respData.result || {};
+      const p = r.payload || {};
+      const suffix = p.reason_code ? "（" + p.reason_code + "）" : "";
+      line.textContent = "发送：" + (p.status || "?") + suffix;
+      const status = await this.api("/api/status");
+      this.renderSendStatus(status.send);
+    } catch (e) {
+      line.textContent = "发送：失败（" + (e.message || e) + "）";
+    }
   }
 }
 

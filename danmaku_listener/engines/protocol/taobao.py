@@ -130,6 +130,18 @@ def rebuild_failures_degraded(failures: int) -> bool:
 
 
 class TaobaoWebProtocolEngine(BaseEngine):
+    """淘宝直播 mtop 双通道受控页面引擎
+
+    AutoDanmu send 钩子：E5 经引擎实例瞬态 context（per-profile Lock 串行）；
+    选择器为候选集，M0 探针（tools/send_probes/）校准后修订。
+    """
+
+    SEND_INPUT_SELECTORS = ["textarea", "input[placeholder*=说]", "div[contenteditable=true]"]
+    SEND_BUTTON_SELECTORS = ['button:has-text("发送")', 'text=发送']
+
+    def _send_room_url(self, room_id: str) -> str:
+        return self.LIVE_URL_TEMPLATE.format(live_id=room_id)
+
     """淘宝直播 mtop 双通道引擎（每平台一实例、每房间独立任务）"""
 
     platform = "taobao"

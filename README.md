@@ -53,6 +53,7 @@ pip install ".[all]"       # 全部
 ```bash
 danmaku-serve --web
 # 浏览器打开 http://localhost:8080 —— 添加房间（如 bilibili:23058）即可看到契约 v1 弹幕流
+# 端口可经 config.local.toml 覆盖（[ws] port / [web] port；默认 8765 / 8080——文档以默认值为准）
 ```
 
 ### 库用法（AUTOlive 集成）

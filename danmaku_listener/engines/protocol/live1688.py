@@ -113,6 +113,14 @@ def parse_base64_mixed_message(base64_data: str) -> list:
 
 
 class Live1688Engine(ControlledPageEngine):
+    """1688 直播受控页面引擎（AutoDanmu send 钩子同 E5 纪律——选择器待 M0 校准）"""
+
+    SEND_INPUT_SELECTORS = ["textarea", "input[placeholder*=说]", "div[contenteditable=true]"]
+    SEND_BUTTON_SELECTORS = ['button:has-text("发送")', 'text=发送']
+
+    def _send_room_url(self, room_id: str) -> str:
+        return LIVE_URL_TEMPLATE.format(feed_id=room_id)
+
     """1688 直播弹幕引擎（受控页面响应拦截，独立平台）"""
 
     platform = "1688"

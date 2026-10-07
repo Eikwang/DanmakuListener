@@ -67,6 +67,18 @@ class NeedLoginVisible(Exception):
 
 
 class WechatChannelsEngine(ControlledPageEngine):
+    """视频号受控后台引擎（助手发言身份；AutoDanmu send 钩子同 E5 纪律——选择器待 M0 校准）"""
+
+    SEND_INPUT_SELECTORS = ["textarea", "div[contenteditable=true]", "input[placeholder*=说]"]
+    SEND_BUTTON_SELECTORS = ['button:has-text("发送")', 'text=发送']
+
+    def _send_room_url(self, room_id: str) -> str:
+        return BACKEND_URL
+
+    async def _send_navigate(self, page, room_id: str) -> None:
+        """后台型导航：直播图标→直播管理→进入直播间（复用监听侧几何路径助手）"""
+        await self._navigate_to_live_room(room_id, page)
+
     """视频号受控后台引擎（wxlivespy 同构解析 + 登录窗口闭环）"""
 
     platform = "wechat_channels"
