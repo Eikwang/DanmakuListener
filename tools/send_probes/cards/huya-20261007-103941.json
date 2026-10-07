@@ -1,0 +1,42 @@
+{
+  "platform": "huya",
+  "room_url": "https://www.huya.com/691406",
+  "sends_planned": 3,
+  "started": "2026-10-07 10:38:11",
+  "route": "DOM（R22 探针）",
+  "sends": [
+    {
+      "seq": 1,
+      "marker": "主播早上好啊",
+      "verdict": "SUCCESS",
+      "detail": "marker 回显于聊天流"
+    },
+    {
+      "seq": 2,
+      "marker": "吃早饭了吗？",
+      "verdict": "FAIL",
+      "detail": "TimeoutError: Locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator(\"button:has-text(\\\"发送\\\")\").first\n    - locato"
+    },
+    {
+      "seq": 3,
+      "marker": "主播辛苦了",
+      "verdict": "FAIL",
+      "detail": "TimeoutError: Locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator(\"button:has-text(\\\"发送\\\")\").first\n    - locato"
+    }
+  ],
+  "risk_signals": [],
+  "selector_notes": {
+    "input": {
+      "found": "#pub_msg_input",
+      "tried": []
+    },
+    "button": {
+      "found": "button:has-text(\"发送\")",
+      "tried": [
+        ".send-btn(不可见/不存在)"
+      ]
+    }
+  },
+  "verdicts_summary": "FAIL=2, SUCCESS=1",
+  "blocked_reason": null
+}

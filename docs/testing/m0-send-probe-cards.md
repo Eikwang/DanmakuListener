@@ -18,7 +18,7 @@
 | douyin | DOM | ✅ **实发 SUCCESS×3**（2026-10-07 实测，指定文案） | 中高（终判：可行但需有头窗口） | cards/douyin-20261007-100544.json | cookie 文件注入被拒（bd_ticket_guard 指纹绑定）→ profile 登录闭环（douyin_login 扫码一次）+**有头窗口**（headless 聊天面板不出现）；contenteditable+\[class\*=send\] 命中；管线 sender 已接（DouyinProfileSender） |
 | kuaishou | DOM | ✅ **实发 SUCCESS×3**（2026-10-07 实测，指定文案） | 高（终判） | cards/kuaishou-20261007-095159.json | storage_state 注入 17 cookie；textarea+text=发送 命中；无风控信号（R22 判断验证：DOM 路线直达） |
 | douyu | DOM(+R19) | ✅ **实发 SUCCESS×3**（2026-10-07 实测，指定文案） | 高（终判） | cards/douyu-20261007-094617.json | cookie 注入 24 条（acf_* 会话充分，R19 断言验证）；.ChatSend-input 已不可见（UI 变更）→通用 input[placeholder] 命中；.ChatSend-button 正常；无风控信号 |
-| huya | DOM | ⚠️ R19 缺字段 | 前置未满足 | — | 先跑登录窗口补齐（login_gate 语义）再探针 |
+| huya | DOM | ✅ **实发 SUCCESS×3**（2026-10-07 实测，指定文案） | 高（终判，附冷却约束） | cards/huya-20261007-103941.json + 补发卡片 | profile 浏览器会话直接可用（R19 JSON 缺字段仅限协议路线，DOM 路线不受限）；**普通账号发送冷却 ~30s**——首条后按钮被冷却态替换致点击超时，--min-interval 35 补发全过；管线 send_min_interval=30s 恰好覆盖 |
 
 ## R19 cookie 字段审计结论（离线，2026-10-06）
 

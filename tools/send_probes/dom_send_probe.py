@@ -207,8 +207,13 @@ def main() -> None:
     ap.add_argument("--sends", type=int, default=3, help="连续发送次数（默认 3，R17）")
     ap.add_argument("--messages", default=None,
                     help="自定义内容列表（分号分隔），如 --messages '甲；乙；丙'——提供时覆盖自动 marker")
+    ap.add_argument("--min-interval", type=float, default=None,
+                    help="发送间隔下限（秒）——覆盖默认 10s（虎牙等平台冷却更长）")
     ap.add_argument("--headed", action="store_true", help="可见窗口（默认 attended 可见）")
     args = ap.parse_args()
+    if args.min_interval:
+        import common as _c
+        _c.MIN_INTERVAL = args.min_interval
     args.custom_messages = [m.strip() for m in args.messages.split("；") if m.strip()] if args.messages else None
     if args.custom_messages:
         args.sends = len(args.custom_messages)
