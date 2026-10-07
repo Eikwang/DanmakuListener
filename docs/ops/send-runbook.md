@@ -48,6 +48,20 @@
 - **自发声回环**：发送成功的弹幕会回到监听流——AUTOlive 必须按
   DANMU_SEND_RESULT 的 sent_at+content 在对账窗口去重自己的发声（F8/R39）
 
+## 控制台房间行内发送（v11，2026-10-08）——手动 QA 清单
+
+房间列表每行第二行为行内发送表单（输入框+发送按钮+行内反馈行），
+token 复用 localStorage `send_token`（首次发送 prompt 一次）。验收清单：
+
+1. **dry-run 模式**（send_dry_run=true）：房间行输入→发送→「○ dry-run 已记录（未实发）」（非成功语义）
+2. **实发**（B 站）：发送→「✓ 已发送 HH:MM」+ 弹幕流回环可见（F8 链路）
+3. **禁用三态**：停止房间→按钮禁用（title=房间未在监听中）；空输入→禁用；发送中→禁用+「发送中…」
+4. **错误 token**：401→清除 localStorage `send_token` 并提示重试
+5. **限速**：连发两条→第二条「✗ 限速冷却中（RATE_LIMITED）」（title 悬浮 fix_hint）
+6. **停服**：服务停止后发送→「✗ 网络错误（无法连接服务）」
+7. **键盘**：Enter 提交；Escape 清空输入框；成功后焦点回位（连续发送）
+8. **可达性**：结果三态色（绿 ✓/蓝 ○/红 ✗）在行底 #1e293b 上对比度 ≥4.5:1；Tab 序=自然 DOM 顺序
+
 ## 平台专项
 
 - **B站**：cookie 需 SESSDATA+bili_jct；登录失效回执 PLATFORM_REJECTED(code=-101)→重登

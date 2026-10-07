@@ -122,3 +122,17 @@
 - **Context**: R24 否决记录（前置计划）+ ADR-002 替代方案节；2026-10-07 检索确认官方 taobao.live.comments.publish 等存在但需资质。评估产出=立项/不立项决议（记录于 ADR 或新 ADR）。
 - **Effort**: human S（30min 评估）/ CC XS | **Depends on**: 无
 - 来源: /autoplan CEO 声部 F11（2026-10-07，defer 决策）
+
+## P3: 发送成功弹幕在弹幕区高亮（webui）
+- **What**: 房间行发送成功的弹幕在弹幕流中高亮数秒；需跨平台内容归一化匹配（平台侧可能改写内容）。
+- **Why**: CEO 评审扩展候选#3（2026-10-07 defer）——行内结果反馈已覆盖核心确认需求，弹幕区匹配脆弱且非必要。
+- **Effort**: human S / CC M | **Depends on**: 本计划 T3 落地
+- 来源: /autoplan CEO review 扩展裁定（2026-10-07，defer 决策）
+
+## P3: DESIGN.md 提取（前端设计系统文档化）
+- **What**: 从 style.css v7 锚点（slate 暗阶/blue-600 主色/8px 网格/字号层级/AUTOlive design_tokens 对齐）提取 DESIGN.md。
+- **Why**: 设计评审 P5（2026-10-07）——事实设计系统存在且用户裁定过，但无文档承载；新前端工作时锚点靠读源码。
+- **Pros**: 令牌词汇统一；新组件对齐有据；/design-consultation 后续工作有底。
+- **Cons**: 文档维护成本（令牌变更需同步）。
+- **Effort**: human S / CC S | **Depends on**: 无
+- 来源: /autoplan 设计评审 P5（2026-10-07，defer 决策）
