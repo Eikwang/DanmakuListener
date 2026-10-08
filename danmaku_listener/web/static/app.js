@@ -40,6 +40,25 @@ const STATUS_NAMES = {
   login_failed: "登录失败", error: "异常",
 };
 
+// 管线拒绝码中文映射（contract/models.py 词表；映射表未覆盖的码直接展示原码——spec 评审）
+const SEND_REASON_NAMES = {
+  AUTH_UNCONFIGURED: "鉴权未配置",
+  SENDER_DISABLED: "平台未启用",
+  CIRCUIT_OPEN: "熔断开启",
+  ROOM_NOT_LISTENED: "房间未在监听",
+  RATE_LIMITED: "限速冷却中",
+  RATE_COOLDOWN: "冷却等待",
+  DUPLICATE: "重复内容",
+  TOO_LONG: "内容超长",
+  KEYWORD_BLOCKED: "命中关键词拦截",
+  PLATFORM_REJECTED: "平台拒绝",
+  SEND_TIMEOUT: "发送超时",
+  AUDIT_UNAVAILABLE: "审计不可用",
+  ROUTE_UNVERIFIED: "路线未验证",
+  SENDER_UNAVAILABLE: "发送器不可用",
+  IDEMPOTENT_REPLAY: "幂等重放（回执上次结果）",
+};
+
 // 直播间链接识别（与后端 platform_parser.LINK_PATTERNS 对齐；仅做平台预选，
 // 后端为解析权威；未收录平台链接由用户手动选平台后直接粘贴）
 const LINK_PATTERNS = [
@@ -85,6 +104,7 @@ class DanmakuApp {
     this.currentEngine = "—";
     this.typeFilter = new Set(); // 空集合=全部显示
     this._lastStatsSig = {};     // 房间统计同值去重（在线统一口径，2026-10-05）
+    this.sendMaxLength = 0;      // D-G：/api/config send_max_length（0=未读取不设 maxlength）
 
     this.init();
   }
@@ -476,8 +496,6 @@ class DanmakuApp {
     document.getElementById("keyword-toggle")?.addEventListener("change", (e) => {
       this.api("/api/keywords/toggle", "PUT", { enabled: e.target.checked }).then(() => this.loadKeywords());
     });
-    document.getElementById("send-test-btn")?.addEventListener("click", () => this.sendTestDanmu());
-    });
   }
 
   async api(path, method = "GET", body = null) {
@@ -537,6 +555,9 @@ class DanmakuApp {
         const input = document.getElementById(`cfg-${key}`);
         if (input) input.value = value;
       }
+      // D-G：内容长度上限（读不到/非法不设，由守卫 TOO_LONG 回执兜底）
+      const maxLen = Number((data.config || {}).send_max_length);
+      this.sendMaxLength = Number.isFinite(maxLen) && maxLen > 0 ? maxLen : 0;
       const src = document.getElementById("data-source");
       if (src && data.source === "config.local.toml") src.textContent = "配置: config.local.toml";
     } catch (e) { /* config 可选 */ }
@@ -612,7 +633,51 @@ class DanmakuApp {
       };
       actions.append(toggle, del);
 
-      li.append(name, actions);
+      // 两行布局（CEO 计划 D-A）：上行=身份/状态/操作，下行=行内发送表单
+      const mainRow = document.createElement("div");
+      mainRow.className = "room-main-row";
+      mainRow.append(name, actions);
+
+      const sendRow = document.createElement("div");
+      sendRow.className = "room-send-row";
+      const sendInput = document.createElement("input");
+      sendInput.type = "text";
+      sendInput.placeholder = "发送弹幕到该房间";
+      sendInput.setAttribute("aria-label", `发送弹幕到 ${pname}:${r.room_id}`);
+      if (this.sendMaxLength > 0) sendInput.maxLength = this.sendMaxLength; // D-G
+      const sendBtn = document.createElement("button");
+      sendBtn.textContent = "发送";
+      sendBtn.className = "room-send-btn";
+      sendBtn.setAttribute("aria-label", `发送弹幕到 ${pname}:${r.room_id}`);
+      const sendResult = document.createElement("div");
+      sendResult.className = "room-send-result";
+      sendResult.setAttribute("role", "status");
+      sendResult.setAttribute("aria-live", "polite");
+
+      // D-B 按钮禁用三态：非 running（baseDisabled）/ 空输入 / 发送中（sendFromRoom 置位）
+      sendBtn.dataset.baseDisabled = String(r.status !== "running");
+      if (sendBtn.dataset.baseDisabled === "true") {
+        sendBtn.disabled = true;
+        sendBtn.title = "房间未在监听中";
+      }
+      sendInput.addEventListener("input", () => {
+        sendBtn.disabled = sendBtn.dataset.baseDisabled === "true" || sendInput.value.trim() === "";
+      });
+      sendInput.addEventListener("keydown", (e) => {
+        if (e.isComposing) return; // IME 组合输入中 Enter=确认候选词（评审 P1：中文输入误触发发送）
+        if (e.key === "Enter" && !sendBtn.disabled) {
+          this.sendFromRoom(r.platform, r.room_id, sendInput, sendBtn, sendResult);
+        } else if (e.key === "Escape") {
+          sendInput.value = ""; // Escape 清空（设计评审 P6）
+          // 编程赋值不触发 input 事件——同步按钮态（评审 P2-1）
+          sendBtn.disabled = sendBtn.dataset.baseDisabled === "true";
+        }
+      });
+      sendBtn.addEventListener("click", () =>
+        this.sendFromRoom(r.platform, r.room_id, sendInput, sendBtn, sendResult));
+
+      sendRow.append(sendInput, sendBtn);
+      li.append(mainRow, sendRow, sendResult);
       list.appendChild(li);
     }
     document.getElementById("stop-all-btn").disabled = rooms.length === 0;
@@ -640,9 +705,10 @@ class DanmakuApp {
   }
 
   async loadInitialState() {
+    // 先 config 后 rooms：send_max_length 就位后首渲染即有 maxlength（D-G）
+    await this.loadConfig();
     await this.loadRooms();
     await this.loadKeywords();
-    await this.loadConfig();
     try {
       const status = await this.api("/api/status");
       if (status.message_count != null) {
@@ -665,44 +731,115 @@ class DanmakuApp {
       + " · " + (send.dry_run ? "dry-run 开（只记录不实发）" : "实发模式");
   }
 
-  async sendTestDanmu() {
-    // 魔法时刻（DX 0D）：控制台 dry-run 发送测试——10 秒内见回执
-    const line = document.getElementById("send-result-line");
-    const platform = document.getElementById("send-platform-input")?.value.trim();
-    const room_id = document.getElementById("send-room-input")?.value.trim();
-    const content = document.getElementById("send-content-input")?.value.trim();
-    if (!platform || !room_id || !content) {
-      line.textContent = "发送：平台/房间号/内容均必填";
+  // 公共 token 流（D-D：抽取自 sendTestDanmu 既有语义；prompt 取消/空 → null 不发请求）
+  getSendToken() {
+    let token = localStorage.getItem("send_token");
+    if (token) return token;
+    token = window.prompt("输入发送 token（persistence_data/send_token.txt 内容）:") || "";
+    if (!token.trim()) return null;
+    localStorage.setItem("send_token", token.trim());
+    return token.trim();
+  }
+
+  // 行内结果反馈（D-C）：一律 textContent（XSS 卫生，评审 S5）；三态语义色
+  setRoomSendResult(resultEl, text, kind, title = "") {
+    if (!resultEl.isConnected) {
+      // 列表重绘后行节点已游离（对抗评审 F1）：降级写入发送状态行，回执不静默丢失
+      const line = document.getElementById("send-status-line");
+      if (line) line.textContent = "发送：最近一次回执 → " + text;
       return;
     }
-    line.textContent = "发送：处理中…";
-    let sendToken = localStorage.getItem("send_token");
-    if (!sendToken) {
-      sendToken = window.prompt("输入发送 token（persistence_data/send_token.txt 内容）:") || "";
-      if (!sendToken.trim()) { line.textContent = "发送：已取消（需要 token）"; return; }
-      localStorage.setItem("send_token", sendToken.trim());
+    resultEl.textContent = text;
+    resultEl.className = "room-send-result" + (kind ? " " + kind : "");
+    resultEl.title = title;
+  }
+
+  // 房间行内发送（T3）：AbortController 60s（D-E）+ request_id 随机后缀（spec 1.3b）
+  // + 全分支反馈（D-C）+ 完成仅更新状态行不重绘列表（spec 2.2）+ 焦点回位（连续发送）
+  async sendFromRoom(platform, roomId, inputEl, btnEl, resultEl) {
+    const content = inputEl.value.trim();
+    if (!content || btnEl.disabled) return;
+    const token = this.getSendToken();
+    if (!token) {
+      this.setRoomSendResult(resultEl, "✗ 未提供 token，未发送", "error");
+      return;
     }
+    const prevLabel = btnEl.textContent;
+    btnEl.disabled = true;
+    btnEl.textContent = "发送中…";
+    inputEl.disabled = true;
+    const restore = () => {
+      btnEl.disabled = btnEl.dataset.baseDisabled === "true" || inputEl.value.trim() === "";
+      btnEl.textContent = prevLabel;
+      inputEl.disabled = false;
+    };
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 60000);
     try {
       const resp = await fetch("/api/send-danmu", {
         method: "POST",
-        headers: { "Content-Type": "application/json",
-                   "Authorization": "Bearer " + localStorage.getItem("send_token") },
-        body: JSON.stringify({ platform, room_id, content, request_id: "ui-" + Date.now() }),
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+        body: JSON.stringify({
+          platform, room_id: roomId, content,
+          request_id: "ui-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8),
+        }),
+        signal: controller.signal,
       });
       if (resp.status === 401) {
         localStorage.removeItem("send_token");
-        line.textContent = "发送：token 无效——已清除，请重试";
+        this.setRoomSendResult(resultEl, "✗ token 无效——已清除，请重试", "error");
         return;
       }
-      const respData = await resp.json();
-      const r = respData.result || {};
-      const p = r.payload || {};
-      const suffix = p.reason_code ? "（" + p.reason_code + "）" : "";
-      line.textContent = "发送：" + (p.status || "?") + suffix;
-      const status = await this.api("/api/status");
-      this.renderSendStatus(status.send);
+      let p = {};
+      let errBody = null;
+      try {
+        const respData = await resp.json();
+        p = (respData.result || {}).payload || {};
+        if (!resp.ok) errBody = respData; // 503/400 直返 {error, fix_hint}（非包裹路径，评审 P2-2）
+      } catch (e) {
+        if (e.name === "AbortError" || controller.signal.aborted) {
+          this.setRoomSendResult(resultEl, "✗ 发送超时（超过 60s）", "error"); // 评审 P2-3
+          return;
+        }
+        this.setRoomSendResult(resultEl, `✗ 服务错误（HTTP ${resp.status}）`, "error");
+        return;
+      }
+      if (!resp.ok) {
+        const name = SEND_REASON_NAMES[errBody?.error] || errBody?.error || "服务错误";
+        this.setRoomSendResult(resultEl, `✗ ${name}（HTTP ${resp.status}）`, "error",
+          [errBody?.error, errBody?.fix_hint].filter(Boolean).join(" · "));
+        return;
+      }
+      if (p.status === "sent") {
+        const ts = typeof p.sent_at === "number" ? p.sent_at * 1000
+          : (p.sent_at ? Date.parse(p.sent_at) : Date.now());
+        const d = Number.isFinite(ts) ? new Date(ts) : new Date();
+        const hhmm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+        this.setRoomSendResult(resultEl, `✓ 已发送 ${hhmm}`, "success");
+        inputEl.value = "";
+        inputEl.focus(); // 发送成功后焦点回位（连续发送）
+      } else if (p.status === "dry_run") {
+        this.setRoomSendResult(resultEl, "○ dry-run 已记录（未实发）", "dryrun");
+      } else {
+        const name = SEND_REASON_NAMES[p.reason_code] || p.reason_code || "未知错误";
+        const code = SEND_REASON_NAMES[p.reason_code] ? `（${p.reason_code}）` : "";
+        const title = [p.reason_code, p.fix_hint, p.docs_anchor].filter(Boolean).join(" · ");
+        this.setRoomSendResult(resultEl, `✗ ${name}${code}`, "error", title);
+      }
     } catch (e) {
-      line.textContent = "发送：失败（" + (e.message || e) + "）";
+      if (e.name === "AbortError") {
+        this.setRoomSendResult(resultEl, "✗ 发送超时（超过 60s）", "error");
+      } else {
+        this.setRoomSendResult(resultEl, "✗ 网络错误（无法连接服务）", "error");
+      }
+    } finally {
+      clearTimeout(timer);
+      restore();
+      // 完成后仅更新发送状态行，不重绘房间列表（spec 评审 2.2——保护行内结果）
+      try {
+        const status = await this.api("/api/status");
+        this.renderSendStatus(status.send);
+      } catch (e) { /* status 可选 */ }
     }
   }
 }

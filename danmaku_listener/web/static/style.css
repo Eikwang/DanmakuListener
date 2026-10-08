@@ -420,8 +420,7 @@ section h2 {
 
 .room-item {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
+    flex-direction: column;
     gap: 6px;
     padding: 7px 8px;
     margin-bottom: 6px;
@@ -430,6 +429,68 @@ section h2 {
     border-radius: 6px;
     font-size: 13px;
 }
+
+/* 两行布局上行（v11 CEO 计划 T2）：身份/状态/操作（原 .room-item 行样式平移） */
+.room-item .room-main-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 6px;
+}
+
+/* 两行布局下行：行内发送表单（v11 T2/T4） */
+.room-send-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+.room-send-row input {
+    flex: 1;
+    min-width: 0;
+    padding: 3px 8px;
+    font-size: 12px;
+    background-color: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-primary);
+}
+
+.room-send-row input:hover { border-color: var(--border-strong); }
+
+.room-send-btn {
+    flex-shrink: 0;
+    padding: 3px 10px;
+    font-size: 11px;
+    border-radius: 4px;
+    background: var(--accent);
+    color: #fff;
+}
+
+.room-send-btn:hover:not(:disabled) { background: var(--accent-hover); }
+.room-send-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* 可达性（设计评审 P5/P6）：焦点环 2px accent；结果行语义色 + 溢出省略 */
+.room-send-row input:focus-visible,
+.room-send-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
+.room-send-result {
+    font-size: 11px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-height: 1em;
+}
+
+/* 11px 小字在 #1e293b 上需 ≥4.5:1——用 400 阶亮色变体（对抗评审 F2；与
+   .status-badge.running/.error 用色同源），语义 hue 与 --success/--info/--danger 一致 */
+.room-send-result.success { color: #4ade80; }
+.room-send-result.dryrun { color: #38bdf8; }
+.room-send-result.error { color: #f87171; }
 
 .room-item .room-name {
     display: flex;

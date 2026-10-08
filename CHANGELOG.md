@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.6.1 (2026-10-08)
+
+webui 房间行内弹幕发送（/autoplan 降级管线四阶段评审批准，13 项裁定）——房间行两行布局 + 行内发送表单，消费既有 `POST /api/send-danmu`，零后端改动。版本号经用户裁定取 PATCH。
+
+### 修复
+- **app.js:480 多余 `});` 语法错误（P0）**：`91d45c5` 引入，main 前端 JS 整体失效（房间列表/弹幕流/统计全不渲染）；修复 + node --check 冒烟单测防回归
+
+### 新增
+- **房间行内发送表单（T2/T3）**：每房间行第二行=输入框（maxlength 读自 /api/config send_max_length）+发送按钮+行内结果反馈行；按钮禁用三态（非 running/空输入/发送中）；Enter 提交+焦点回位+Escape 清空；IME 组合输入 Enter 不误触发（isComposing 守卫）
+- **发送交互全分支反馈（D-C）**：✓ 已发送 HH:MM（含弹幕流回环）/ ○ dry-run 已记录 / ✗ 拒绝码中文映射（15 码+原码兜底，fix_hint+docs_anchor 入 title）/ 超时/网络/服务错误三失败分支；request_id 随机后缀防同毫秒幂等键相撞；AbortController 60s
+- **getSendToken() 抽取**：token 流公共化（localStorage send_token+prompt），401 清 token 语义单点化；prompt 取消→行内提示不发请求
+- **列表重绘回执降级**：在途发送遇列表重绘时回执降级写入发送状态行（对抗评审 F1），不静默丢失
+- **结果三态色**：11px 小字用 400 阶亮色变体（#4ade80/#38bdf8/#f87171，对抗评审 F2 对比度 ≥4.5:1），与 status-badge 用色同源
+
+### 变更
+- 右栏"弹幕发送"测试表单删除（D-H 裁定：与房间行功能冗余；AUTH 反馈经运行中房间行可达），状态行保留；`?v=11` 缓存破坏
+- style.css：.room-item 两行布局（.room-main-row/.room-send-row），focus-visible 焦点环，结果行 aria-live
+- send-runbook.md：新增房间行内发送手动 QA 清单（8 项）
+- 测试基线 631→634（前端资产回归 3 项）
+
 ## v0.6.0 (2026-10-07)
 
 弹幕发送修复计划（/autoplan 全管线 82 项裁定）——淘宝 mtop 新路线 + 抖音常驻会话 + 三平台接线，10 平台 sender 全接线交付。

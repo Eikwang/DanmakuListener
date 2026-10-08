@@ -1,9 +1,12 @@
 """Task-01: 项目脚手架 测试
 
 验证 web/ 目录结构、aiohttp 服务启动、静态文件路由、blocked_keywords.json 存在。
+v11（2026-10-08）扩展：前端资产回归——node --check 语法冒烟 + 房间行内发送功能断言。
 """
 
 import json
+import shutil
+import subprocess
 import pytest
 from pathlib import Path
 
@@ -116,3 +119,33 @@ class TestWebAppModuleEntry:
         """web.app 模块有 main 函数"""
         from danmaku_listener.web.app import main
         assert callable(main)
+
+
+class TestWebFrontendAssets:
+    """前端资产回归（v11 房间行内发送——CEO 计划 T5：冒烟 + 字符串断言）"""
+
+    def test_app_js_syntax(self):
+        """node --check app.js 语法冒烟（91d45c5 先例：语法错误=整站前端失效；node 缺失时跳过）"""
+        node = shutil.which("node")
+        if node is None:
+            pytest.skip("node not available")
+        result = subprocess.run(
+            [node, "--check", str(WEB_DIR / "static" / "app.js")],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0, f"app.js syntax error:\n{result.stderr}"
+
+    def test_app_js_has_room_send_functions(self):
+        """app.js 含房间行发送核心函数（防未来重构静默删功能）"""
+        js = (WEB_DIR / "static" / "app.js").read_text(encoding="utf-8")
+        for needle in ("sendFromRoom", "getSendToken", "room-send-row",
+                       "room-send-result", "SEND_REASON_NAMES"):
+            assert needle in js, f"app.js missing {needle}"
+
+    def test_index_html_send_section_slimmed(self):
+        """index.html：v11 缓存版本 + 状态行保留 + 旧测试表单已删（D-H）"""
+        html = (WEB_DIR / "static" / "index.html").read_text(encoding="utf-8")
+        assert "app.js?v=11" in html, "index.html script cache version not bumped to v11"
+        assert "send-status-line" in html, "send status line must be kept (T7)"
+        assert "send-test-btn" not in html, "old send test form should be removed (D-H)"
+        assert "send-content-input" not in html, "old send test form should be removed (D-H)"
