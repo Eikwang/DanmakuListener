@@ -33,7 +33,8 @@ from danmaku_listener.senders.resident_session import (
 )
 
 PROFILE_DIR = "cookie/douyin_profile"
-INPUT_SEL = "div[contenteditable=true]"
+INPUT_SEL = "#chatInput"  # 2026-10-08 验收用户实测定位（id 稳定；输入框在播放器浮层内）
+INPUT_SEL_FALLBACK = "div[contenteditable=true]"  # 旧页面形态兜底
 BUTTON_SEL = "[class*=send]"
 LOGIN_SIGNAL = "需先登录"
 ECHO_WAIT_S = 15.0
@@ -91,11 +92,15 @@ class DouyinProfileSender(BaseSender):
             inp = page.locator(INPUT_SEL).first
             try:
                 await inp.click(timeout=10_000)
-            except Exception as e:  # noqa: BLE001
-                return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
-                                  detail=f"输入框不可达: {type(e).__name__}",
-                                  fix_hint="聊天面板未出现——登录态失效重扫码，或页面结构变更重跑 T1 探针",
-                                  docs_anchor="docs/ops/send-runbook.md")
+            except Exception:  # noqa: BLE001  主定位器未命中 → 旧形态兜底
+                try:
+                    inp = page.locator(INPUT_SEL_FALLBACK).first
+                    await inp.click(timeout=10_000)
+                except Exception as e:  # noqa: BLE001
+                    return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
+                                      detail=f"输入框不可达: {type(e).__name__}",
+                                      fix_hint="聊天面板未出现——登录态失效重扫码，或页面结构变更重跑 T1 探针",
+                                      docs_anchor="docs/ops/send-runbook.md")
             await asyncio.sleep(0.5)
             # 1688 实证配方：逐键输入进 React state（fill 的 DOM 值不进框架 state 风险）
             await inp.press_sequentially(content, delay=45)
