@@ -251,7 +251,7 @@ async def test_login_wait_visible_success_and_stop_paths():
     assert outcome == "window_closed"
 
 
-async def _fast_sleep(box):
+def _fast_sleep(box):
     async def _sleep(sec):
         box["now"] += sec
     return _sleep
@@ -329,3 +329,141 @@ def test_rebuild_failures_counter():
 def test_relogin_mode_default_pending():
     """spike 未定型默认 None（重登检测禁用不弹窗）"""
     assert tb.RELOGIN_MODE is None
+
+
+# ---- 登录后保窗宽限（2026-10-08 验收实证：登录成功即关窗杀掉安全滑块）----
+
+class _FakeClock:
+    def __init__(self, step=2.0):
+        self.t = 0.0
+        self.step = step
+
+    def __call__(self):
+        return self.t
+
+
+class _FakeLoginPage:
+    async def goto(self, url, timeout=None):
+        return None
+
+
+class _FakeLoginContext:
+    def __init__(self):
+        self.pages = [_FakeLoginPage()]
+        self.close_called = False
+
+    async def close(self):
+        self.close_called = True
+
+
+def _install_login_pw(monkeypatch, context):
+    import playwright.async_api as apimod
+
+    class _Chromium:
+        @staticmethod
+        async def launch_persistent_context(*a, **k):
+            return context
+
+    class _PW:
+        chromium = _Chromium()
+
+    class _AP:
+        async def __aenter__(self):
+            return _PW()
+
+        async def __aexit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(apimod, "async_playwright", lambda: _AP())
+
+
+def _make_engine():
+    from danmaku_listener.engines.protocol.taobao import TaobaoWebProtocolEngine
+    return TaobaoWebProtocolEngine()
+
+
+def _unb_cookie():
+    return [{"name": "unb", "value": "test-unb"}]
+
+
+@pytest.mark.asyncio
+async def test_login_grace_holds_window_30s_after_login(monkeypatch):
+    """登录 cookie 落地后保窗 LOGIN_POST_GRACE_S（供滑块验证）——不再立即关窗
+    Value: protects=登录后 30s 滑块宽限（profile 拿到通过状态）; fails_when=回归为命中即 return 关窗;
+    why_new=验收实证登录即关窗杀滑块→发送被 x5sec 拦，此路径此前零测试; seam=Eng F6 clock/sleep_fn/cookies_fn"""
+    from danmaku_listener.engines.protocol.taobao import LOGIN_POST_GRACE_S
+    engine = _make_engine()
+    context = _FakeLoginContext()
+    _install_login_pw(monkeypatch, context)
+    clock = _FakeClock(step=2.0)
+    calls = {"n": 0}
+
+    async def cookies_fn():
+        calls["n"] += 1
+        clock.t += 2.0  # 每次 cookie 轮询推进假时钟
+        return [] if calls["n"] == 1 else _unb_cookie()  # 第 2 次登录落地
+
+    sleeps = []
+
+    async def sleep_fn(s):
+        sleeps.append(s)
+
+    result = await engine._wait_login_visible(
+        "r1", "https://tbzb.taobao.com/live?liveId=1",
+        clock=clock, sleep_fn=sleep_fn, cookies_fn=cookies_fn)
+    assert result == "logged_in"
+    # 登录落地后假时钟须继续推进 ≥30s（旧实现命中即 return，推进 <4s）
+    assert clock.t >= LOGIN_POST_GRACE_S, f"保窗未生效：时钟仅推进 {clock.t}s"
+
+
+@pytest.mark.asyncio
+async def test_login_grace_user_close_still_logged_in(monkeypatch):
+    """宽限期内用户手动关窗 → 仍返回 logged_in（登录态已入 profile，不得重新弹窗）"""
+    engine = _make_engine()
+    context = _FakeLoginContext()
+    _install_login_pw(monkeypatch, context)
+    clock = _FakeClock(step=2.0)
+    calls = {"n": 0}
+
+    async def cookies_fn():
+        calls["n"] += 1
+        clock.t += 2.0
+        if calls["n"] == 1:
+            return []
+        if calls["n"] == 3:
+            raise RuntimeError("Target closed")  # 宽限期内用户关窗
+        return _unb_cookie()
+
+    async def sleep_fn(s):
+        pass
+
+    result = await engine._wait_login_visible(
+        "r1", "https://tbzb.taobao.com/live?liveId=1",
+        clock=clock, sleep_fn=sleep_fn, cookies_fn=cookies_fn)
+    assert result == "logged_in"
+    assert context.close_called
+
+
+@pytest.mark.asyncio
+async def test_login_grace_stop_flag_interrupts(monkeypatch):
+    """宽限期内停止房间 → 立即 stopped（Eng F3）"""
+    engine = _make_engine()
+    context = _FakeLoginContext()
+    _install_login_pw(monkeypatch, context)
+    clock = _FakeClock(step=2.0)
+    calls = {"n": 0}
+
+    async def cookies_fn():
+        calls["n"] += 1
+        clock.t += 2.0
+        if calls["n"] == 2:
+            engine._stop_flags["r1"] = True  # 登录落地瞬间停止房间
+        return [] if calls["n"] == 1 else _unb_cookie()
+
+    async def sleep_fn(s):
+        pass
+
+    result = await engine._wait_login_visible(
+        "r1", "https://tbzb.taobao.com/live?liveId=1",
+        clock=clock, sleep_fn=sleep_fn, cookies_fn=cookies_fn)
+    assert result == "stopped"
