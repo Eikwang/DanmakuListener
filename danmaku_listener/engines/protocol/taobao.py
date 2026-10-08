@@ -67,6 +67,10 @@ LOGIN_WAIT_TIMEOUT = 300.0
 LOGIN_BUDGET = 2
 #: 登录窗口 cookie 轮询间隔
 LOGIN_POLL_INTERVAL = 2.0
+#: 登录成功后保窗宽限（2026-10-08 验收实证：登录 cookie 落地后淘宝常弹安全滑块，
+#: 立即关窗会杀掉验证——profile 拿不到通过状态，后续瞬态发送页被 x5sec 拦。
+#: 保窗 30s 供人工完成滑块；用户可手动关窗提前结束）
+LOGIN_POST_GRACE_S = 30.0
 
 
 def _has_login_cookie(cookies) -> bool:
@@ -585,6 +589,24 @@ class TaobaoWebProtocolEngine(BaseEngine):
                             logger.info(
                                 f"[taobao] room {room_id} login ok: new_cookies={new_names} "
                                 f"unb_changed=True unb_mask={_mask_cookie((unb or {}).get('value', ''))}")
+                            # 登录后保窗宽限（2026-10-08 验收用户实证：登录成功即关窗
+                            # 会杀掉紧随的安全滑块——profile 缺滑块通过状态，后续
+                            # 发送被 x5sec 拦）。保窗 LOGIN_POST_GRACE_S 供人工完成；
+                            # 用户手动关窗立即提前结束（登录态已入 profile，仍算成功）
+                            grace_deadline = clock() + LOGIN_POST_GRACE_S
+                            while clock() < grace_deadline:
+                                if self._stop_flags.get(room_id):  # Eng F3
+                                    logger.info(f"[taobao] room {room_id} login grace stopped by user")
+                                    return "stopped"
+                                try:
+                                    await _cookies()
+                                except Exception as e:
+                                    logger.info(f"[taobao] room {room_id} post-login window closed "
+                                                f"({type(e).__name__})——滑块宽限提前结束，登录态已入 profile")
+                                    return "logged_in"
+                                await sleep_fn(poll_interval)
+                            logger.info(f"[taobao] room {room_id} login grace ended "
+                                        f"({LOGIN_POST_GRACE_S:.0f}s)——窗口关闭")
                             return "logged_in"
                         await sleep_fn(poll_interval)
                     logger.info(f"[taobao] room {room_id} login wait timeout "
