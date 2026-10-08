@@ -55,6 +55,7 @@ def _base_launch_args(mode: str) -> tuple[dict, list]:
     extra = [
         "--disable-renderer-backgrounding",
         "--disable-background-timer-throttling",
+        "--mute-audio",  # 2026-10-08 验收用户反馈：后台常驻页播直播流有声——纯后台形态静音
     ]
     if mode == MODE_HEADLESS_NEW:
         # 新无头：headless=False + flag（Chromium 解析；完整 Blink 指纹，无桌面要求）
