@@ -31,9 +31,12 @@ class DouyuCookieSender(DomTransientSender):
     platform = "douyu"
     room_url_template = "https://www.douyu.com/{room_id}"
     login_hint = "重新登录：python -m danmaku_listener.engines.send_login douyu [room_id]（DX-D1）"
-    input_selectors = ("input[placeholder*=说]", "input[placeholder*=未拥有]",
+    input_selectors = (".ChatSend-txt",  # 2026-10-08 新前端 live-next：输入面=contenteditable DIV
+                       "input[placeholder*=说]", "input[placeholder*=未拥有]",
                        "input[placeholder*=弹幕]", "#js-player-input",
-                       "input[placeholder]")  # 泛匹配降级最后（防搜索框误选——T6 实测）
+                       "input[placeholder]")  # 泛匹配降级最后（防搜索框误选——T6 实测；
+                                              # 新前端改版后 input 系全失效会命中搜索框——
+                                              # .ChatSend-txt 优先即为此）
     button_selectors = (".ChatSend-button", 'button:has-text("发送")', "text=发送")
     cookie_file = "cookie/douyu_login_cookies.json"
     storage_state_mode = False
