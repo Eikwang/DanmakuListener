@@ -59,6 +59,11 @@ const SEND_REASON_NAMES = {
   IDEMPOTENT_REPLAY: "幂等重放（回执上次结果）",
 };
 
+// 前端发送中止上限（T4 提取，原两处 60000 字面量；CEO-1 预算契约：后端四阶段 ≤55s，留 5s 余量）
+const SEND_TIMEOUT_MS = 60000;
+// 中止后对账宽限（T4/评审 maint#5 提取——与 runbook QA 第 9 项及 tests/js 断言联动）
+const RECONCILE_GRACE_MS = 2000;
+
 // 直播间链接识别（与后端 platform_parser.LINK_PATTERNS 对齐；仅做平台预选，
 // 后端为解析权威；未收录平台链接由用户手动选平台后直接粘贴）
 const LINK_PATTERNS = [
@@ -774,14 +779,15 @@ class DanmakuApp {
       inputEl.disabled = false;
     };
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 60000);
+    const timer = setTimeout(() => controller.abort(), SEND_TIMEOUT_MS);
+    const requestId = "ui-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
     try {
       const resp = await fetch("/api/send-danmu", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
         body: JSON.stringify({
           platform, room_id: roomId, content,
-          request_id: "ui-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8),
+          request_id: requestId,
         }),
         signal: controller.signal,
       });
@@ -798,7 +804,8 @@ class DanmakuApp {
         if (!resp.ok) errBody = respData; // 503/400 直返 {error, fix_hint}（非包裹路径，评审 P2-2）
       } catch (e) {
         if (e.name === "AbortError" || controller.signal.aborted) {
-          this.setRoomSendResult(resultEl, "✗ 发送超时（超过 60s）", "error"); // 评审 P2-3
+          // 中止后对账（T4/CEO-5）：后端可能在中止后才出结果——单次查询兜底回显
+          await this.reconcileAfterAbort(resultEl, inputEl, requestId);
           return;
         }
         this.setRoomSendResult(resultEl, `✗ 服务错误（HTTP ${resp.status}）`, "error");
@@ -820,6 +827,11 @@ class DanmakuApp {
         inputEl.focus(); // 发送成功后焦点回位（连续发送）
       } else if (p.status === "dry_run") {
         this.setRoomSendResult(resultEl, "○ dry-run 已记录（未实发）", "dryrun");
+      } else if (p.status === "unknown") {
+        // ？第三态（评审 ASK-C/redteam#4）：结果未知≠确定失败——弹幕可能已落地，
+        // 盲重会制造平台侧真重复（DUPLICATE 影子源）
+        this.setRoomSendResult(resultEl, "？结果未知（可能已送达）——请对账/回环确认后再重试", "unknown",
+          [p.reason_code, p.fix_hint, "重试前先按 request_id 对账或查看弹幕流回环"].filter(Boolean).join(" · "));
       } else {
         const name = SEND_REASON_NAMES[p.reason_code] || p.reason_code || "未知错误";
         const code = SEND_REASON_NAMES[p.reason_code] ? `（${p.reason_code}）` : "";
@@ -828,7 +840,8 @@ class DanmakuApp {
       }
     } catch (e) {
       if (e.name === "AbortError") {
-        this.setRoomSendResult(resultEl, "✗ 发送超时（超过 60s）", "error");
+        // 中止后对账（T4/CEO-5）：同上——fetch 层中止的单次兜底查询
+        await this.reconcileAfterAbort(resultEl, inputEl, requestId);
       } else {
         this.setRoomSendResult(resultEl, "✗ 网络错误（无法连接服务）", "error");
       }
@@ -840,6 +853,51 @@ class DanmakuApp {
         const status = await this.api("/api/status");
         this.renderSendStatus(status.send);
       } catch (e) { /* status 可选 */ }
+    }
+  }
+
+  // 中止后对账（T4/CEO-5）：后端可能在中止后才出结果（慢页/网络抖动）——
+  // 宽限 2s 后按 request_id 单次查询 /api/send-results，把真实结果回显到行内；
+  // 查不到则回落「发送超时 · 结果待对账」（后端 T2 围栏保证结果终会落审计）
+  async reconcileAfterAbort(resultEl, inputEl, requestId) {
+    await new Promise((resolve) => setTimeout(resolve, RECONCILE_GRACE_MS)); // 宽限：给后端收尾窗口
+    const token = localStorage.getItem("send_token");
+    if (!token) {
+      this.setRoomSendResult(resultEl,
+        `✗ 发送超时（超过 ${SEND_TIMEOUT_MS / 1000}s）· 结果待对账`, "error",
+        "结果未即时可得：稍后按 request_id 查询 GET /api/send-results 对账");
+      return;
+    }
+    try {
+      // 对账 GET 也必须有界（对抗评审 F1）：无超时的 fetch 会在服务停滞时把
+      // 房间行锁死在「发送中…」——正是本分支要消灭的挂点形态在前端的复活
+      const resp = await fetch("/api/send-results?request_id=" + encodeURIComponent(requestId),
+        { headers: { "Authorization": "Bearer " + token }, signal: AbortSignal.timeout(5000) });
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      const body = await resp.json();
+      const row = body && body.found ? body.result : null;
+      if (!row) throw new Error("not reconciled yet");
+      if (row.status === "sent") {
+        const ts = typeof row.sent_at === "number" ? row.sent_at * 1000 : Date.now();
+        const d = new Date(Number.isFinite(ts) ? ts : Date.now());
+        const hhmm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+        this.setRoomSendResult(resultEl, `✓ 已发送 ${hhmm}（对账回显）`, "success");
+        if (inputEl) { inputEl.value = ""; inputEl.focus(); }
+      } else if (row.status === "dry_run") {
+        this.setRoomSendResult(resultEl, "○ dry-run 已记录（对账回显）", "dryrun");
+      } else if (row.status === "unknown") {
+        // ？第三态（评审 ASK-C）：同直发路径——UNKNOWN 不得渲染为确定失败
+        this.setRoomSendResult(resultEl, "？结果未知（可能已送达，对账回显）——请确认弹幕流后再重试", "unknown",
+          [row.reason_code, row.fix_hint, "发送中止后的对账回显"].filter(Boolean).join(" · "));
+      } else {
+        const name = SEND_REASON_NAMES[row.reason_code] || row.reason_code || "未知错误";
+        this.setRoomSendResult(resultEl, `✗ ${name}（对账回显）`, "error",
+          [row.reason_code, row.fix_hint, "发送中止后的对账回显"].filter(Boolean).join(" · "));
+      }
+    } catch (e) {
+      this.setRoomSendResult(resultEl,
+        `✗ 发送超时（超过 ${SEND_TIMEOUT_MS / 1000}s）· 结果待对账`, "error",
+        "结果未即时可得：稍后按 request_id 查询 GET /api/send-results 对账");
     }
   }
 }
