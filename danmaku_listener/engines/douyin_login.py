@@ -25,6 +25,9 @@ from loguru import logger
 
 DEFAULT_COOKIE_FILE = "cookie/douyin_cookies.json"
 DEFAULT_TIMEOUT = 300.0  # 5 分钟登录窗口
+#: 登录后保窗宽限（2026-10-08 验收用户实证：抖音同款淘宝缺陷——登录落地即关窗
+#: 杀掉安全滑块，会话半授权→发送 PLATFORM_REJECTED。保窗 30s 供人工完成验证）
+LOGIN_POST_GRACE_S = 30.0
 
 #: 判定登录成功的标志 cookie（sessionid 为主站会话身份；ss 为同值安全副本）
 LOGIN_MARKER_COOKIES = {"sessionid", "sessionid_ss"}
@@ -189,6 +192,22 @@ async def run_profile_login_flow(
                 names = {c["name"] for c in cookies if c.get("value")}
                 if LOGIN_MARKER_COOKIES & names:
                     logged_in = True
+                    # 登录后保窗宽限（淘宝同款修复——2026-10-08 验收实证）：
+                    # 保窗 30s 供人工完成登录后安全验证；用户手动关窗立即提前
+                    # 结束（登录态已入 profile，仍算成功）
+                    grace_deadline = time.monotonic() + LOGIN_POST_GRACE_S
+                    while time.monotonic() < grace_deadline:
+                        try:
+                            await context.cookies()
+                        except Exception:
+                            logger.info("[douyin-login] post-login window closed "
+                                        "during grace——验证宽限提前结束")
+                            break
+                        if page.is_closed():
+                            break
+                        await asyncio.sleep(2)
+                    logger.info(f"[douyin-login] login grace ended "
+                                f"({LOGIN_POST_GRACE_S:.0f}s)——窗口关闭")
                     break
                 if page.is_closed():
                     break
