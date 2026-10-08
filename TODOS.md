@@ -136,3 +136,12 @@
 - **Cons**: 文档维护成本（令牌变更需同步）。
 - **Effort**: human S / CC S | **Depends on**: 无
 - 来源: /autoplan 设计评审 P5（2026-10-07，defer 决策）
+
+## P3: 拼多多/美团弹幕发送接线（2026-10-08 范围裁定 defer）
+- **What**: 为拼多多、美团两平台补发送 sender（12 平台产品承诺的发送矩阵缺口 2/12）。拼多多可参考受控页面组（EngineHookSender 引擎钩子）路线探针后接线；美团按协议边界申报先例评估（进场监听已裁定申报，发送同理需先探针判定可行形态）。
+- **Why**: 发送验收战役（2026-10-08）裁定：当前 10 平台已接线且各有 M0/管线实证，pdd/美团无 sender 代码、无实测痛点证据，补线属新功能开发，不进验收战役范围。
+- **Pros**: 补齐产品级 12 平台发送承诺；pdd 与受控页面组同构（低成本探针一次）。
+- **Cons**: 无痛点驱动；探针+sender+回归 ~1-2h CC/平台；美团可能受 H5guard 风控约束（进场先例）。
+- **Context**: 发送矩阵见 docs/testing/m0-send-probe-cards.md（pdd/美团无行）；受控页面组接线模式见 senders/wiring.py EngineHookSender 循环；重启条件=客户对 pdd/美团发声有实际需求，或 AUTOlive 自动发声场景铺开到这两平台。
+- **Effort**: human S / CC M（探针判定+接线+回归）| **Depends on**: 无（E5 模式已验证）
+- 来源: /plan-ceo-review CEO-4 范围裁定（2026-10-08，defer 决策——验收战役交付物 3）

@@ -16,6 +16,17 @@ ret 五路径映射（CEO-F4/DX-D5，已知码样本来自 T1）：
   3. SESSION_EXPIRED/NEED_LOGIN/未登录类 → FAIL NEEDS_LOGIN 语义
   4. FAIL_SYS_PARAM*/ILLEGAL（参数错误）→ FAIL 参数细分
   5. 其它未知 ret → FAIL 保守透传原始 ret 到 detail
+
+T2 修复（2026-10-08 验收战役 CEO-1/3，根因卡 m0-send-probe-cards.md:39）：
+- 全部 await 显式超时：x5sec 风控触发 noCaptcha 时页面 promise 永不 settle（网络层
+  实证 _____tmd_____/report?x5secdata + nocaptcha initialize）——evaluate 裸 await 即
+  永久悬挂。EVAL_TIMEOUT_S 硬超时兜底；JS mtop timeout 12s 先行落地错误路径保留 ret。
+  边界说明（评审 maint#1/redteam#6）：launch_persistent_context/new_page 依赖
+  Playwright 默认 30s 超时，close 无超时参数——此三者的残余挂起面由管线级
+  wait_for(70s) 兜底（pipeline.py），超预算即 UNKNOWN 回执，锁不泄漏。
+- x5sec 信号检测：eval 窗口内网络层捕获风险信号 → FAILED「风控验证待人工」（勿盲目重试）。
+- sender 级 catch（E5 隔离，与 deprecated DOM 钩子/EngineHookSender 同语义）。
+- 阶段预算收敛：goto 20 + topic 12 + lib 8 + eval 15 = 55s（CEO-1：前端 60s 中止内闭环）。
 """
 from __future__ import annotations
 
@@ -35,14 +46,40 @@ from danmaku_listener.senders.base import BaseSender, SendResult
 PUBLISH_API = "mtop.taobao.iliad.comment.publish"
 PUBLISH_VERSION = "1.0"
 PUBLISH_APPKEY = "34675810"
-LOCK_TIMEOUT_S = 3.0          # S4-1：监听重登长动作不饿死发送
-PAGE_TIMEOUT_MS = 30_000      # ENG-1 同款纪律：单次操作显式超时
-MTOP_LIB_WAIT_S = 20.0        # 页面 mtop 库就绪预算
-TOPIC_WAIT_S = 20.0           # 页面请求锚定 topic 预算
+LOCK_TIMEOUT_S = 3.0          # S4-1：监听重登长动作不饿死发送（锁等待，不计入四阶段预算）
+PAGE_TIMEOUT_MS = 20_000      # goto 预算（T2 收敛 30→20s——CEO-1：四阶段合计≤55s）
+TOPIC_WAIT_S = 12.0           # 页面请求锚定 topic 预算（T2 收敛 20→12s）
+MTOP_LIB_WAIT_S = 8.0         # 页面 mtop 库就绪预算（T2 收敛 20→8s）
+EVAL_TIMEOUT_S = 15.0         # mtop page-eval 硬超时（T2 新增——x5sec promise 永挂实证，消灭无超时挂点）
+# 四阶段预算和 = 20 + 12 + 8 + 15 = 55s ≤ 前端 60s 中止（CEO-1；tripwire 单测锁定）
 
 # 已知 ret 码分类（DX-D5 样本 + 惯例前缀；顺序敏感——先匹配风控再未登录）
 RET_RISK_PATTERNS = ("RGV587", "FAIL_SYS_USER_VALIDATE", "x5sec", "P_UNCHECKED")
 RET_LOGIN_PATTERNS = ("SESSION_EXPIRED", "NEED_LOGIN", "FAIL_SYS_SESSION", "登录")
+
+#: x5sec/noCaptcha 风控信号（T1 网络层实证：_____tmd_____/report?x5secdata + nocaptcha initialize）
+RISK_SIGNAL_URL_PATTERNS = ("_____tmd_____", "x5secdata", "nocaptcha")
+
+
+def is_risk_signal_url(url: str) -> bool:
+    """网络层风险信号判定（纯函数，单测可锁）"""
+    return any(p in (url or "") for p in RISK_SIGNAL_URL_PATTERNS)
+
+
+def is_publish_flow_risk_url(url: str) -> bool:
+    """发布流程风控信号判定（单一权威门——观测窗口内命中即计 risk）
+
+    锚定语义（评审 maint#2/security#1 收敛）：仅 h5api.m.taobao.com 的 publish
+    相关响应（_____tmd_____/x5secdata 特征）或阿里 noCaptcha 组件（cf.aliyun.com）
+    计入——主机白名单防第三方页面资源以子串伪造信号（把 UNKNOWN 伪装成
+    「风控待人工」或反向抑制）。
+    """
+    u = url or ""
+    if "h5api.m.taobao.com" in u and PUBLISH_API in u and is_risk_signal_url(u):
+        return True
+    if "cf.aliyun.com" in u and "nocaptcha" in u:
+        return True
+    return False
 
 EVAL_SEND_JS = """
 async (args) => {
@@ -53,7 +90,7 @@ async (args) => {
   try {
     const res = await mtop.request({
       api: args.api, v: args.v, appKey: args.appKey,
-      data: args.data, type: 'GET', dataType: 'jsonp', timeout: 15000,
+      data: args.data, type: 'GET', dataType: 'jsonp', timeout: 12000,
     });
     return {ret: res && res.ret};
   } catch (e) {
@@ -81,10 +118,15 @@ class TaobaoMtopSender(BaseSender):
                               fix_hint="profile 锁被监听操作占用——稍后重试（busy）")
         try:
             return await self._send_locked(room_id, content)
+        except Exception as e:  # noqa: BLE001  E5 隔离（与 deprecated DOM 钩子/EngineHookSender 同语义——异常不出 sender 边界）
+            logger.warning(f"[taobao-mtop] send 异常: {type(e).__name__}: {str(e)[:120]}")
+            return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
+                              detail=f"{type(e).__name__}: {str(e)[:100]}")
         finally:
             self._engine._profile_lock.release()
 
     async def _send_locked(self, room_id: str, content: str) -> SendResult:
+        t0 = time.monotonic()
         async with async_playwright() as pw:
             context = await pw.chromium.launch_persistent_context(
                 self._engine._profile_dir(), headless=True,
@@ -92,29 +134,79 @@ class TaobaoMtopSender(BaseSender):
                 viewport={"width": 1280, "height": 800},
                 args=["--disable-blink-features=AutomationControlled",
                       "--disable-setuid-sandbox", "--hide-crash-restore-bubble"])
+            logger.info(f"[taobao-mtop] stage=launch elapsed={time.monotonic()-t0:.1f}s room={room_id}")
             try:
                 page = context.pages[0] if context.pages else await context.new_page()
+                # x5sec 风控信号观测（T1 实证 + 评审 redteam#2：注册提前到 page 创建后——
+                # 页面加载期（goto/topic/lib）触发的风控挑战同样计入，不再误诊为
+                # 「页面改版」；风险命中时各失败分支统一回风控语义）
+                risk = {"hit": False}
+
+                def _on_response(resp) -> None:
+                    if is_publish_flow_risk_url(getattr(resp, "url", "") or ""):
+                        risk["hit"] = True
+
+                page.on("response", _on_response)
                 try:
-                    await page.goto(self._room_url(room_id), timeout=PAGE_TIMEOUT_MS,
-                                    wait_until="domcontentloaded")
-                except Exception as e:  # noqa: BLE001
-                    return SendResult(SendStatus.UNKNOWN, SendRejectReason.SEND_TIMEOUT.value,
-                                      detail=f"goto: {type(e).__name__}")
-                topic = await self._wait_topic(page)
-                if not topic:
-                    return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
-                                      fix_hint="未能从页面锚定 topic（未开播/未登录/加载慢）——"
-                                               "确认房间监听状态后重试；持续失败跑 tools/send_probes/taobao_mtop_capture.py capture",
-                                      docs_anchor="docs/testing/m0-send-probe-cards.md")
-                if not await self._wait_mtop_lib(page):
-                    return SendResult(SendStatus.FAILED, SendRejectReason.ROUTE_UNVERIFIED.value,
-                                      fix_hint="页面 mtop 库不可达（window.lib.mtop 缺失）——页面结构变更，重跑 T1 探针",
-                                      docs_anchor="docs/testing/m0-send-probe-cards.md")
-                result = await page.evaluate(
-                    EVAL_SEND_JS,
-                    {"api": PUBLISH_API, "v": PUBLISH_VERSION, "appKey": PUBLISH_APPKEY,
-                     "data": {"topic": topic, "content": content}})
-                return self._map_ret(result)
+                    try:
+                        await page.goto(self._room_url(room_id), timeout=PAGE_TIMEOUT_MS,
+                                        wait_until="domcontentloaded")
+                        logger.info(f"[taobao-mtop] stage=goto elapsed={time.monotonic()-t0:.1f}s room={room_id}")
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning(f"[taobao-mtop] stage=goto FAILED elapsed={time.monotonic()-t0:.1f}s "
+                                       f"room={room_id} err={type(e).__name__}")
+                        if risk["hit"]:
+                            return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
+                                              detail="x5sec 风控信号（网络层捕获，页面加载期）——noCaptcha 验证待人工",
+                                              fix_hint="风控验证待人工（headless 无法完成滑块）——勿盲目重试；"
+                                                       "降频稍后重试或经有头窗口完成验证后恢复")
+                        return SendResult(SendStatus.UNKNOWN, SendRejectReason.SEND_TIMEOUT.value,
+                                          detail=f"goto: {type(e).__name__}")
+                    topic = await self._wait_topic(page)
+                    logger.info(f"[taobao-mtop] stage=topic elapsed={time.monotonic()-t0:.1f}s "
+                                f"room={room_id} anchored={bool(topic)}")
+                    if not topic:
+                        if risk["hit"]:
+                            return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
+                                              detail="x5sec 风控信号（网络层捕获）——topic 未锚定疑因风控拦截",
+                                              fix_hint="风控验证待人工——勿盲目重试；降频稍后重试或经有头窗口完成验证后恢复")
+                        return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
+                                          fix_hint="未能从页面锚定 topic（未开播/未登录/加载慢）——"
+                                                   "确认房间监听状态后重试；持续失败跑 tools/send_probes/taobao_mtop_capture.py capture",
+                                          docs_anchor="docs/testing/m0-send-probe-cards.md")
+                    if not await self._wait_mtop_lib(page):
+                        logger.warning(f"[taobao-mtop] stage=mtop_lib MISSING elapsed={time.monotonic()-t0:.1f}s room={room_id}")
+                        if risk["hit"]:
+                            return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
+                                              detail="x5sec 风控信号（网络层捕获）——mtop 库不可达疑因风控拦截",
+                                              fix_hint="风控验证待人工——勿盲目重试；降频稍后重试或经有头窗口完成验证后恢复")
+                        return SendResult(SendStatus.FAILED, SendRejectReason.ROUTE_UNVERIFIED.value,
+                                          fix_hint="页面 mtop 库不可达（window.lib.mtop 缺失）——页面结构变更，重跑 T1 探针",
+                                          docs_anchor="docs/testing/m0-send-probe-cards.md")
+                    try:
+                        result = await asyncio.wait_for(
+                            page.evaluate(
+                                EVAL_SEND_JS,
+                                {"api": PUBLISH_API, "v": PUBLISH_VERSION, "appKey": PUBLISH_APPKEY,
+                                 "data": {"topic": topic, "content": content}}),
+                            timeout=EVAL_TIMEOUT_S)
+                    except asyncio.TimeoutError:
+                        # 挂点兜底（T2）：页面 promise 未决（x5sec noCaptcha 等待人工验证）——
+                        # 结构化回执而非永久悬挂（原形态=前端 60s 中止+无审计 result 行）
+                        if risk["hit"]:
+                            logger.warning(f"[taobao-mtop] stage=eval x5sec_signal elapsed={time.monotonic()-t0:.1f}s room={room_id}")
+                            return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
+                                              detail="x5sec 风控信号（网络层捕获）——noCaptcha 验证待人工",
+                                              fix_hint="风控验证待人工（headless 无法完成滑块）——勿盲目重试；"
+                                                       "降频稍后重试或经有头窗口完成验证后恢复")
+                        logger.warning(f"[taobao-mtop] stage=eval NO_RESPONSE elapsed={time.monotonic()-t0:.1f}s room={room_id}")
+                        return SendResult(SendStatus.UNKNOWN, SendRejectReason.SEND_TIMEOUT.value,
+                                          detail=f"mtop 调用 {EVAL_TIMEOUT_S:.0f}s 无响应（页面 promise 未决）",
+                                          fix_hint="页面 mtop 调用未决——重跑 T1 探针核对形态")
+                    logger.info(f"[taobao-mtop] stage=eval elapsed={time.monotonic()-t0:.1f}s room={room_id} ret={str(result.get('ret'))[:80]}")
+                    return self._map_ret(result)
+                finally:
+                    page.remove_listener("response", _on_response)
             finally:
                 try:
                     await context.close()
@@ -135,9 +227,17 @@ class TaobaoMtopSender(BaseSender):
     async def _wait_mtop_lib(self, page) -> bool:
         deadline = time.monotonic() + MTOP_LIB_WAIT_S
         while time.monotonic() < deadline:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
             try:
-                if await page.evaluate(EVAL_LIB_PROBE_JS):
+                # 单次探针也必须有界（评审 P1：冻结页下裸 evaluate 永挂→锁泄漏——
+                # 「全部 await 显式超时」不变量含探针调用）
+                if await asyncio.wait_for(page.evaluate(EVAL_LIB_PROBE_JS),
+                                          timeout=min(2.0, remaining)):
                     return True
+            except asyncio.TimeoutError:
+                pass  # 单次探针未决（页面冻结形态）——计入预算继续轮询
             except Exception:  # noqa: BLE001
                 pass
             await asyncio.sleep(1)

@@ -491,6 +491,9 @@ section h2 {
 .room-send-result.success { color: #4ade80; }
 .room-send-result.dryrun { color: #38bdf8; }
 .room-send-result.error { color: #f87171; }
+/* ？结果未知（UNKNOWN，评审 ASK-C）：琥珀色独立第四态——与 FAILED 的 ✗ 明确区分，
+   防止「可能已送达」被当确定失败诱导盲重（DUPLICATE 影子源） */
+.room-send-result.unknown { color: #fbbf24; }
 
 .room-item .room-name {
     display: flex;

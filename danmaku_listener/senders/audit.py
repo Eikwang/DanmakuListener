@@ -94,6 +94,10 @@ class SendAuditLog:
                     "status": row.get("status"),
                     "reason_code": row.get("reason_code"),
                     "sent_at": row.get("sent_at"),
+                    # 评审 redteam#5：对账回执需要 triage 上下文（detail/fix_hint）——
+                    # 中止场景下运维从行内即可定位，不必翻 JSONL（索引体积换闭环）
+                    "detail": (row.get("detail") or "")[:160],
+                    "fix_hint": (row.get("fix_hint") or "")[:160],
                 }
                 self._persist_index()
             return True

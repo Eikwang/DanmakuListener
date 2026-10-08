@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.6.2 (2026-10-08)
+
+多平台发送实测验收战役修复批（验收战役计划经 CEO/工程双阶段评审批准，8 项裁定 + 评审军团 20 项发现全闭环）——淘宝验收失败根因修复 + 发送链路「无超时挂点」类缺陷清零 + webui 行内发送结果闭环。
+
+### 修复
+- **淘宝发送静默挂起（P0，验收首日实证）**：根因=x5sec 风控触发 noCaptcha 验证，headless 瞬态页无人可解，mtop.request promise 永挂 + evaluate 裸 await 即永久悬挂。现在全部 await 显式超时（发送 evaluate 15s/lib 探针 2s/管线兜底 70s），x5sec 网络信号检测回执「风控验证待人工，勿盲目重试」——失败从 120s 永挂变为 ~17s 结构化回执
+- **发送异常穿透 500（CEO-3）**：管线唯一分发点异常围栏——sender 异常/挂起转结构化回执+审计 result 行，杜绝 HTTP 500 与静默丢回执；未捕获异常计熔断（FAILED），unknown 语义保留给 sender 自分类
+- **前端中止后结果不可见（CEO-5）**：60s 中止后 2s 宽限自动对账 `/api/send-results` 回显真实结果（sent/dry_run/failed/未知四态），查不到回落「结果待对账」；对账 GET 自带 5s 超时
+- **UNKNOWN 渲染语义（？第四态）**：「结果未知（可能已送达）」琥珀色独立呈现，不再诱导盲重制造平台侧真重复（DUPLICATE 影子源消解）
+- **幂等重放保真**：重放回执透传原 detail/fix_hint，对账 triage 上下文不被覆盖降级
+
+### 变更
+- 淘宝 sender 阶段预算收敛（goto 20+topic 12+lib 8+eval 15=55s，前端 60s 内闭环；tripwire 单测锁定）；JS mtop timeout 12s 联动
+- x5sec 观测窗提前到页面加载期（goto/topic/lib 失败分支统一风控语义，不再误诊「页面改版」）；检测门主机白名单收敛（防页面伪造信号）
+- 发送阶段日志（launch/goto/topic/lib/eval 五阶段+耗时）；管线日志 detail 截断 60→200
+- runbook：失败表补 6 行（E5 隔离/管线兜底/页面未决/x5sec/DUPLICATE 对账指引等）、周检命令修正（--page-eval 形态）、验收前置检查（ADR-002 合规+重登窗口避让）、QA 清单第 9 项（中止对账）
+- 测试基线 634→647（pytest）+ 新增 node:test 前端对账 6 用例（零依赖，源码提取防漂移）
+
 ## v0.6.1 (2026-10-08)
 
 webui 房间行内弹幕发送（/autoplan 降级管线四阶段评审批准，13 项裁定）——房间行两行布局 + 行内发送表单，消费既有 `POST /api/send-danmu`，零后端改动。版本号经用户裁定取 PATCH。
