@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any, Optional
 
@@ -18,6 +19,7 @@ from danmaku_listener.contract.models import (Category,
                                               DanmuSendRequestPayload, DanmuSendResultPayload,
                                               Envelope, SendRejectReason, SendStatus, UnifiedMessage)
 from danmaku_listener.senders.audit import SendAuditLog
+from danmaku_listener.senders.base import SendResult
 from danmaku_listener.senders.guard import SendGuard
 from danmaku_listener.senders.registry import SenderRegistry
 
@@ -65,6 +67,7 @@ class DanmuCommandPipeline:
                                        fix_hint="配置 ws_token_file 或 DANMAKU_TOKEN 后重启", source=source)
 
         # 幂等（R18/F9）：重复 request_id → 回执上次结果（非错误语义）
+        # （对抗评审 F2：重放透传 seen 的 detail/fix_hint——不得覆盖降级索引里的对账上下文）
         seen = self._audit.lookup(request_id)
         if seen is not None:
             return await self._finish(
@@ -72,7 +75,8 @@ class DanmuCommandPipeline:
                 SendStatus(seen.get("status", "failed")) if seen.get("status") in ("sent", "dry_run", "failed", "unknown") else SendStatus.FAILED,
                 reason_code=seen.get("reason_code") or SendRejectReason.IDEMPOTENT_REPLAY.value,
                 sent_at=seen.get("sent_at"),
-                fix_hint="重复 request_id——回执上次结果（幂等）", source=source,
+                fix_hint=seen.get("fix_hint") or "重复 request_id——回执上次结果（幂等）", source=source,
+                detail=seen.get("detail"),
                 replay=True)
 
         # 熔断（F3）与开关（P2 状态矩阵）
@@ -94,9 +98,16 @@ class DanmuCommandPipeline:
         # 守卫链（DX-F1：拒绝不排队）
         ok, reason, sanitized = self._guard.check(platform, room_id, content)
         if not ok:
+            # hint 按原因细分（CEO-8）：DUPLICATE 是上次尝试的影子——指引对账而非盲目重试
+            # （2026-10-08 实证：发送挂起后重试同内容必得 DUPLICATE）
+            hints = {
+                SendRejectReason.DUPLICATE.value: "同内容在去重窗口内（默认 300s）——上次尝试可能已送达："
+                                                   "查看弹幕流回环确认，或按 request_id 检索 "
+                                                   "persistence_data/send_audit.jsonl 对账后再决定重试",
+            }
             return await self._finish(platform, room_id, request_id, content, SendStatus.FAILED,
                                        reason or SendRejectReason.PLATFORM_REJECTED.value,
-                                       fix_hint="守卫命中——AUTOlive 退避重试", source=source)
+                                       fix_hint=hints.get(reason, "守卫命中——AUTOlive 退避重试"), source=source)
 
         # 审计 intent（R25 fail-closed：实发路径审计失败=拒绝发送）
         dry_run = self._guard._settings.send_dry_run
@@ -125,7 +136,23 @@ class DanmuCommandPipeline:
                                        SendRejectReason.SENDER_UNAVAILABLE.value,
                                        fix_hint=f"平台 {platform} 未注册发送器（M2/M3 探针定路线）", source=source)
         self._guard.record_attempt(platform, room_id, sanitized)
-        result = await sender.send(room_id, sanitized)
+        try:
+            # 管线级兜底超时（评审 ASK-A）：sender 内部应自有隔离（E5 catch/预算），
+            # 此层兜住未来任何 sender 的新增挂点——挂起同异常一样不得穿透为 500/锁泄漏。
+            # 70s > taobao 四阶段 55s+锁 3s+launch 收尾裕量，< 双倍前端预算。
+            result = await asyncio.wait_for(sender.send(room_id, sanitized), timeout=70.0)
+        except asyncio.TimeoutError:
+            logger.warning(f"[send-pipeline] {platform}:{room_id} sender 兜底超时(70s)——挂起已被边界捕获")
+            result = SendResult(SendStatus.UNKNOWN, SendRejectReason.SEND_TIMEOUT.value,
+                                detail="管线兜底超时(70s)：sender 挂起（可能未返回结果）")
+        except Exception as e:  # noqa: BLE001  发送围栏（CEO-3，R32 唯一分发点）：
+            # sender 异常→FAILED 回执+审计 result 行，杜绝 500 与静默丢回执。
+            # 语义裁定（评审 redteam#3，2026-10-08）：未捕获异常=真实故障计熔断（FAILED），
+            # unknown 语义保留给 sender 内部自分类的「结果未知」（如 mtop 无响应）
+            logger.warning(f"[send-pipeline] {platform}:{room_id} sender 异常: "
+                           f"{type(e).__name__}: {str(e)[:120]}")
+            result = SendResult(SendStatus.FAILED, SendRejectReason.SEND_TIMEOUT.value,
+                                detail=f"sender 异常（围栏兜底，计熔断）: {type(e).__name__}: {str(e)[:100]}")
 
         # 熔断记账（R36：unknown 不计失败计告警）
         self._guard.record_result(platform, result.status.value, result.detail or "")
@@ -156,12 +183,14 @@ class DanmuCommandPipeline:
                 "kind": "result", "request_id": request_id, "platform": platform,
                 "room_id": room_id, "status": status.value, "reason_code": reason_code,
                 "sent_at": sent_at, "source": source, "dry_run": dry_run or status == SendStatus.DRY_RUN,
+                # 评审 redteam#5：detail/fix_hint 入审计行→幂等索引→对账回执可 triage
+                "detail": (detail or "")[:160], "fix_hint": (fix_hint or "")[:160],
             })
         wire = self._build_result_wire(platform, room_id, request_id, status,
                                        reason_code, fix_hint, docs_anchor, sent_at, content)
         await self._broadcast(wire)
         if detail:
-            logger.info(f"[send-pipeline] {platform}:{room_id} {status.value} {reason_code or ''} {detail[:60]}")
+            logger.info(f"[send-pipeline] {platform}:{room_id} {status.value} {reason_code or ''} {detail[:200]}")
         return wire
 
     def _build_result_wire(self, platform: str, room_id: str, request_id: str,

@@ -225,3 +225,207 @@ async def test_topic_not_found_fails_with_hint(monkeypatch):
     result = await sender.send("3101430810353885", "[M0] t")
     assert result.status == SendStatus.FAILED
     assert "topic" in (result.fix_hint or "")
+
+
+# ---- T2 修复回归（2026-10-08 验收战役 CEO-1/3；根因卡 m0-send-probe-cards.md:39）----
+
+def test_stage_budget_sum_within_ceo1_cap():
+    """预算 tripwire（CEO-1）：goto+topic+lib+eval 合计 ≤55s——前端 60s 中止内闭环"""
+    from danmaku_listener.senders import taobao_mtop as mod
+    total = mod.PAGE_TIMEOUT_MS / 1000 + mod.TOPIC_WAIT_S + mod.MTOP_LIB_WAIT_S + mod.EVAL_TIMEOUT_S
+    assert total <= 55.0, f"阶段预算和 {total}s 超过 CEO-1 上限 55s（前端 60s 中止内须闭环）"
+
+
+def test_eval_js_timeout_synced_below_python_cap():
+    """JS mtop timeout（12s）须先于 Python wait_for（15s）落地——错误路径保留 ret 细节"""
+    from danmaku_listener.senders import taobao_mtop as mod
+    assert "timeout: 12000" in mod.EVAL_SEND_JS
+    assert "15000" not in mod.EVAL_SEND_JS
+
+
+def test_is_risk_signal_url_patterns():
+    from danmaku_listener.senders.taobao_mtop import is_risk_signal_url
+    assert is_risk_signal_url("https://h5api.m.taobao.com/h5/mtop.taobao.iliad.comment.publish/1.0/_____tmd_____/report?x5secdata=xgba")
+    assert is_risk_signal_url("https://cf.aliyun.com/nocaptcha/initialize.jsonp?a=X82Y")
+    assert not is_risk_signal_url("https://h5api.m.taobao.com/h5/mtop.taobao.iliad.comment.publish/1.0/?callback=cb")
+
+
+class HangingSendPage(FakePage):
+    """send evaluate 永不 settle（复现 x5sec noCaptcha promise 永挂形态）"""
+
+    def __init__(self, response_urls=None):
+        super().__init__([])
+        self._response_urls = list(response_urls or [])
+
+    async def evaluate(self, js, args=None):
+        if "args.api" in js:
+            await asyncio.sleep(3600)  # 永挂（由 EVAL_TIMEOUT_S 兜底）
+        return self._lib_ready
+
+    def on(self, event, handler):
+        self._listeners.append(handler)
+        if event == "request" and self._topic_requests:
+            class Req:
+                url = "https://h5api.m.taobao.com/h5/mtop.taobao.iliad.comment.query.latest/1.0/?data=%7B%22topic%22%3A%22topic-abc-123%22%7D"
+                post_data = None
+            asyncio.get_event_loop().call_later(0.05, lambda: handler(Req()))
+        elif event == "response" and self._response_urls:
+            for u in self._response_urls:
+                class Resp:
+                    url = u
+                asyncio.get_event_loop().call_later(0.05, lambda h=handler, r=Resp(): h(r))
+
+
+@pytest.mark.asyncio
+async def test_eval_no_settle_maps_to_unknown_send_timeout(monkeypatch):
+    """T2 挂点兜底：页面 promise 未决（无风控信号）→ UNKNOWN/SEND_TIMEOUT 回执而非永挂"""
+    import danmaku_listener.senders.taobao_mtop as mod
+    monkeypatch.setattr(mod, "TOPIC_WAIT_S", 1.0)
+    monkeypatch.setattr(mod, "MTOP_LIB_WAIT_S", 1.0)
+    monkeypatch.setattr(mod, "EVAL_TIMEOUT_S", 0.2)
+    sender = TaobaoMtopSender(FakeEngine())
+    page = HangingSendPage()
+    context = FakeContext(page)
+
+    class FakePWModule:
+        @staticmethod
+        def async_playwright():
+            class _Ctx:
+                async def __aenter__(self):
+                    return FakePlaywright(context)
+
+                async def __aexit__(self, *exc):
+                    return False
+            return _Ctx()
+
+    monkeypatch.setattr(mod, "async_playwright", FakePWModule.async_playwright, raising=False)
+    result = await sender.send("3101430810353885", "[M0] t")
+    assert result.status == SendStatus.UNKNOWN
+    assert result.reason_code == "SEND_TIMEOUT"
+
+
+@pytest.mark.asyncio
+async def test_x5sec_signal_maps_to_manual_verify_hint(monkeypatch):
+    """T2 x5sec 检测：eval 窗口内网络层风控信号 → FAILED「验证待人工」而非 UNKNOWN"""
+    import danmaku_listener.senders.taobao_mtop as mod
+    monkeypatch.setattr(mod, "TOPIC_WAIT_S", 1.0)
+    monkeypatch.setattr(mod, "MTOP_LIB_WAIT_S", 1.0)
+    monkeypatch.setattr(mod, "EVAL_TIMEOUT_S", 0.5)
+    sender = TaobaoMtopSender(FakeEngine())
+    page = HangingSendPage(response_urls=[
+        "https://h5api.m.taobao.com/h5/mtop.taobao.iliad.comment.publish/1.0/_____tmd_____/report?x5secdata=xgba5f12",
+        "https://cf.aliyun.com/nocaptcha/initialize.jsonp?a=X82Y",
+    ])
+    context = FakeContext(page)
+
+    class FakePWModule:
+        @staticmethod
+        def async_playwright():
+            class _Ctx:
+                async def __aenter__(self):
+                    return FakePlaywright(context)
+
+                async def __aexit__(self, *exc):
+                    return False
+            return _Ctx()
+
+    monkeypatch.setattr(mod, "async_playwright", FakePWModule.async_playwright, raising=False)
+    result = await sender.send("3101430810353885", "[M0] t")
+    assert result.status == SendStatus.FAILED
+    assert result.reason_code == "PLATFORM_REJECTED"
+    assert "勿盲目重试" in (result.fix_hint or "")
+    assert "x5sec" in (result.detail or "")
+
+
+@pytest.mark.asyncio
+async def test_playwright_launch_failure_returns_structured_receipt(monkeypatch):
+    """T2 E5 隔离：launch 失败（profile 冲突等）→ 结构化 FAILED 回执而非异常穿透（500）"""
+    import danmaku_listener.senders.taobao_mtop as mod
+    monkeypatch.setattr(mod, "TOPIC_WAIT_S", 1.0)
+    monkeypatch.setattr(mod, "MTOP_LIB_WAIT_S", 1.0)
+    sender = TaobaoMtopSender(FakeEngine())
+
+    class BoomPWModule:
+        @staticmethod
+        def async_playwright():
+            class _Ctx:
+                async def __aenter__(self):
+                    raise RuntimeError("Target closed: profile in use")
+
+                async def __aexit__(self, *exc):
+                    return False
+            return _Ctx()
+
+    monkeypatch.setattr(mod, "async_playwright", BoomPWModule.async_playwright, raising=False)
+    result = await sender.send("3101430810353885", "[M0] t")
+    assert result.status == SendStatus.FAILED
+    assert "Target closed" in (result.detail or "")
+
+
+@pytest.mark.asyncio
+async def test_lib_probe_hang_is_bounded(monkeypatch):
+    """评审 P1（父验证）：lib 探针 evaluate 冻结页永挂→锁泄漏——「全部 await 有界」不变量回归锁
+    Value: protects=_wait_mtop_lib 单次探针有界且超时计为 lib 不可用; fails_when=探针裸 await 回归;
+    why_new=既有测试只锁发送 evaluate 的超时，探针路径无覆盖; seam=none"""
+    import danmaku_listener.senders.taobao_mtop as mod
+
+    class FrozenProbePage(FakePage):
+        async def evaluate(self, js, args=None):
+            if "args.api" in js:
+                return {"ret": ["SUCCESS::调用成功"]}
+            await asyncio.sleep(3600)  # lib 探针永挂（冻结页形态）
+
+    monkeypatch.setattr(mod, "TOPIC_WAIT_S", 1.0)
+    monkeypatch.setattr(mod, "MTOP_LIB_WAIT_S", 0.5)
+    sender = TaobaoMtopSender(FakeEngine())
+    page = FrozenProbePage([])
+    context = FakeContext(page)
+
+    class FakePWModule:
+        @staticmethod
+        def async_playwright():
+            class _Ctx:
+                async def __aenter__(self):
+                    return FakePlaywright(context)
+
+                async def __aexit__(self, *exc):
+                    return False
+            return _Ctx()
+
+    monkeypatch.setattr(mod, "async_playwright", FakePWModule.async_playwright, raising=False)
+    result = await asyncio.wait_for(sender.send("3101430810353885", "[M0] t"), timeout=5)
+    assert result.status == SendStatus.FAILED
+    assert result.reason_code == "ROUTE_UNVERIFIED"
+    assert not sender._engine._profile_lock._lock._locked  # 锁须已释放（挂起不得泄漏锁）
+
+
+@pytest.mark.asyncio
+async def test_benign_response_during_eval_timeout_stays_unknown(monkeypatch):
+    """testing #3 负路径：eval 窗口内良性 publish 响应不得误报 x5sec 风控（误报会误导「勿盲目重试」处置）
+    Value: protects=x5sec 门的零误报（良性 URL→UNKNOWN 而非 FAILED）; fails_when=门误判良性 URL;
+    why_new=既有测试只覆盖风险信号正例，无良性反例; seam=none"""
+    import danmaku_listener.senders.taobao_mtop as mod
+    monkeypatch.setattr(mod, "TOPIC_WAIT_S", 1.0)
+    monkeypatch.setattr(mod, "MTOP_LIB_WAIT_S", 1.0)
+    monkeypatch.setattr(mod, "EVAL_TIMEOUT_S", 0.2)
+    sender = TaobaoMtopSender(FakeEngine())
+    page = HangingSendPage(response_urls=[
+        "https://h5api.m.taobao.com/h5/mtop.taobao.iliad.comment.publish/1.0/?callback=cb",
+    ])
+    context = FakeContext(page)
+
+    class FakePWModule:
+        @staticmethod
+        def async_playwright():
+            class _Ctx:
+                async def __aenter__(self):
+                    return FakePlaywright(context)
+
+                async def __aexit__(self, *exc):
+                    return False
+            return _Ctx()
+
+    monkeypatch.setattr(mod, "async_playwright", FakePWModule.async_playwright, raising=False)
+    result = await sender.send("3101430810353885", "[M0] t")
+    assert result.status == SendStatus.UNKNOWN
+    assert result.reason_code == "SEND_TIMEOUT"
