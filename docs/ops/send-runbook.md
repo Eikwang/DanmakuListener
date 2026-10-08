@@ -1,6 +1,6 @@
 # 发送功能运维手册（AutoDanmu，ADR-002 + 修复计划 2026-10-07）——适用于全部已接线平台
 
-生成：/autoplan 批准计划 T10/T5 | 2026-10-07 更新（T2 淘宝 mtop/T3 抖音常驻/T6 三平台接线）
+生成：/autoplan 批准计划 T10/T5 | 2026-10-08 更新（v0.6.2 发送验收战役修复批——围栏/预算/x5sec 检测/对账闭环；T2 淘宝 mtop/T3 抖音常驻/T6 三平台接线）
 
 ## 发送开关与配置（[send] 配置段）
 
@@ -25,7 +25,13 @@
 | CIRCUIT_OPEN | 连续 N 次失败熔断 | **人工重开**：排查平台侧（禁言/登录态/风控）后 enable |
 | RATE_COOLDOWN | T4 DOM 兜底滑块冷却期（含剩余秒数） | 冷却结束后自动恢复；勿反复重试撞墙 |
 | ROOM_NOT_LISTENED | 目标房间未监听 | 先在控制台添加并启动该房间 |
-| RATE_LIMITED / DUPLICATE / TOO_LONG / KEYWORD_BLOCKED | 守卫命中（拒绝不排队） | AUTOlive 退避重试；调 send_min_interval / send_max_length / 关键词表 |
+| DUPLICATE | 同内容去重窗口内（上次尝试可能未出结果——影子症状） | **先对账**：按 request_id 查 `GET /api/send-results` 确认上次尝试无结果后再退避重试（CEO-8 勿盲目重试） |
+| RATE_LIMITED / TOO_LONG / KEYWORD_BLOCKED | 守卫命中（拒绝不排队） | AUTOlive 退避重试；调 send_min_interval / send_max_length / 关键词表 |
+| FAILED（detail 含 RuntimeError/Target closed，taobao） | sender 级 E5 隔离 catch：launch/浏览器层异常（profile 冲突等） | 查服务日志 stage= 行定位；确认无其他浏览器占用 cookie/taobao_profile 后重试；持续失败跑探针 |
+| SEND_TIMEOUT（detail 含 "sender 异常"） | 管线围栏捕获的 sender 层异常（浏览器崩溃/profile 冲突等，T2） | 查服务日志 stage= 行定位；重试一次，持续失败跑对应平台探针 |
+| SEND_TIMEOUT（detail 含 "页面 promise 未决" 或 "无响应"） | mtop 调用无响应（慢页/风控验证未决且无网络信号，T2 兜底） | 降频重试；持续出现跑 tools/send_probes 探针核对形态 |
+| SEND_TIMEOUT（detail 含 "管线兜底超时(70s)"） | 管线级 70s 兜底捕获的 sender 挂起（未返回结果） | 查服务日志 stage= 行定位挂起阶段；降频重试；持续出现跑对应平台探针 |
+| PLATFORM_REJECTED（detail 含 "x5sec 风控信号"） | 风控触发 noCaptcha 验证（headless 无法完成滑块，T1/T2 实证） | **勿盲目重试**：降频稍后重试，或经有头窗口完成验证后恢复（复现则按缺陷卡裁定 PLAN B=常驻会话） |
 | PLATFORM_REJECTED（detail 含 RGV587/x5sec/风控） | 平台风控拦截 | **降频稍后重试；勿重扫码**（登录态未失效——CEO-F4 ret 映射语义） |
 | PLATFORM_REJECTED（fix_hint 含"登录"） | 登录态失效 | 按对应平台登录 CLI 重登（见下节） |
 | AUDIT_UNAVAILABLE | 审计写失败 | 检查 persistence_data/ 磁盘与权限；实发路径 fail-closed（R25） |
@@ -53,6 +59,14 @@
 房间列表每行第二行为行内发送表单（输入框+发送按钮+行内反馈行），
 token 复用 localStorage `send_token`（首次发送 prompt 一次）。验收清单：
 
+**前置检查（每平台验收前必过——CEO-7，验收战役 2026-10-08）：**
+
+- **合规（ADR-002）**：验收发送仅限**自运营/受托直播间**（发声主场景约束；
+  礼物发送始终禁止）；测试房间与账号由运营方确认后使用
+- **时序避让**：确认该平台监听**无登录/重登动作进行中**（可见登录窗口 240s
+  预算期间 profile 锁被占用，发送 3s 即回 busy——非发送缺陷）；收到 busy
+  回执先查监听日志再重试
+
 1. **dry-run 模式**（send_dry_run=true）：房间行输入→发送→「○ dry-run 已记录（未实发）」（非成功语义）
 2. **实发**（B 站）：发送→「✓ 已发送 HH:MM」+ 弹幕流回环可见（F8 链路）
 3. **禁用三态**：停止房间→按钮禁用（title=房间未在监听中）；空输入→禁用；发送中→禁用+「发送中…」
@@ -60,7 +74,8 @@ token 复用 localStorage `send_token`（首次发送 prompt 一次）。验收�
 5. **限速**：连发两条→第二条「✗ 限速冷却中（RATE_LIMITED）」（title 悬浮 fix_hint）
 6. **停服**：服务停止后发送→「✗ 网络错误（无法连接服务）」
 7. **键盘**：Enter 提交；Escape 清空输入框；成功后焦点回位（连续发送）
-8. **可达性**：结果三态色（绿 ✓/蓝 ○/红 ✗）在行底 #1e293b 上对比度 ≥4.5:1；Tab 序=自然 DOM 顺序
+8. **可达性**：结果四态色（绿 ✓/蓝 ○/红 ✗/琥珀 ？结果未知）在行底 #1e293b 上对比度 ≥4.5:1；Tab 序=自然 DOM 顺序；「？结果未知」=UNKNOWN（可能已送达）——重试前先对账/回环确认，勿盲目重试
+9. **中止对账**（T4/CEO-5）：点击发送后 60s 内未得回执（如停服模拟）→ 行内显示「✗ 发送超时（超过 60s）· 结果待对账」；服务恢复后按 request_id 重查 `GET /api/send-results` 可见真实结果；若后端在中止后才出结果（慢页场景），行内 2s 宽限后自动回显「（对账回显）」结果
 
 ## 平台专项
 
@@ -85,9 +100,9 @@ token 复用 localStorage `send_token`（首次发送 prompt 一次）。验收�
 
 ## 运维节奏（每周）
 
-1. **淘宝 mtop 重放健康检查（CEO-F4）**：
-   `python tools/send_probes/taobao_mtop_capture.py --replay persistence_data/taobao-mtop-template.json --sends 1`
-   ——ret 非 SUCCESS→端点/风控变化，排查后更新模板（capture 重抓）
+1. **淘宝 mtop 重放健康检查（CEO-F4；T1 修正 2026-10-08——缺 `--page-eval` 的纯 HTTP 形态必被 RGV587 拒，行为签名须页面现生成）**：
+   `python tools/send_probes/taobao_mtop_capture.py --replay persistence_data/taobao-mtop-template.json --page-eval --room-url "<在播直播间URL>" --sends 1`
+   ——ret 非 SUCCESS→端点/风控变化，排查后更新模板（capture 重抓）；出现 `_____tmd_____/report?x5secdata` 或 `nocaptcha` 信号→风控验证待人工（见上方失败表），降频或经有头窗口处理后重试
 2. **实发成功率周报（CEO-F13/ENG-7）**：统计 send_audit.jsonl 各平台
    sent/failed 比率；**快手/斗鱼/虎牙成功率跌破阈值→升级该平台常驻会话或登录链改造**
 3. **平台政策监控（CEO-F10）**：风控突变/新规发布（AI 直播标注等）→重评发送策略；

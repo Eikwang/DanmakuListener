@@ -36,3 +36,44 @@
 - [x] 判定语义 F5：SUCCESS（回显）/ FAIL（显式错误）/ UNKNOWN（不计熔断）/ BLOCKED
 - [x] 内容标记 [M0]（回环识别 F8）
 - [x] R23 社区资料比对：结论见 tools/send_probes/README.md（斗鱼/抖音/快手发送均无成熟公开逆向——DOM 优先）
+
+## 根因卡：淘宝集成环境发送挂起（2026-10-08，T1 取证）
+
+**判定：none（挂起）——不是 sent，也不是显式 failed。** 无任何证据表明弹幕实际发出。
+
+### 证据时间线（persistence_data/send_audit.jsonl）
+
+| 行 | ts(≈) | request_id | 事件 |
+|---|---|---|---|
+| 54 | 09:17:53 | ui-1791422273810-a816ke | intent（"早上好呀主播"，房 2402661083849123）——**无 result 行** |
+| 55 | 09:19:55 | ui-1791422395668-pn55d9 | intent+result 同秒：**DUPLICATE**（行 54 record_attempt 占 300s 去重窗的影子） |
+| 56 | 09:21:28 | ui-1791422488366-mnggx2 | 重启后 intent——**此后文件零写入**（mtime 09:21） |
+
+关键推论：行 54 的 intent 后 122 秒（> sender 全部有界阶段预算 85s）仍无 result → 挂点必在**无超时的 await**；锁 busy 路径（3s 超时会留 result）排除；监听引擎无常开浏览器（taobao.py:451-452 finally close 实证），profile 冲突会快速 raise（→500，前端"服务错误"而非 60s 中止）→ 降权。
+
+### 挂点嫌疑排序
+
+1. **[P1 头号] page.evaluate(EVAL_SEND_JS) 无超时包裹**（senders/taobao_mtop.py:113）——页面 JS promise 未决（页面冻结/风控打断/mtop jsonp 超时机制失效）→ await 永久悬挂。
+2. [P2] playwright 启动/launch 阶段挂起（与"重试看到 60s 超时而非 500"部分矛盾，未完全排除；首次尝试可能是 500 形态）。
+
+### 环境差异假设（集成 vs T2 探针）
+
+T2 管线级 sent（10-07）为独立探针进程；本次在 web 服务进程（12 平台监听并发）。且**房间不同**（本次 2402661083849123 vs 探针 1917110531243955/4091720237373013）——两次挂起都是确定性复现（同形状无 result），指向稳定条件而非偶发竞态。分辨动作：换探针房间对照（T6 清单项）+ T5 阶段日志锁定挂点。
+
+### 结构性缺陷（根因三件套，见计划 §已知问题）
+
+① 四阶段预算 85s > 前端 60s 中止（app.js:801）；② record_attempt 发起即占窗 → DUPLICATE 影子；③ sender 无异常围栏 → 异常形态为 500 且丢审计 result 行。T1 结论：**三件套全部实证成立**；修复=T2（围栏+预算 ≤55s，全部 await 包 wait_for，消灭无超时挂点类）+T4（对账轮询）。
+
+### 根因定稿（2026-10-08 10:42 网络观测实证）
+
+**挂起机制 = x5sec 风控触发 noCaptcha 验证，headless 瞬态页无人可解，promise 永挂。**
+
+分阶段计时探针（独立干净进程，无监听/服务并发）：`launch=0.1s ✓ | goto=0.2s ✓ | topic_anchor=1.0s ✓（房间在播）| mtop_lib=0.1s ✓ | eval_mtop=20s TIMEOUT`。
+
+网络层证据：mtop publish 响应 URL=`/h5/mtop.taobao.iliad.comment.publish/1.0/_____tmd_____/report?x5secdata=xgba…`（x5sec 风控挑战）+ `cf.aliyun.com/nocaptcha/initialize.jsonp`（验证组件初始化）——**请求发出且服务端有响应，但响应是风控验证流程而非发布结果**；mtop 库等待验证完成 → promise 未决 → evaluate 无超时 → 永挂。
+
+- 「集成进程并发」假设否决（独立进程同挂）；「房间/topic 问题」否决（秒级锚定成功）。
+- 与学习 [douyin-send-resident-session] 同构：瞬态窗口触发行为风控——10-07 探针连发是今日触发的可能导火索。
+- 修复映射：T2 超时包裹（挂起→结构化 UNKNOWN）+ x5sec/nocaptcha 信号检测（回执 fix_hint=「风控验证待人工，勿盲目重试」）；**验证通过的形态（有头/常驻会话）=PLAN B**，如验收阶段复现则按缺陷卡流程裁定。
+- 附带发现：runbook 周检命令 `--replay` 缺 `--page-eval`（纯 HTTP 形态=T1 实证必败 RGV587）——T5 修正。
+- 本次 T1 探针零弹幕落地（全部在风控层被拦，无真实发送成功）。
