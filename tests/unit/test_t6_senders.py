@@ -228,7 +228,7 @@ async def test_huya_resident_send_success(monkeypatch):
         async def aclose(self):
             pass
 
-    monkeypatch.setattr(huya_mod, "_get_session", lambda idle: FakeSession())
+    monkeypatch.setattr(huya_mod, "_get_session", lambda idle, mode: FakeSession())
     sender = HuyaResidentSender(settings=make_settings())
     result = await sender.send("12345", "[M0] t6")
     assert result.status == SendStatus.SENT
