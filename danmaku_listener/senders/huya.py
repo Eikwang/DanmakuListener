@@ -18,12 +18,13 @@ from loguru import logger
 from danmaku_listener.contract.models import SendRejectReason, SendStatus
 from danmaku_listener.senders.base import BaseSender, SendResult
 from danmaku_listener.senders.resident_session import (
-    MODE_MINIMIZED,
+    MODE_HEADLESS_NEW,
     ResidentSendSession,
 )
 
 PROFILE_DIR = "cookie/huya_login_profile"
-INPUT_SELECTORS = ("#pub_msg_input", "input[placeholder*=弹幕]", "textarea")
+INPUT_SELECTORS = ("#J_RoomChatSpeaker",  # 2026-10-08 验收用户实测定位
+                   "#pub_msg_input", "input[placeholder*=弹幕]", "textarea")
 BUTTON_SELECTORS = ("[class*=send]", 'button:has-text("发送")', ".send-btn")
 ECHO_WAIT_S = 12.0
 
@@ -31,25 +32,29 @@ ECHO_WAIT_S = 12.0
 _session: ResidentSendSession | None = None
 
 
-def _get_session(idle_timeout_s: int) -> ResidentSendSession:
+def _get_session(idle_timeout_s: int, window_mode: str) -> ResidentSendSession:
     global _session
-    if _session is None:
+    if _session is None or _session._window_mode != window_mode:
         _session = ResidentSendSession(
             "huya-send", PROFILE_DIR,
-            window_mode=MODE_MINIMIZED, idle_timeout_s=idle_timeout_s)
+            # 2026-10-08 验收用户裁定：默认完全后台无痕（原 headed minimized 可见最小化）；
+            # headless=new 完整 Blink 指纹+--mute-audio 静音；INI send_window_mode 可覆写
+            window_mode=window_mode, idle_timeout_s=idle_timeout_s)
     return _session
 
 
 class HuyaResidentSender(BaseSender):
-    """虎牙常驻会话 sender（headed minimized；profile 持久会话）"""
+    """虎牙常驻会话 sender（headless_new 完全后台；profile 持久会话）"""
 
     platform = "huya"
 
     def __init__(self, settings=None):
+        mode = MODE_HEADLESS_NEW  # 2026-10-08 验收裁定：默认完全后台（原 minimized）
         idle = 1800
         if settings is not None:
+            mode = getattr(settings, "send_window_mode", mode) or mode
             idle = int(getattr(settings, "send_session_idle_timeout_seconds", idle) or idle)
-        self._session = _get_session(idle)
+        self._session = _get_session(idle, mode)
 
     async def send(self, room_id: str, content: str) -> SendResult:
         url = f"https://www.huya.com/{room_id}"
