@@ -18,12 +18,32 @@ from loguru import logger
 from danmaku_listener.contract.models import SendRejectReason, SendStatus
 from danmaku_listener.senders.base import BaseSender, SendResult
 from danmaku_listener.senders.resident_session import (
-    MODE_HEADLESS_NEW,
+    MODE_MINIMIZED,
     LoginTakeoverError,
     ResidentSendSession,
 )
 
 PROFILE_DIR = "cookie/huya_login_profile"
+#: headless 反检测指纹包（2026-10-09 对抗实验 1：虎牙风控识别 headless=new
+#: 指纹并静默吞弹幕——headed 对照可过。注入 7 信号伪装后再验）
+STEALTH_JS = """
+() => {
+    Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+    Object.defineProperty(window, 'outerWidth', {get: () => 1280});
+    Object.defineProperty(window, 'outerHeight', {get: () => 800});
+    Object.defineProperty(screen, 'availWidth', {get: () => 1280});
+    Object.defineProperty(screen, 'availHeight', {get: () => 760});
+    Object.defineProperty(screen, 'colorDepth', {get: () => 24});
+    Object.defineProperty(screen, 'pixelDepth', {get: () => 24});
+    if (!window.chrome) { window.chrome = {runtime: {}, loadTimes: () => {}, csi: () => {}}; }
+    Object.defineProperty(navigator, 'plugins', {get: () => [1,2,3,4,5]});
+    Object.defineProperty(navigator, 'languages', {get: () => ['zh-CN', 'zh', 'en']});
+    const origQuery = window.navigator.permissions.query;
+    window.navigator.permissions.query = (p) => p.name === 'notifications'
+        ? Promise.resolve({state: Notification.permission}) : origQuery(p);
+}
+"""
+
 INPUT_SELECTORS = ("#pub_msg_input",  # 2026-10-09 验收用户 devtools 实测（真输入框；
                    # #J_RoomChatSpeaker 是容器——此前打容器导致假 UNKNOWN）
                    "#J_RoomChatSpeaker", "input[placeholder*=弹幕]", "textarea")
@@ -35,7 +55,7 @@ ECHO_WAIT_S = 12.0
 _session: ResidentSendSession | None = None
 
 
-def _get_session(idle_timeout_s: int, window_mode: str) -> ResidentSendSession:
+def _get_session(idle_timeout_s: int, window_mode: str) -> ResidentSendSession:  # noqa: 保持 STEALTH_JS 常量供后续对抗参考
     global _session
     if _session is None or _session._window_mode != window_mode:
         _session = ResidentSendSession(
@@ -52,7 +72,7 @@ class HuyaResidentSender(BaseSender):
     platform = "huya"
 
     def __init__(self, settings=None):
-        mode = MODE_HEADLESS_NEW  # 2026-10-08 验收裁定：默认完全后台（原 minimized）
+        mode = MODE_MINIMIZED  # 2026-10-09 回退：headless=new 指纹被虎牙风控静默吞（对比实验实证），headed minimized 为 T6 实证可用形态
         idle = 1800
         if settings is not None:
             mode = getattr(settings, "send_window_mode", mode) or mode
