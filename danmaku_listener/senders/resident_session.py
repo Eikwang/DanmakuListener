@@ -65,6 +65,10 @@ def _base_launch_args(mode: str) -> tuple[dict, list]:
     return {"headless": False}, extra  # foreground
 
 
+class LoginTakeoverError(Exception):
+    """可见登录窗流程未完成（超时/用户关窗）——调用方转 FAILED 回执。"""
+
+
 def cleanup_stale_chromium(profile_dir: str) -> int:
     """DX-D7：按命令行匹配清理占用 profile 的残留 Chromium 进程；返回清理数"""
     try:
@@ -140,6 +144,90 @@ class ResidentSendSession:
         self._last_activity = time.monotonic()
         logger.info(f"[{self.name}] 会话启动: mode={self._window_mode} profile={self._profile_dir}")
 
+    async def login_takeover(self, room_id: str, url: str, cookie_names: tuple,
+                             grace_s: float = 30.0, timeout_s: float = 240.0) -> Any:
+        """关闭当前（无头）context，弹可见登录窗，登录后该 context 转正为会话上下文。
+
+        背景（2026-10-09 虎牙验收实证）：huya 登录令牌为会话级 cookie——登录窗关闭
+        即丢失，常驻无头会话永远匿名。方案 A：登录发生在发送会话自己的浏览器里，
+        登录后窗口不关、转正为常驻上下文（headed 保持，用户可手动最小化）。
+
+        Returns:
+            已登录的 per-room page（已导航到 url；_pages/_context 均已登记）。
+
+        Raises:
+            LoginTakeoverError: 登录未完成（超时/用户关窗）。
+        """
+        from playwright.async_api import async_playwright
+
+        await self.close()          # 释放 profile（关无头 context；pages 清空）
+        self._closed = False        # 转正重启需复位 close 语义
+        self._pw_stack = async_playwright()
+        self._pw = await self._pw_stack.__aenter__()
+        try:
+            self._context = await self._pw.chromium.launch_persistent_context(
+                self._profile_dir, headless=False,
+                user_agent=self._user_agent, viewport=self._viewport,
+                args=["--disable-blink-features=AutomationControlled",
+                      "--disable-setuid-sandbox", "--hide-crash-restore-bubble",
+                      "--mute-audio"])
+        except Exception as e:
+            await self._pw_stack.__aexit__(None, None, None)
+            self._pw_stack = self._pw = self._context = None
+            raise
+        try:
+            page = self._context.pages[0] if self._context.pages else await self._context.new_page()
+            try:
+                await page.goto(url, timeout=45000, wait_until="domcontentloaded")
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"[{self.name}] login takeover goto warning: {e}")
+            deadline = time.monotonic() + timeout_s
+            logged = False
+            while time.monotonic() < deadline:
+                try:
+                    cookies = {c["name"] for c in await self._context.cookies() if c.get("value")}
+                except Exception:  # noqa: BLE001  窗口被用户关闭
+                    break
+                if set(cookie_names) & cookies:
+                    logged = True
+                    # 保窗 grace：供安全验证（滑块等）——验证完用户可关窗（会话已入 profile）
+                    g = time.monotonic() + grace_s
+                    while time.monotonic() < g:
+                        try:
+                            await self._context.cookies()
+                        except Exception:  # noqa: BLE001
+                            break
+                        await asyncio.sleep(2)
+                    break
+                try:
+                    if page.is_closed():
+                        break
+                except Exception:  # noqa: BLE001
+                    break
+                await asyncio.sleep(2)
+            if not logged:
+                try:
+                    await self._context.close()
+                except Exception:  # noqa: BLE001
+                    pass
+                self._pw_stack = self._pw = self._context = None
+                raise LoginTakeoverError("登录未完成（超时/关窗）——重试发送将再次弹出登录窗口")
+            logger.info(f"[{self.name}] login takeover OK——登录窗转正为发送会话（headed 保持）")
+            try:
+                await page.goto(url, timeout=45000, wait_until="domcontentloaded")
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"[{self.name}] login takeover room goto warning: {e}")
+            self._pages[room_id] = page
+            self._last_activity = time.monotonic()
+            return page
+        except Exception:
+            try:
+                await self._context.close()
+            except Exception:  # noqa: BLE001
+                pass
+            self._pw_stack = self._pw = self._context = None
+            raise
+
     async def close(self) -> None:
         """关闭会话（ENG-12 关闭日志；DX-D7 close 超时→stale 标记）"""
         if self._closed:
@@ -198,7 +286,8 @@ class ResidentSendSession:
     # ---- 发送入口 ----
 
     async def send(self, room_id: str, room_url: str,
-                   send_action: Callable[[Any, str], Awaitable[SendResult]]) -> SendResult:
+                   send_action: Callable[[Any, str], Awaitable[SendResult]],
+                   action_timeout_s: float | None = None) -> SendResult:
         """在常驻会话的 per-room page 上执行 send_action(page, room_id)
 
         send_action 由平台 sender 提供（DOM 配方/回显判定/登录失效检测）——
@@ -266,7 +355,8 @@ class ResidentSendSession:
             # 页面配方执行（ENG-1：显式超时——超时会话级重置）
             self._last_activity = time.monotonic()
             try:
-                result = await asyncio.wait_for(send_action(page, room_id), timeout=PAGE_OP_TIMEOUT_S * 3)
+                result = await asyncio.wait_for(send_action(page, room_id),
+                                                timeout=action_timeout_s or PAGE_OP_TIMEOUT_S * 3)
             except asyncio.TimeoutError:
                 logger.warning(f"[{self.name}] 会话重置: 发送操作超时 {PAGE_OP_TIMEOUT_S*3}s（ENG-1）——关闭待重建")
                 await self.close()

@@ -19,6 +19,7 @@ from danmaku_listener.contract.models import SendRejectReason, SendStatus
 from danmaku_listener.senders.base import BaseSender, SendResult
 from danmaku_listener.senders.resident_session import (
     MODE_HEADLESS_NEW,
+    LoginTakeoverError,
     ResidentSendSession,
 )
 
@@ -60,10 +61,36 @@ class HuyaResidentSender(BaseSender):
 
     async def send(self, room_id: str, content: str) -> SendResult:
         url = f"https://www.huya.com/{room_id}"
-        return await self._session.send(room_id, url, self._page_action(content))
+        # 登录转正流程（可见窗+人工登录+30s 验证宽限）可能需要数分钟——
+        # action 预算放宽至 360s（默认 90s 会掐断登录窗）
+        return await self._session.send(room_id, url, self._page_action(content),
+                                        action_timeout_s=360.0)
 
     def _page_action(self, content: str):
         async def action(page, rid: str) -> SendResult:
+            # 登录态检测（2026-10-09 方案 A：UDB 遮罩/登录 cookie 缺失 → 可见登录窗
+            # 转正——huya 登录令牌为会话级 cookie，profile cookie 无法跨页恢复登录态）
+            try:
+                mask = await page.locator("#UDBSdkLgn-mask").count()
+                cookies = {c["name"] for c in await page.context.cookies() if c.get("value")}
+                logged = bool({"yyuid", "hicl_imid", "huya_uid"} & cookies) and not mask
+            except Exception:  # noqa: BLE001  探测失败不阻断（fake page 兼容）
+                logged = True
+            if not logged:
+                logger.info(f"[huya] room {rid} 未登录（UDB 遮罩/cookie 缺失）——弹可见登录窗转正")
+                try:
+                    page = await self._session.login_takeover(
+                        rid, f"https://www.huya.com/{rid}",
+                        ("yyuid", "hicl_imid", "huya_uid"), grace_s=30.0)
+                except LoginTakeoverError as e:
+                    return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
+                                      detail=f"登录未完成: {e}",
+                                      fix_hint="重试发送将再次弹出登录窗口——请在窗口内完成登录与安全验证")
+                except Exception as e:  # noqa: BLE001  会话层异常隔离
+                    logger.warning(f"[huya] login takeover error: {type(e).__name__}: {str(e)[:80]}")
+                    return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
+                                      detail=f"登录窗异常: {type(e).__name__}: {str(e)[:80]}",
+                                      fix_hint="重试发送将再次弹出登录窗口")
             # 渲染等待：goto 返回后 SPA 输入框延迟挂载（1s 即查会假阴性）
             inp = None
             for _ in range(10):
