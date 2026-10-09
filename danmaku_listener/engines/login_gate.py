@@ -30,6 +30,9 @@ LOGIN_WAIT_TIMEOUT = 300.0
 LOGIN_BUDGET = 2
 #: 登录窗口 cookie 轮询间隔
 LOGIN_POLL_INTERVAL = 2.0
+#: 登录后保窗宽限（2026-10-09 小红书验收实证：登录落地即关窗杀安全验证——
+#: 淘宝/抖音同款缺陷第四例；共享函数一处修复覆盖全部受控页面平台）
+LOGIN_POST_GRACE_S = 30.0
 
 #: 各平台登录态判定 cookie（平台 → 候选名集合；任一存在且有值即视为已登录）
 LOGIN_COOKIE_NAMES = {

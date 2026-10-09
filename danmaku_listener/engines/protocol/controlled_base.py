@@ -153,6 +153,26 @@ class ControlledPageEngine(BaseEngine):
                                 f"[{self.platform}] room {room_id} login ok: "
                                 f"new_cookies={new_names} "
                                 f"hit_mask={LOGIN_GATE.mask_cookie((hit or {}).get('value', ''))}")
+                            # 登录后保窗宽限（2026-10-09 小红书验收用户实证：登录落地
+                            # 即关窗杀安全验证——淘宝/抖音同款缺陷第四例，共享函数一处
+                            # 修复覆盖 xiaohongshu/jd/1688 全部受控页面平台）
+                            grace_deadline = clock() + LOGIN_GATE.LOGIN_POST_GRACE_S
+                            while clock() < grace_deadline:
+                                if self._stopped(room_id):
+                                    logger.info(f"[{self.platform}] room {room_id} "
+                                                f"login grace stopped by user")
+                                    return "stopped"
+                                try:
+                                    cookies = await _cookies() or []
+                                except Exception as e:  # noqa: BLE001
+                                    logger.info(f"[{self.platform}] room {room_id} "
+                                                f"post-login window closed during grace")
+                                    return "logged_in"
+                                if not LOGIN_GATE.has_login_cookie(cookies, cookie_names):
+                                    break  # 会话被服务端作废——降级游客继续
+                                await sleep_fn(poll_interval)
+                            logger.info(f"[{self.platform}] room {room_id} "
+                                        f"login grace ended ({LOGIN_GATE.LOGIN_POST_GRACE_S:.0f}s)")
                             return "logged_in"
                         await sleep_fn(poll_interval)
                     logger.info(f"[{self.platform}] room {room_id} login wait timeout "
