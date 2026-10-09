@@ -135,6 +135,56 @@ class TaobaoMtopSender(BaseSender):
                 args=["--disable-blink-features=AutomationControlled",
                       "--disable-setuid-sandbox", "--hide-crash-restore-bubble"])
             logger.info(f"[taobao-mtop] stage=launch elapsed={time.monotonic()-t0:.1f}s room={room_id}")
+            # 登录门槛（2026-10-09 验收实证：profile 删除/会话失效→匿名 mtop 发送被拒
+            # PLATFORM_REJECTED。未登录→关无头 context、弹可见登录窗（等 unb+30s 滑块
+            # 宽限）→登录态入 profile 后同页继续发送。taobao 登录 cookie 为持久型——
+            # 发送完成后关窗不丢登录态）
+            try:
+                _ck = {c["name"] for c in await context.cookies() if c.get("value")}
+            except Exception:  # noqa: BLE001
+                _ck = set()
+            if "unb" not in _ck:
+                logger.info(f"[taobao-mtop] stage=login_gate 未登录——弹可见登录窗"
+                            f"（等用户完成登录+安全验证，最长 240s）")
+                await context.close()
+                context = await pw.chromium.launch_persistent_context(
+                    self._engine._profile_dir(), headless=False,
+                    user_agent=self._engine_UA(),
+                    viewport={"width": 1280, "height": 800},
+                    args=["--disable-blink-features=AutomationControlled",
+                          "--disable-setuid-sandbox", "--hide-crash-restore-bubble",
+                          "--mute-audio"])
+                page = context.pages[0] if context.pages else await context.new_page()
+                try:
+                    await page.goto(self._room_url(room_id), timeout=45000,
+                                    wait_until="domcontentloaded")
+                except Exception as e:  # noqa: BLE001
+                    logger.debug(f"[taobao-mtop] login window goto warning: {e}")
+                deadline = time.monotonic() + 240
+                logged = False
+                while time.monotonic() < deadline:
+                    try:
+                        ck = {c["name"] for c in await context.cookies() if c.get("value")}
+                        if "unb" in ck:
+                            logged = True
+                            break
+                    except Exception:  # noqa: BLE001
+                        break
+                    if page.is_closed():
+                        return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
+                                          detail="登录窗口被关闭",
+                                          fix_hint="重试发送将再次弹出登录窗口")
+                    await asyncio.sleep(2)
+                if not logged:
+                    return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
+                                      detail="登录未完成（240s 超时）",
+                                      fix_hint="重试发送将再次弹出登录窗口")
+                # 保窗宽限 30s：登录后滑块/安全验证（验收用户实测必需）
+                g = time.monotonic() + 30
+                while time.monotonic() < g:
+                    await asyncio.sleep(2)
+                logger.info(f"[taobao-mtop] stage=login_gate 完成 elapsed={time.monotonic()-t0:.1f}s")
+                page = context.pages[0] if context.pages else await context.new_page()
             try:
                 page = context.pages[0] if context.pages else await context.new_page()
                 # x5sec 风控信号观测（T1 实证 + 评审 redteam#2：注册提前到 page 创建后——

@@ -85,6 +85,10 @@ class FakeContext:
     def pages(self):
         return [self._page]
 
+    async def cookies(self):
+        # 登录门槛（2026-10-09）：默认已登录（unb 在）——登录门槛直通
+        return [{"name": "unb", "value": "test-unb"}]
+
     async def close(self):
         pass
 
