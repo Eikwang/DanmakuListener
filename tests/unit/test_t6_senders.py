@@ -222,13 +222,14 @@ async def test_huya_resident_send_success(monkeypatch):
         def __init__(self):
             self.page = FakePage()
 
-        async def send(self, room_id, url, action):
+        async def send(self, room_id, url, action, action_timeout_s=None):
             return await action(self.page, room_id)
 
         async def aclose(self):
             pass
 
     monkeypatch.setattr(huya_mod, "_get_session", lambda idle, mode: FakeSession())
+    # （FakeSession.send 需接受 action_timeout_s kwarg——见其定义）
     sender = HuyaResidentSender(settings=make_settings())
     result = await sender.send("12345", "[M0] t6")
     assert result.status == SendStatus.SENT
