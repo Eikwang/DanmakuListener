@@ -214,9 +214,9 @@ def map_custom_data(cd: Dict[str, Any], seq: int, ts: int,
 class XiaohongshuEngine(ControlledPageEngine):
     """小红书受控页面引擎（AutoDanmu send 钩子同 E5 纪律——选择器待 M0 校准）"""
 
-    SEND_INPUT_SELECTORS = ["#input-area div[contenteditable=true]",
+    SEND_INPUT_SELECTORS = ["#input-area",
+                            "#input-area div[contenteditable=true]",
                             "#input-area textarea",
-                            "#input-area > div",
                             "textarea", "div[contenteditable=true]"]
     SEND_BUTTON_SELECTORS = ["#input-area button", "#msg_send_bt"]
     LOGIN_WAIT_TIMEOUT_S = 240.0   # 页内登录等待（用户扫码/验证期间发送挂起）
