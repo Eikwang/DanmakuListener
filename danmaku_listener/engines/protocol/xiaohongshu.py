@@ -212,8 +212,83 @@ def map_custom_data(cd: Dict[str, Any], seq: int, ts: int,
 class XiaohongshuEngine(ControlledPageEngine):
     """小红书受控页面引擎（AutoDanmu send 钩子同 E5 纪律——选择器待 M0 校准）"""
 
-    SEND_INPUT_SELECTORS = ["textarea", "div[contenteditable=true]", "input[placeholder*=说]"]
+    SEND_INPUT_SELECTORS = [".live-chat .input-bar div[contenteditable=true]",
+                            ".input-bar div[contenteditable=true]",
+                            "textarea", "div[contenteditable=true]", "input[placeholder*=说]"]
     SEND_BUTTON_SELECTORS = ['button:has-text("发送")', 'text=发送']
+
+    async def send_danmu(self, room_id: str, content: str):
+        """小红书 DOM 发送（2026-10-09 验收修正）：基类 fill 不进框架 state
+        （1688 同款教训）——.input-bar contenteditable 逐键+Enter；回显核查
+        排除输入面自身（fill 时代假阳性 sent 教训）。"""
+        from danmaku_listener.contract.models import SendRejectReason, SendStatus
+        from danmaku_listener.senders.base import SendResult
+
+        try:
+            await asyncio.wait_for(self._profile_lock.acquire(),
+                                   timeout=3.0)  # S4-1/R14
+        except asyncio.TimeoutError:
+            return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
+                              fix_hint="profile 锁被监听操作占用——稍后重试（busy）")
+        try:
+            from playwright.async_api import async_playwright
+
+            url = self._send_room_url(room_id)
+            async with async_playwright() as pw:
+                context = await self._launch(pw, headless=True)
+                try:
+                    page = context.pages[0] if context.pages else await context.new_page()
+                    try:
+                        await page.goto(url, timeout=45000, wait_until="domcontentloaded")
+                    except Exception as e:  # noqa: BLE001
+                        return SendResult(SendStatus.UNKNOWN, SendRejectReason.SEND_TIMEOUT.value,
+                                          detail=f"goto: {type(e).__name__}")
+                    await asyncio.sleep(4)
+                    inp = None
+                    for sel in self.SEND_INPUT_SELECTORS:
+                        try:
+                            loc = page.locator(sel).first
+                            if await loc.count() > 0 and await loc.is_visible():
+                                inp = loc
+                                break
+                        except Exception:  # noqa: BLE001
+                            continue
+                    if inp is None:
+                        return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
+                                          fix_hint="未发现弹幕输入面（页面结构变更/未登录）——重跑 M0 探针")
+                    await inp.click()
+                    await inp.press_sequentially(content, delay=50)
+                    await inp.press("Enter")
+                    # 回显核查：.live-chat 文本减 .input-bar 自身（排除输入面假阳性——
+                    # fill 时代 sent 假阳性即输入面自匹配）
+                    echo = time.monotonic() + 12
+                    hit = False
+                    while time.monotonic() < echo:
+                        txt = await page.evaluate("""
+                            () => {
+                                const el = document.querySelector('.live-chat');
+                                if (!el) return '';
+                                const bar = el.querySelector('.input-bar');
+                                return bar ? el.innerText.replace(bar.innerText, '') : el.innerText;
+                            }
+                        """)
+                        if content in (txt or ""):
+                            hit = True
+                            break
+                        await asyncio.sleep(1.5)
+                    if hit:
+                        return SendResult(SendStatus.SENT, sent_at=int(time.time()))
+                    return SendResult(SendStatus.UNKNOWN, SendRejectReason.SEND_TIMEOUT.value,
+                                      detail="无回显（消息列表未见标记——本地乐观渲染已排除）")
+                finally:
+                    try:
+                        await context.close()
+                    except Exception:  # noqa: BLE001
+                        pass
+        except Exception as e:  # noqa: BLE001  E5 隔离：异常不出引擎边界
+            logger.warning(f"[xiaohongshu] send_danmu error: {type(e).__name__}: {str(e)[:100]}")
+            return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
+                              detail=f"{type(e).__name__}: {str(e)[:100]}")
 
     def _send_room_url(self, room_id: str) -> str:
         return LIVE_URL_TEMPLATE.format(room_id=room_id)
