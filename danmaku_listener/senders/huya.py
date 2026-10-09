@@ -102,6 +102,15 @@ class HuyaResidentSender(BaseSender):
             except Exception:  # noqa: BLE001
                 await inp.press("Enter")
             await asyncio.sleep(2)
+            # 提交后状态观测（评审 F-B 同款——UNKNOWN 分流依据）：
+            # 内层 #pub_msg_input 清空=框架已受理提交（送达未证）；有内容=提交未触发
+            input_after = None
+            try:
+                ta = page.locator("#pub_msg_input").first
+                if await ta.count() > 0:
+                    input_after = (await ta.input_value()).strip()
+            except Exception:  # noqa: BLE001
+                pass
             # F5：get_by_text 穿透 shadow DOM 回显
             deadline = time.monotonic() + ECHO_WAIT_S
             while time.monotonic() < deadline:
@@ -111,6 +120,7 @@ class HuyaResidentSender(BaseSender):
                 except Exception:  # noqa: BLE001
                     pass
                 await asyncio.sleep(1.5)
+            state = "空(框架已受理提交)" if input_after == "" else ("有内容(提交未触发)" if input_after else "无法读取")
             return SendResult(SendStatus.UNKNOWN, SendRejectReason.SEND_TIMEOUT.value,
-                              detail="无回显无显式错误（虎牙冷却/虚拟列表可能——min-interval 35s 覆写兜底）")
+                              detail=f"无回显无显式错误；提交后输入框={state}（虎牙冷却/虚拟列表可能）")
         return action
