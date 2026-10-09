@@ -103,26 +103,33 @@ class HuyaResidentSender(BaseSender):
                     await inp.press("Enter")
             except Exception:  # noqa: BLE001
                 await inp.press("Enter")
-            await asyncio.sleep(2)
-            # 提交后状态观测（评审 F-B 同款——UNKNOWN 分流依据）：
-            # 内层 #pub_msg_input 清空=框架已受理提交（送达未证）；有内容=提交未触发
+            # 提交后状态观测（前移至 +0.3s——huya 提交成功后会重建聊天区节点，
+            # 观测晚了读到的就是重建后的世界，2026-10-09 实测教训）
             input_after = None
             try:
                 ta = page.locator("#pub_msg_input").first
                 if await ta.count() > 0:
                     input_after = (await ta.input_value()).strip()
-            except Exception:  # noqa: BLE001
-                pass
-            # F5：get_by_text 穿透 shadow DOM 回显
+            except Exception:  # noqa: BLE001  节点已被页面重建替换——按 None 记
+                input_after = None
+            # F5：get_by_text 穿透 shadow DOM 回显；兜底=聊天容器 innerText 扫描
+            # （虎牙 2026-10-09 实测：提交成功后节点重建致 get_by_text 假阴性——
+            #   斗鱼/1688 同款第三例；innerText 扫描按行拼接仍可命中）
             deadline = time.monotonic() + ECHO_WAIT_S
             while time.monotonic() < deadline:
                 try:
                     if await page.get_by_text(content).count() > 0:
                         return SendResult(SendStatus.SENT, sent_at=int(time.time()))
+                    aside_text = await page.evaluate(
+                        "() => { const a = document.querySelector('#js-player-asideMain');"
+                        " return a ? a.innerText : ''; }")
+                    if content in (aside_text or ""):
+                        return SendResult(SendStatus.SENT, sent_at=int(time.time()))
                 except Exception:  # noqa: BLE001
                     pass
                 await asyncio.sleep(1.5)
-            state = "空(已提交或输入未进真输入框——按 #pub_msg_input 直打复验)" if input_after == "" else ("有内容(提交未触发)" if input_after else "无法读取")
+            state = ("空(已提交——回显与观测均未命中)" if input_after == ""
+                     else ("有内容(提交未触发)" if input_after else "无法读取(节点已重建)"))
             return SendResult(SendStatus.UNKNOWN, SendRejectReason.SEND_TIMEOUT.value,
                               detail=f"无回显无显式错误；提交后输入框={state}（虎牙冷却/虚拟列表可能）")
         return action
