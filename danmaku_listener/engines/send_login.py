@@ -69,6 +69,16 @@ async def _huya_login(room_id: str = "", timeout: float = 240.0) -> dict:
                     break
                 if set(HUYA_COOKIE_NAMES) & cookies:
                     logged = True
+                    # 登录后保窗宽限（2026-10-09 虎牙验收实证：登录落地即关窗杀安全
+                    # 验证，会话数分钟内被服务端作废——淘宝/抖音同款缺陷第三例）
+                    grace_deadline = time.monotonic() + 30.0
+                    while time.monotonic() < grace_deadline:
+                        try:
+                            await context.cookies()
+                        except Exception:
+                            break
+                        await asyncio.sleep(2)
+                    logger.info("[huya-login] login grace ended (30s)——窗口关闭")
                     break
                 if page.is_closed():
                     break
