@@ -329,17 +329,29 @@ class ResidentSendSession:
                 page = None
 
             # per-room page 懒创建（playwright timeout 参数=毫秒；asyncio.wait_for=秒——双层保护）
-            try:
-                page = await asyncio.wait_for(self._context.new_page(), timeout=PAGE_OP_TIMEOUT_S)
-                await asyncio.wait_for(page.goto(room_url, timeout=PAGE_OP_TIMEOUT_S * 1000,
-                                                 wait_until="domcontentloaded"), timeout=PAGE_OP_TIMEOUT_S + 15)
-            except Exception as e:  # noqa: BLE001 挂页失败→关会话防泄漏（loop 干净退出）
-                logger.warning(f"[{self.name}] 页面挂载失败: {type(e).__name__}: {str(e)[:100]}——关闭会话防进程泄漏")
-                await self.close()
-                self._closed = False
+            # 挂页失败重试一次（2026-10-09 虎牙实证：用户关闭转正窗口→context 死亡，
+            # 首次 new_page 撞死 context 报 TargetClosedError——全量重启浏览器后可自愈；
+            # 重启后若会话失效，由 action 层登录检测触发转正登录窗）
+            for mount_attempt in range(2):
+                try:
+                    page = await asyncio.wait_for(self._context.new_page(), timeout=PAGE_OP_TIMEOUT_S)
+                    await asyncio.wait_for(page.goto(room_url, timeout=PAGE_OP_TIMEOUT_S * 1000,
+                                                     wait_until="domcontentloaded"), timeout=PAGE_OP_TIMEOUT_S + 15)
+                    break
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(f"[{self.name}] 页面挂载失败(第{mount_attempt + 1}次): "
+                                   f"{type(e).__name__}: {str(e)[:80]}——全量重启浏览器重试")
+                    await self.close()          # 全量关闭（含死亡 context）
+                    self._closed = False
+                    if mount_attempt == 0:
+                        await self._launch()    # 全量重启浏览器（无头形态）
+                        continue
+                    return SendResult(SendStatus.UNKNOWN, SendRejectReason.SEND_TIMEOUT.value,
+                                      detail=f"挂页失败(重试后仍失败): {type(e).__name__}",
+                                      fix_hint="页面导航超时/失败——重试将使用全新会话")
+            else:
                 return SendResult(SendStatus.UNKNOWN, SendRejectReason.SEND_TIMEOUT.value,
-                                  detail=f"挂页失败: {type(e).__name__}",
-                                  fix_hint="页面导航超时/失败——重试将使用全新会话")
+                                  detail="挂页失败: 重试耗尽")
             self._pages[room_id] = page
             logger.info(f"[{self.name}] 页面挂载: room={room_id}（per-room 常驻）")
 
