@@ -246,12 +246,8 @@ class XiaohongshuEngine(ControlledPageEngine):
             self._send_ctx = None
         from playwright.async_api import async_playwright
         self._send_pw = await async_playwright().start()
-        self._send_ctx = await self._send_pw.chromium.launch_persistent_context(
-            self._profile_dir, headless=False,
-            user_agent=self._user_agent, viewport=self._viewport,
-            args=["--disable-blink-features=AutomationControlled",
-                  "--disable-setuid-sandbox", "--hide-crash-restore-bubble",
-                  "--mute-audio"])
+        # 引擎自己的 _launch（统一反检测参数）——headed 形态
+        self._send_ctx = await self._launch(self._send_pw, headless=False)
         self._send_page = (self._send_ctx.pages[0] if self._send_ctx.pages
                            else await self._send_ctx.new_page())
         return self._send_page
