@@ -46,7 +46,9 @@ def extract_room_id(room_spec: str) -> str:
     """room_id 归一：数字 / xiaohongshu 直播间链接（livestream/{id}）"""
     spec = room_spec.strip()
     if "xiaohongshu.com" in spec or "xhslink.com" in spec:
-        m = re.search(r"livestream/(\d+)", spec)
+        # 2026-10-09：新分享链接形态 livestream/<dynpath>/<id>（中间可有路径段）——
+        # 旧正则 livestream/(\d+) 要求紧邻，新形态解析失败（验收用户实测）
+        m = re.search(r"livestream/(?:[^/\s]*/)?(\d+)", spec)
         if m:
             return m.group(1)
         raise XiaohongshuParseError(
