@@ -219,11 +219,46 @@ class XiaohongshuEngine(ControlledPageEngine):
                             "#input-area > div",
                             "textarea", "div[contenteditable=true]"]
     SEND_BUTTON_SELECTORS = ["#input-area button", "#msg_send_bt"]
+    LOGIN_WAIT_TIMEOUT_S = 240.0   # 页内登录等待（用户扫码/验证期间发送挂起）
+
+    # ---- 方案 A：headed 持久发送页（2026-10-09 验收实证）----
+    # XHS 登录令牌为会话级 cookie——浏览器关闭即丢（headless 瞬态页每次都是
+    # 匿名态，提交被静默吞）。 headed 持久页跨发送存活：登录态随浏览器存活，
+    # 未登录时用户直接在页内完成登录（登录弹窗就在房间页上）。
+    _send_pw: Any = None
+    _send_ctx: Any = None
+    _send_page: Any = None
+
+    async def _ensure_send_page(self) -> Any:
+        """headed 持久发送页（跨发送存活；死亡时重建）。"""
+        if self._send_page is not None:
+            try:
+                if not self._send_page.is_closed():
+                    return self._send_page
+            except Exception:  # noqa: BLE001
+                pass
+            self._send_page = None
+            try:
+                if self._send_ctx is not None:
+                    await self._send_ctx.close()
+            except Exception:  # noqa: BLE001
+                pass
+            self._send_ctx = None
+        from playwright.async_api import async_playwright
+        self._send_pw = await async_playwright().start()
+        self._send_ctx = await self._send_pw.chromium.launch_persistent_context(
+            self._profile_dir, headless=False,
+            user_agent=self._user_agent, viewport=self._viewport,
+            args=["--disable-blink-features=AutomationControlled",
+                  "--disable-setuid-sandbox", "--hide-crash-restore-bubble",
+                  "--mute-audio"])
+        self._send_page = (self._send_ctx.pages[0] if self._send_ctx.pages
+                           else await self._send_ctx.new_page())
+        return self._send_page
 
     async def send_danmu(self, room_id: str, content: str):
-        """小红书 DOM 发送（2026-10-09 验收修正 v2）：输入区=#input-area（用户
-        devtools 实测）；发送按钮在输入文字后才出现（先逐键输入→按钮出现→点击）；
-        房间链接必须原样携带 xsec_token（纯数字 URL 已 404——风控收紧）。"""
+        """小红书发送（方案 A）：headed 持久页 + 未登录时页内等待用户登录 +
+        #input-area 配方（逐键+按钮时序）+ 回显排除输入面。"""
         from danmaku_listener.contract.models import SendRejectReason, SendStatus
         from danmaku_listener.senders.base import SendResult
 
@@ -233,32 +268,40 @@ class XiaohongshuEngine(ControlledPageEngine):
         except asyncio.TimeoutError:
             return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
                               fix_hint="profile 锁被监听操作占用——稍后重试（busy）")
+        page = None
         try:
             from playwright.async_api import async_playwright
 
             # 房间 URL：链接形态原样携带（含 xsec_token）；纯数字才拼模板
             url = (room_id.strip() if "xiaohongshu.com" in room_id
                    else self._send_room_url(room_id))
-            async with async_playwright() as pw:
-                # headed 形态（2026-10-09 验收裁决）：headless=new 提交被服务端静默吞
-                # （人工 headed 对照能过——虎牙同款指纹识别），有头瞬态窗发送后自动关闭
-                context = await self._launch(pw, headless=False)
-                try:
-                    page = context.pages[0] if context.pages else await context.new_page()
+            page = await self._ensure_send_page()
+            try:
+                await page.goto(url, timeout=45000, wait_until="domcontentloaded")
+            except Exception as e:  # noqa: BLE001
+                return SendResult(SendStatus.UNKNOWN, SendRejectReason.SEND_TIMEOUT.value,
+                                  detail=f"goto: {type(e).__name__}")
+            # 等输入区出现（最长 10s）——未登录时页面弹登录窗
+            inp = None
+            for _ in range(5):
+                for sel in self.SEND_INPUT_SELECTORS:
                     try:
-                        await page.goto(url, timeout=45000, wait_until="domcontentloaded")
-                    except Exception as e:  # noqa: BLE001
-                        return SendResult(SendStatus.UNKNOWN, SendRejectReason.SEND_TIMEOUT.value,
-                                          detail=f"goto: {type(e).__name__}")
-                    await asyncio.sleep(5)
-                    # 登录态检测：登录弹窗出现=会话失效（profile cookie 未恢复页面登录态）
-                    login_dlg = await page.locator(".login-container, [class*=login-container]").count()
-                    if login_dlg > 0 or await page.locator("#input-area").count() == 0:
-                        return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
-                                          detail="页面未登录（登录弹窗出现/输入区缺失）",
-                                          fix_hint="重新添加房间以触发可见登录窗，完成登录后再发送")
-                    # 输入面：#input-area 内（用户 devtools 实测容器）
-                    inp = None
+                        loc = page.locator(sel).first
+                        if await loc.count() > 0 and await loc.is_visible():
+                            inp = loc
+                            break
+                    except Exception:  # noqa: BLE001
+                        continue
+                if inp is not None:
+                    break
+                await asyncio.sleep(2)
+            if inp is None:
+                # 未登录（登录弹窗遮挡）——等待用户在可见窗口内完成登录（最长 240s）
+                logger.info(f"[xhs] room {room_id} 未登录——等待用户在 headed 窗口完成登录"
+                            f"（最长 {self.LOGIN_WAIT_TIMEOUT_S:.0f}s，完成后自动继续发送）")
+                wait_deadline = time.monotonic() + self.LOGIN_WAIT_TIMEOUT_S
+                while time.monotonic() < wait_deadline:
+                    await asyncio.sleep(3)
                     for sel in self.SEND_INPUT_SELECTORS:
                         try:
                             loc = page.locator(sel).first
@@ -267,49 +310,52 @@ class XiaohongshuEngine(ControlledPageEngine):
                                 break
                         except Exception:  # noqa: BLE001
                             continue
-                    if inp is None:
-                        return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
-                                          fix_hint="未发现弹幕输入面（页面结构变更）——重跑 M0 探针")
-                    await inp.click()
-                    await inp.press_sequentially(content, delay=50)
-                    # 发送按钮输入文字后才出现（验收用户实测）——先 Enter 兜底再按钮
-                    await inp.press("Enter")
-                    btn = page.locator("#input-area button").first
-                    if await btn.count() > 0 and await btn.is_visible():
-                        try:
-                            await btn.click(timeout=3_000)
-                        except Exception:  # noqa: BLE001
-                            pass
-                    # 回显核查：消息列表出现标记（排除输入面自身假阳性）
-                    echo = time.monotonic() + 12
-                    hit = False
-                    while time.monotonic() < echo:
-                        txt = await page.evaluate(
-                            "(m) => { const el = document.querySelector('#input-area');"
-                            " const main = el ? (el.closest('.main-comment') || el.parentElement) : null;"
-                            " if (!main) return '';"
-                            " const area = main.querySelector('#input-area');"
-                            " const base = area ? area.innerText : '';"
-                            " return main.innerText.replace(base, '').slice(-400); }", content)
-                        if content in (txt or ""):
-                            hit = True
-                            break
-                        await asyncio.sleep(1.5)
-                    if hit:
-                        return SendResult(SendStatus.SENT, sent_at=int(time.time()))
-                    return SendResult(SendStatus.UNKNOWN, SendRejectReason.SEND_TIMEOUT.value,
-                                      detail="无回显（消息列表未见标记——本地乐观渲染已排除）")
-                finally:
-                    try:
-                        await context.close()
-                    except Exception:  # noqa: BLE001
-                        pass
+                    if inp is not None:
+                        logger.info(f"[xhs] room {room_id} 登录完成——继续发送")
+                        break
+                if inp is None:
+                    return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
+                                      detail="登录未完成（240s 等待超时）",
+                                      fix_hint="重试发送将再次打开登录页——完成登录后自动继续发送")
+            await inp.click()
+            await inp.press_sequentially(content, delay=50)
+            # 发送按钮输入文字后才出现（验收用户实测）——先 Enter 兜底再按钮
+            await inp.press("Enter")
+            btn = page.locator("#input-area button").first
+            if await btn.count() > 0 and await btn.is_visible():
+                try:
+                    await btn.click(timeout=3_000)
+                except Exception:  # noqa: BLE001
+                    pass
+            # 回显核查：消息列表出现标记（排除输入面自身假阳性）
+            echo = time.monotonic() + 12
+            hit = False
+            while time.monotonic() < echo:
+                txt = await page.evaluate(
+                    "(m) => { const el = document.querySelector('#input-area');"
+                    " const main = el ? (el.closest('.main-comment') || el.parentElement) : null;"
+                    " if (!main) return '';"
+                    " const area = main.querySelector('#input-area');"
+                    " const base = area ? area.innerText : '';"
+                    " return main.innerText.replace(base, '').slice(-400); }", content)
+                if content in (txt or ""):
+                    hit = True
+                    break
+                await asyncio.sleep(1.5)
+            if hit:
+                return SendResult(SendStatus.SENT, sent_at=int(time.time()))
+            return SendResult(SendStatus.UNKNOWN, SendRejectReason.SEND_TIMEOUT.value,
+                              detail="无回显（消息列表未见标记——本地乐观渲染已排除）")
         except Exception as e:  # noqa: BLE001  E5 隔离：异常不出引擎边界
             logger.warning(f"[xiaohongshu] send_danmu error: {type(e).__name__}: {str(e)[:100]}")
             return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
                               detail=f"{type(e).__name__}: {str(e)[:100]}")
-            return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
-                              detail=f"{type(e).__name__}: {str(e)[:100]}")
+        finally:
+            if page is not None:
+                try:
+                    await page.close()
+                except Exception:  # noqa: BLE001
+                    pass
 
     def _send_room_url(self, room_id: str) -> str:
         return LIVE_URL_TEMPLATE.format(room_id=room_id)
