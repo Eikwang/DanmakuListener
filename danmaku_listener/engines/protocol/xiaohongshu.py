@@ -240,7 +240,9 @@ class XiaohongshuEngine(ControlledPageEngine):
             url = (room_id.strip() if "xiaohongshu.com" in room_id
                    else self._send_room_url(room_id))
             async with async_playwright() as pw:
-                context = await self._launch(pw, headless=True)
+                # headed 形态（2026-10-09 验收裁决）：headless=new 提交被服务端静默吞
+                # （人工 headed 对照能过——虎牙同款指纹识别），有头瞬态窗发送后自动关闭
+                context = await self._launch(pw, headless=False)
                 try:
                     page = context.pages[0] if context.pages else await context.new_page()
                     try:
