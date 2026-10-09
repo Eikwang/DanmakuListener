@@ -23,9 +23,11 @@ from danmaku_listener.senders.resident_session import (
 )
 
 PROFILE_DIR = "cookie/huya_login_profile"
-INPUT_SELECTORS = ("#J_RoomChatSpeaker",  # 2026-10-08 验收用户实测定位
-                   "#pub_msg_input", "input[placeholder*=弹幕]", "textarea")
-BUTTON_SELECTORS = ("[class*=send]", 'button:has-text("发送")', ".send-btn")
+INPUT_SELECTORS = ("#pub_msg_input",  # 2026-10-09 验收用户 devtools 实测（真输入框；
+                   # #J_RoomChatSpeaker 是容器——此前打容器导致假 UNKNOWN）
+                   "#J_RoomChatSpeaker", "input[placeholder*=弹幕]", "textarea")
+BUTTON_SELECTORS = ("#msg_send_bt",  # 2026-10-09 验收用户 devtools 实测（真发送按钮）
+                    "[class*=send]", 'button:has-text("发送")', ".send-btn")
 ECHO_WAIT_S = 12.0
 
 #: 进程级会话单例（虎牙 profile 独立于抖音——第二实例参数化复用同一管理器类）
@@ -120,7 +122,7 @@ class HuyaResidentSender(BaseSender):
                 except Exception:  # noqa: BLE001
                     pass
                 await asyncio.sleep(1.5)
-            state = "空(框架已受理提交)" if input_after == "" else ("有内容(提交未触发)" if input_after else "无法读取")
+            state = "空(已提交或输入未进真输入框——按 #pub_msg_input 直打复验)" if input_after == "" else ("有内容(提交未触发)" if input_after else "无法读取")
             return SendResult(SendStatus.UNKNOWN, SendRejectReason.SEND_TIMEOUT.value,
                               detail=f"无回显无显式错误；提交后输入框={state}（虎牙冷却/虚拟列表可能）")
         return action
