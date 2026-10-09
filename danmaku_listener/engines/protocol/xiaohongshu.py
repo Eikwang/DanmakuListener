@@ -212,15 +212,16 @@ def map_custom_data(cd: Dict[str, Any], seq: int, ts: int,
 class XiaohongshuEngine(ControlledPageEngine):
     """小红书受控页面引擎（AutoDanmu send 钩子同 E5 纪律——选择器待 M0 校准）"""
 
-    SEND_INPUT_SELECTORS = [".live-chat .input-bar div[contenteditable=true]",
-                            ".input-bar div[contenteditable=true]",
-                            "textarea", "div[contenteditable=true]", "input[placeholder*=说]"]
-    SEND_BUTTON_SELECTORS = ['button:has-text("发送")', 'text=发送']
+    SEND_INPUT_SELECTORS = ["#input-area div[contenteditable=true]",
+                            "#input-area textarea",
+                            "#input-area > div",
+                            "textarea", "div[contenteditable=true]"]
+    SEND_BUTTON_SELECTORS = ["#input-area button", "#msg_send_bt"]
 
     async def send_danmu(self, room_id: str, content: str):
-        """小红书 DOM 发送（2026-10-09 验收修正）：基类 fill 不进框架 state
-        （1688 同款教训）——.input-bar contenteditable 逐键+Enter；回显核查
-        排除输入面自身（fill 时代假阳性 sent 教训）。"""
+        """小红书 DOM 发送（2026-10-09 验收修正 v2）：输入区=#input-area（用户
+        devtools 实测）；发送按钮在输入文字后才出现（先逐键输入→按钮出现→点击）；
+        房间链接必须原样携带 xsec_token（纯数字 URL 已 404——风控收紧）。"""
         from danmaku_listener.contract.models import SendRejectReason, SendStatus
         from danmaku_listener.senders.base import SendResult
 
@@ -233,7 +234,9 @@ class XiaohongshuEngine(ControlledPageEngine):
         try:
             from playwright.async_api import async_playwright
 
-            url = self._send_room_url(room_id)
+            # 房间 URL：链接形态原样携带（含 xsec_token）；纯数字才拼模板
+            url = (room_id.strip() if "xiaohongshu.com" in room_id
+                   else self._send_room_url(room_id))
             async with async_playwright() as pw:
                 context = await self._launch(pw, headless=True)
                 try:
@@ -243,7 +246,14 @@ class XiaohongshuEngine(ControlledPageEngine):
                     except Exception as e:  # noqa: BLE001
                         return SendResult(SendStatus.UNKNOWN, SendRejectReason.SEND_TIMEOUT.value,
                                           detail=f"goto: {type(e).__name__}")
-                    await asyncio.sleep(4)
+                    await asyncio.sleep(5)
+                    # 登录态检测：登录弹窗出现=会话失效（profile cookie 未恢复页面登录态）
+                    login_dlg = await page.locator(".login-container, [class*=login-container]").count()
+                    if login_dlg > 0 or await page.locator("#input-area").count() == 0:
+                        return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
+                                          detail="页面未登录（登录弹窗出现/输入区缺失）",
+                                          fix_hint="重新添加房间以触发可见登录窗，完成登录后再发送")
+                    # 输入面：#input-area 内（用户 devtools 实测容器）
                     inp = None
                     for sel in self.SEND_INPUT_SELECTORS:
                         try:
@@ -255,23 +265,28 @@ class XiaohongshuEngine(ControlledPageEngine):
                             continue
                     if inp is None:
                         return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
-                                          fix_hint="未发现弹幕输入面（页面结构变更/未登录）——重跑 M0 探针")
+                                          fix_hint="未发现弹幕输入面（页面结构变更）——重跑 M0 探针")
                     await inp.click()
                     await inp.press_sequentially(content, delay=50)
+                    # 发送按钮输入文字后才出现（验收用户实测）——先 Enter 兜底再按钮
                     await inp.press("Enter")
-                    # 回显核查：.live-chat 文本减 .input-bar 自身（排除输入面假阳性——
-                    # fill 时代 sent 假阳性即输入面自匹配）
+                    btn = page.locator("#input-area button").first
+                    if await btn.count() > 0 and await btn.is_visible():
+                        try:
+                            await btn.click(timeout=3_000)
+                        except Exception:  # noqa: BLE001
+                            pass
+                    # 回显核查：消息列表出现标记（排除输入面自身假阳性）
                     echo = time.monotonic() + 12
                     hit = False
                     while time.monotonic() < echo:
-                        txt = await page.evaluate("""
-                            () => {
-                                const el = document.querySelector('.live-chat');
-                                if (!el) return '';
-                                const bar = el.querySelector('.input-bar');
-                                return bar ? el.innerText.replace(bar.innerText, '') : el.innerText;
-                            }
-                        """)
+                        txt = await page.evaluate(
+                            "(m) => { const el = document.querySelector('#input-area');"
+                            " const main = el ? (el.closest('.main-comment') || el.parentElement) : null;"
+                            " if (!main) return '';"
+                            " const area = main.querySelector('#input-area');"
+                            " const base = area ? area.innerText : '';"
+                            " return main.innerText.replace(base, '').slice(-400); }", content)
                         if content in (txt or ""):
                             hit = True
                             break
@@ -287,6 +302,8 @@ class XiaohongshuEngine(ControlledPageEngine):
                         pass
         except Exception as e:  # noqa: BLE001  E5 隔离：异常不出引擎边界
             logger.warning(f"[xiaohongshu] send_danmu error: {type(e).__name__}: {str(e)[:100]}")
+            return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
+                              detail=f"{type(e).__name__}: {str(e)[:100]}")
             return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
                               detail=f"{type(e).__name__}: {str(e)[:100]}")
 
