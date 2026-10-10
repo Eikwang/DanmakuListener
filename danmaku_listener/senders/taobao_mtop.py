@@ -135,6 +135,9 @@ async (args) => {
 }
 """
 
+#: 无头滑块未通过的哨兵 detail（send() 据此触发有头窗口自动重试——验证环境分）
+SLIDER_HEADLESS_RETRY_DETAIL = "自动滑块未通过（无头环境）——有头窗口自动重试"
+
 EVAL_LIB_PROBE_JS = "!!((window.lib && window.lib.mtop) || window.mtop) && typeof ((window.lib && window.lib.mtop) || window.mtop).request === 'function'"
 
 
@@ -153,7 +156,12 @@ class TaobaoMtopSender(BaseSender):
             return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
                               fix_hint="profile 锁被监听操作占用——稍后重试（busy）")
         try:
-            return await self._send_locked(room_id, content)
+            result = await self._send_locked(room_id, content)
+            if (result.detail or "").startswith(SLIDER_HEADLESS_RETRY_DETAIL):
+                # 无头滑块未过（环境分）——有头窗口自动重试（用户可见窗口闪现）
+                logger.info("[taobao-mtop] 无头滑块未过——有头窗口自动重试（验证环境分）")
+                result = await self._send_locked(room_id, content, headed=True)
+            return result
         except Exception as e:  # noqa: BLE001  E5 隔离（与 deprecated DOM 钩子/EngineHookSender 同语义——异常不出 sender 边界）
             logger.warning(f"[taobao-mtop] send 异常: {type(e).__name__}: {str(e)[:120]}")
             return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
@@ -161,15 +169,17 @@ class TaobaoMtopSender(BaseSender):
         finally:
             self._engine._profile_lock.release()
 
-    async def _send_locked(self, room_id: str, content: str) -> SendResult:
+    async def _send_locked(self, room_id: str, content: str,
+                           headed: bool = False) -> SendResult:
         t0 = time.monotonic()
         async with async_playwright() as pw:
             context = await pw.chromium.launch_persistent_context(
-                self._engine._profile_dir(), headless=True,
+                self._engine._profile_dir(), headless=not headed,
                 user_agent=self._engine_UA(),
                 viewport={"width": 1280, "height": 800},
                 args=["--disable-blink-features=AutomationControlled",
-                      "--disable-setuid-sandbox", "--hide-crash-restore-bubble"])
+                      "--disable-setuid-sandbox", "--hide-crash-restore-bubble"]
+                + (["--mute-audio"] if headed else []))
             logger.info(f"[taobao-mtop] stage=launch elapsed={time.monotonic()-t0:.1f}s room={room_id}")
             # 登录门槛（2026-10-09 验收实证：profile 删除/会话失效→匿名 mtop 发送被拒
             # PLATFORM_REJECTED。未登录→关无头 context、弹可见登录窗（等 unb+30s 滑块
@@ -244,7 +254,7 @@ class TaobaoMtopSender(BaseSender):
                         if risk["hit"]:
                             return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
                                               detail="x5sec 风控信号（网络层捕获，页面加载期）——noCaptcha 验证待人工",
-                                              fix_hint="风控验证待人工（headless 无法完成滑块）——勿盲目重试；"
+                                              fix_hint="风控验证待人工——勿盲目重试；"
                                                        "降频稍后重试或经有头窗口完成验证后恢复")
                         return SendResult(SendStatus.UNKNOWN, SendRejectReason.SEND_TIMEOUT.value,
                                           detail=f"goto: {type(e).__name__}")
@@ -283,6 +293,7 @@ class TaobaoMtopSender(BaseSender):
                     ret_str = ("; ".join(str(r) for r in (result.get("ret") or []))
                                if isinstance(result, dict) else "")
                     risk_ret = any(p in ret_str for p in RET_RISK_PATTERNS)
+                    knob_sel: Optional[str] = None
                     if risk["hit"] or risk_ret:
                         # 自动滑块（2026-10-10 用户需求：~12h 周期性简单滑块——人味
                         # 轨迹拖动自动通过；无滑块/未通过=回落原人工路径。良性超时
@@ -305,13 +316,23 @@ class TaobaoMtopSender(BaseSender):
                     if eval_timeout:
                         if risk["hit"] or risk_ret:
                             logger.warning(f"[taobao-mtop] stage=eval x5sec_signal elapsed={time.monotonic()-t0:.1f}s room={room_id}")
+                            if not headed:
+                                return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
+                                                  detail=SLIDER_HEADLESS_RETRY_DETAIL,
+                                                  fix_hint="有头窗口自动重试进行中——验证环境分更优")
                             return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
-                                              detail="x5sec 风控信号——自动滑块未通过/未出现（重试仍无响应）",
-                                              fix_hint="风控验证待人工——勿盲目重试；降频稍后重试或经有头窗口完成验证后恢复")
+                                              detail="x5sec 风控信号——自动滑块未通过（无头+有头均重试）",
+                                              fix_hint="风控验证待人工——勿盲目重试；降频稍后重试或手动完成验证后恢复")
                         logger.warning(f"[taobao-mtop] stage=eval NO_RESPONSE elapsed={time.monotonic()-t0:.1f}s room={room_id}")
                         return SendResult(SendStatus.UNKNOWN, SendRejectReason.SEND_TIMEOUT.value,
                                           detail=f"mtop 调用 {EVAL_TIMEOUT_S:.0f}s 无响应（页面 promise 未决）",
                                           fix_hint="页面 mtop 调用未决——重跑 T1 探针核对形态")
+                    if risk_ret and isinstance(result, dict) and knob_sel is not None and not headed:
+                        # 无头下滑块拖了但 ret 仍风控——环境分嫌疑，有头重试
+                        logger.warning(f"[taobao-mtop] stage=eval risk_after_slider（无头）room={room_id} ret={ret_str[:80]}")
+                        return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
+                                          detail=SLIDER_HEADLESS_RETRY_DETAIL,
+                                          fix_hint="有头窗口自动重试进行中——验证环境分更优")
                     if risk_ret and isinstance(result, dict):
                         # 重试后仍风控 ret——不再二次拖动（避免循环），人工路径
                         logger.warning(f"[taobao-mtop] stage=eval risk_after_slider room={room_id} ret={ret_str[:80]}")
@@ -347,9 +368,10 @@ class TaobaoMtopSender(BaseSender):
                     if not kb or kb.get("width", 0) <= 0:
                         continue
                     track_w = await loc.evaluate(
-                        "el => { const c = el.closest('.nc-container')"
-                        " || el.closest('[id*=\"nc_1\"]') || el.parentElement;"
-                        " return c ? c.getBoundingClientRect().width : 0; }")
+                        "el => { const t = document.getElementById('nc_1__scale_text')"
+                        " || document.querySelector('[class*=\"scale_text\"], [class*=\"nc-lang-cnt\"]')"
+                        " || el.parentElement;"
+                        " return t ? t.getBoundingClientRect().width : 0; }")
                     if not track_w or track_w <= kb["width"]:
                         track_w = 320.0  # 兜底轨道宽（noCaptcha 常见 300±）
                     plan = plan_slider_drag(float(track_w), float(kb["width"]))
@@ -362,10 +384,20 @@ class TaobaoMtopSender(BaseSender):
                     await page.mouse.up()
                     logger.info(f"[taobao-mtop] stage=slider 拖动完成 sel={sel} "
                                 f"frame={frame.url[:60]} track={track_w:.0f}px 步数={len(plan)}")
+                    # 诊断：knob 是否真的位移（区分"事件未注册"与"动了但被拒"）
+                    try:
+                        kb2 = await loc.bounding_box()
+                        moved = (kb2 is not None and kb is not None
+                                 and abs(kb2["x"] - kb["x"]) > 5.0)
+                        logger.info(f"[taobao-mtop] stage=slider knob位移={moved} "
+                                    f"x:{kb['x']:.0f}->{(kb2 or {}).get('x', -1):.0f}")
+                    except Exception:  # noqa: BLE001  组件重置/隐藏——按已通过倾向记
+                        logger.info("[taobao-mtop] stage=slider knob 位置不可读（组件可能已重置=通过倾向）")
                     # 文本信号（日志级——成功裁决走 mtop 重试 ret）
                     deadline = time.monotonic() + 5
                     ok_text = False
-                    while time.monotonic() < deadline and not ok_text:
+                    fail_text = False
+                    while time.monotonic() < deadline and not (ok_text or fail_text):
                         for f in page.frames:
                             try:
                                 txt = await f.evaluate(
@@ -373,11 +405,14 @@ class TaobaoMtopSender(BaseSender):
                                 if "验证通过" in (txt or ""):
                                     ok_text = True
                                     break
+                                if "验证失败" in (txt or "") or "再次验证" in (txt or ""):
+                                    fail_text = True
+                                    break
                             except Exception:  # noqa: BLE001  about 帧等
                                 continue
-                        if not ok_text:
+                        if not (ok_text or fail_text):
                             await asyncio.sleep(0.5)
-                    logger.info(f"[taobao-mtop] stage=slider 文本信号 ok={ok_text}")
+                    logger.info(f"[taobao-mtop] stage=slider 文本信号 ok={ok_text} fail={fail_text}")
                     return sel
                 except Exception as e:  # noqa: BLE001  单候选失败继续搜
                     logger.debug(f"[taobao-mtop] slider 候选 {sel} 探测失败: {type(e).__name__}")
