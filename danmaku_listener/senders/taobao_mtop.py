@@ -32,6 +32,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
+import random
 import re
 import time
 from typing import Any, Optional
@@ -59,6 +61,40 @@ RET_LOGIN_PATTERNS = ("SESSION_EXPIRED", "NEED_LOGIN", "FAIL_SYS_SESSION", "登�
 
 #: x5sec/noCaptcha 风控信号（T1 网络层实证：_____tmd_____/report?x5secdata + nocaptcha initialize）
 RISK_SIGNAL_URL_PATTERNS = ("_____tmd_____", "x5secdata", "nocaptcha")
+
+#: 自动滑块 knob 候选（noCaptcha 简单滑块——2026-10-10 用户需求：~12h 周期性
+#: 滑块验证，简单拖动无拼图；跨 frame 搜索，baxia 堡垒容器可能包 iframe）
+SLIDER_KNOB_SELECTORS = ("#nc_1_n1z", "[id*='n1z']", "[class*='btn_slide']")
+
+
+def plan_slider_drag(track_width: float, knob_width: float, *,
+                     rng: Optional[random.Random] = None) -> list[tuple[float, float, float]]:
+    """人味滑块拖动轨迹规划（纯函数，单测可锁）
+
+    返回 [(x_abs, dy, delay_ms), ...]——x 为自起点累计的绝对位移，dy 为纵向
+    抖动，delay 为该步后停顿。风控行为分的拦截特征=匀速直线/瞬时完成；
+    人类剖面：变速（两端慢中段快）+ 纵向微抖（±1.5px）+ 终点微过冲回正
+    （sin 半波）+ 总时长 0.55~0.9s + 1~2 次微停顿（犹豫点）。
+    """
+    rng = rng or random.Random()
+    distance = max(120.0, track_width - knob_width + 2.0)
+    steps = rng.randint(24, 34)
+    total_ms = rng.uniform(550.0, 900.0)
+    weights = [0.5 + abs(2.0 * (i + 1) / steps - 1.0) for i in range(steps)]
+    wsum = sum(weights)
+    delays = [total_ms * w / wsum for w in weights]
+    for _ in range(rng.randint(1, 2)):
+        delays[rng.randrange(steps)] += rng.uniform(30.0, 70.0)
+    overshoot = rng.uniform(2.0, 5.0)
+    out: list[tuple[float, float, float]] = []
+    for i in range(steps):
+        t = (i + 1) / steps
+        x = distance * (1.0 - (1.0 - min(t / 0.9, 1.0)) ** 2)
+        if t > 0.9:
+            x = distance + overshoot * math.sin((t - 0.9) / 0.1 * math.pi)
+        out.append((round(x, 2), round(rng.uniform(-1.5, 1.5), 2),
+                    round(delays[i], 1)))
+    return out
 
 
 def is_risk_signal_url(url: str) -> bool:
@@ -233,6 +269,8 @@ class TaobaoMtopSender(BaseSender):
                         return SendResult(SendStatus.FAILED, SendRejectReason.ROUTE_UNVERIFIED.value,
                                           fix_hint="页面 mtop 库不可达（window.lib.mtop 缺失）——页面结构变更，重跑 T1 探针",
                                           docs_anchor="docs/testing/m0-send-probe-cards.md")
+                    result: Optional[dict[str, Any]] = None
+                    eval_timeout = False
                     try:
                         result = await asyncio.wait_for(
                             page.evaluate(
@@ -241,18 +279,42 @@ class TaobaoMtopSender(BaseSender):
                                  "data": {"topic": topic, "content": content}}),
                             timeout=EVAL_TIMEOUT_S)
                     except asyncio.TimeoutError:
-                        # 挂点兜底（T2）：页面 promise 未决（x5sec noCaptcha 等待人工验证）——
-                        # 结构化回执而非永久悬挂（原形态=前端 60s 中止+无审计 result 行）
-                        if risk["hit"]:
+                        eval_timeout = True  # 挂点兜底（T2）——x5sec noCaptcha 等待验证形态
+                    ret_str = ("; ".join(str(r) for r in (result.get("ret") or []))
+                               if isinstance(result, dict) else "")
+                    risk_ret = any(p in ret_str for p in RET_RISK_PATTERNS)
+                    if risk["hit"] or risk_ret:
+                        # 自动滑块（2026-10-10 用户需求：~12h 周期性简单滑块——人味
+                        # 轨迹拖动自动通过；无滑块/未通过=回落原人工路径。良性超时
+                        # 无风控信号不触发——T2 实证 captcha 形态必带网络层信号）
+                        await asyncio.sleep(1.5)  # 验证浮层挂载窗口
+                        knob_sel = await self._try_pass_slider(page)
+                        if knob_sel is not None:
+                            logger.info(f"[taobao-mtop] stage=slider 滑块后重试 mtop room={room_id}")
+                            try:
+                                result = await asyncio.wait_for(
+                                    page.evaluate(
+                                        EVAL_SEND_JS,
+                                        {"api": PUBLISH_API, "v": PUBLISH_VERSION, "appKey": PUBLISH_APPKEY,
+                                         "data": {"topic": topic, "content": content}}),
+                                    timeout=EVAL_TIMEOUT_S)
+                                eval_timeout = False
+                            except asyncio.TimeoutError:
+                                result = None
+                                eval_timeout = True
+                    if eval_timeout:
+                        if risk["hit"] or risk_ret:
                             logger.warning(f"[taobao-mtop] stage=eval x5sec_signal elapsed={time.monotonic()-t0:.1f}s room={room_id}")
                             return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
-                                              detail="x5sec 风控信号（网络层捕获）——noCaptcha 验证待人工",
-                                              fix_hint="风控验证待人工（headless 无法完成滑块）——勿盲目重试；"
-                                                       "降频稍后重试或经有头窗口完成验证后恢复")
+                                              detail="x5sec 风控信号——自动滑块未通过/未出现（重试仍无响应）",
+                                              fix_hint="风控验证待人工——勿盲目重试；降频稍后重试或经有头窗口完成验证后恢复")
                         logger.warning(f"[taobao-mtop] stage=eval NO_RESPONSE elapsed={time.monotonic()-t0:.1f}s room={room_id}")
                         return SendResult(SendStatus.UNKNOWN, SendRejectReason.SEND_TIMEOUT.value,
                                           detail=f"mtop 调用 {EVAL_TIMEOUT_S:.0f}s 无响应（页面 promise 未决）",
                                           fix_hint="页面 mtop 调用未决——重跑 T1 探针核对形态")
+                    if risk_ret and isinstance(result, dict):
+                        # 重试后仍风控 ret——不再二次拖动（避免循环），人工路径
+                        logger.warning(f"[taobao-mtop] stage=eval risk_after_slider room={room_id} ret={ret_str[:80]}")
                     logger.info(f"[taobao-mtop] stage=eval elapsed={time.monotonic()-t0:.1f}s room={room_id} ret={str(result.get('ret'))[:80]}")
                     return self._map_ret(result)
                 finally:
@@ -262,6 +324,64 @@ class TaobaoMtopSender(BaseSender):
                     await context.close()
                 except Exception:  # noqa: BLE001
                     pass
+
+    async def _try_pass_slider(self, page) -> Optional[str]:
+        """自动滑块（简单滑块——人味轨迹拖动，2026-10-10 用户需求）
+
+        跨 frame 搜索 noCaptcha knob → CDP 真实鼠标事件拖动（isTrusted=true）。
+        返回命中的 knob 选择器（None=页面无滑块/探测失败——调用方维持原人工
+        路径）。成功判定交给调用方的 mtop 重试（ret 为最终裁决）；"验证通过"
+        文本仅日志。
+        """
+        try:
+            frames = list(page.frames)
+        except Exception:  # noqa: BLE001  结构异常=无滑块，人工路径
+            return None
+        for frame in frames:
+            for sel in SLIDER_KNOB_SELECTORS:
+                try:
+                    loc = frame.locator(sel).first
+                    if await loc.count() == 0 or not await loc.is_visible():
+                        continue
+                    kb = await loc.bounding_box()
+                    if not kb or kb.get("width", 0) <= 0:
+                        continue
+                    track_w = await loc.evaluate(
+                        "el => { const c = el.closest('.nc-container')"
+                        " || el.closest('[id*=\"nc_1\"]') || el.parentElement;"
+                        " return c ? c.getBoundingClientRect().width : 0; }")
+                    if not track_w or track_w <= kb["width"]:
+                        track_w = 320.0  # 兜底轨道宽（noCaptcha 常见 300±）
+                    plan = plan_slider_drag(float(track_w), float(kb["width"]))
+                    sx, sy = kb["x"] + kb["width"] / 2, kb["y"] + kb["height"] / 2
+                    await page.mouse.move(sx, sy)
+                    await page.mouse.down()
+                    for dx, dy, dms in plan:
+                        await page.mouse.move(sx + dx, sy + dy)
+                        await asyncio.sleep(dms / 1000.0)
+                    await page.mouse.up()
+                    logger.info(f"[taobao-mtop] stage=slider 拖动完成 sel={sel} "
+                                f"frame={frame.url[:60]} track={track_w:.0f}px 步数={len(plan)}")
+                    # 文本信号（日志级——成功裁决走 mtop 重试 ret）
+                    deadline = time.monotonic() + 5
+                    ok_text = False
+                    while time.monotonic() < deadline and not ok_text:
+                        for f in page.frames:
+                            try:
+                                txt = await f.evaluate(
+                                    "() => document.body ? document.body.innerText : ''")
+                                if "验证通过" in (txt or ""):
+                                    ok_text = True
+                                    break
+                            except Exception:  # noqa: BLE001  about 帧等
+                                continue
+                        if not ok_text:
+                            await asyncio.sleep(0.5)
+                    logger.info(f"[taobao-mtop] stage=slider 文本信号 ok={ok_text}")
+                    return sel
+                except Exception as e:  # noqa: BLE001  单候选失败继续搜
+                    logger.debug(f"[taobao-mtop] slider 候选 {sel} 探测失败: {type(e).__name__}")
+        return None
 
     def _room_url(self, room_id: str) -> str:
         from danmaku_listener.engines.protocol.mtop import extract_live_id

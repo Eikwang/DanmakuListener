@@ -9,7 +9,7 @@ import asyncio
 import pytest
 
 from danmaku_listener.contract.models import SendStatus
-from danmaku_listener.senders.taobao_mtop import TaobaoMtopSender
+from danmaku_listener.senders.taobao_mtop import TaobaoMtopSender, plan_slider_drag
 
 
 class FakeLock:
@@ -433,3 +433,36 @@ async def test_benign_response_during_eval_timeout_stays_unknown(monkeypatch):
     result = await sender.send("3101430810353885", "[M0] t")
     assert result.status == SendStatus.UNKNOWN
     assert result.reason_code == "SEND_TIMEOUT"
+
+
+# ---- 自动滑块轨迹规划（2026-10-10——~12h 周期性简单滑块，人味轨迹自动通过）----
+
+import random
+
+
+def test_plan_slider_drag_reaches_track_end_with_overshoot():
+    plan = plan_slider_drag(300.0, 40.0, rng=random.Random(42))
+    assert plan and len(plan) >= 24  # 步数足够细（匀速直线是风控拦截特征）
+    xs = [s[0] for s in plan]
+    distance = 300.0 - 40.0 + 2.0    # track - knob + 2px
+    assert abs(xs[-1] - distance) < 1.0        # 终点回正到轨道末端
+    assert max(xs) <= distance + 5.0 + 0.01    # 过冲上界 5px
+    assert xs[0] > 0.0                          # 首步即有位移
+
+
+def test_plan_slider_drag_total_duration_bounded():
+    plan = plan_slider_drag(300.0, 40.0, rng=random.Random(7))
+    total = sum(s[2] for s in plan)
+    assert 550.0 <= total <= 1050.0   # 0.55~0.9s 基础 + 微停顿上界
+    assert all(0.0 < s[2] for s in plan)
+
+
+def test_plan_slider_drag_deterministic_with_seed():
+    a = plan_slider_drag(300.0, 40.0, rng=random.Random(3))
+    b = plan_slider_drag(300.0, 40.0, rng=random.Random(3))
+    assert a == b
+
+
+def test_plan_slider_drag_min_distance_floor():
+    plan = plan_slider_drag(100.0, 80.0, rng=random.Random(1))  # 轨道<knob→兜底 120px
+    assert plan[-1][0] >= 119.0
