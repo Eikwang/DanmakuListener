@@ -9,7 +9,11 @@ import asyncio
 import pytest
 
 from danmaku_listener.contract.models import SendStatus
-from danmaku_listener.senders.taobao_mtop import TaobaoMtopSender, plan_slider_drag
+from danmaku_listener.senders.taobao_mtop import (
+    TaobaoMtopSender,
+    extract_mtop_ret,
+    plan_slider_drag,
+)
 
 
 class FakeLock:
@@ -466,3 +470,17 @@ def test_plan_slider_drag_deterministic_with_seed():
 def test_plan_slider_drag_min_distance_floor():
     plan = plan_slider_drag(100.0, 80.0, rng=random.Random(1))  # 轨道<knob→兜底 120px
     assert plan[-1][0] >= 119.0
+
+
+# ---- 双发防线：jsonp ret 解析（2026-10-10 用户实测双弹幕根因）----
+
+def test_extract_mtop_ret_from_jsonp():
+    body = 'mtopjsonp7({"api":"x","ret":["SUCCESS::调用成功"],"data":{}})'
+    assert extract_mtop_ret(body) == ["SUCCESS::调用成功"]
+
+
+def test_extract_mtop_ret_from_plain_json_and_risk():
+    assert extract_mtop_ret('{"ret":["RGV587_ERROR::嘛玩意"]}') == ["RGV587_ERROR::嘛玩意"]
+    assert extract_mtop_ret('{"data":{}}') is None
+    assert extract_mtop_ret("") is None
+    assert extract_mtop_ret("not json") is None

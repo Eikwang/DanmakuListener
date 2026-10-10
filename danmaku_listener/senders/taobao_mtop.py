@@ -118,6 +118,21 @@ def is_publish_flow_risk_url(url: str) -> bool:
         return True
     return False
 
+def extract_mtop_ret(body: str) -> Optional[list]:
+    """mtop 响应体 → ret 列表（jsonp 包裹/纯 JSON 双形态；垃圾体 None）"""
+    if not body:
+        return None
+    try:
+        payload = body
+        if "(" in body and body.rstrip().endswith(")"):
+            payload = body[body.find("(") + 1: body.rfind(")")]
+        data = json.loads(payload)
+        ret = data.get("ret") if isinstance(data, dict) else None
+        return ret if isinstance(ret, list) else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 EVAL_SEND_JS = """
 async (args) => {
   const mtop = (window.lib && window.lib.mtop) || window.mtop;
@@ -238,9 +253,13 @@ class TaobaoMtopSender(BaseSender):
                 # 页面加载期（goto/topic/lib）触发的风控挑战同样计入，不再误诊为
                 # 「页面改版」；风险命中时各失败分支统一回风控语义）
                 risk = {"hit": False}
+                publish_responses: list = []  # publish 响应对象（eval 超时形态读原请求结果）
 
                 def _on_response(resp) -> None:
-                    if is_publish_flow_risk_url(getattr(resp, "url", "") or ""):
+                    u = getattr(resp, "url", "") or ""
+                    if "h5api.m.taobao.com" in u and PUBLISH_API in u:
+                        publish_responses.append(resp)
+                    if is_publish_flow_risk_url(u):
                         risk["hit"] = True
 
                 page.on("response", _on_response)
@@ -294,26 +313,50 @@ class TaobaoMtopSender(BaseSender):
                     ret_str = ("; ".join(str(r) for r in (result.get("ret") or []))
                                if isinstance(result, dict) else "")
                     risk_ret = any(p in ret_str for p in RET_RISK_PATTERNS)
+                    ret_success = result is not None and any(
+                        "SUCCESS" in str(r) for r in (result.get("ret") or []))
                     knob_sel: Optional[str] = None
-                    if risk["hit"] or risk_ret:
+                    if (risk["hit"] or risk_ret) and not ret_success:
                         # 自动滑块（2026-10-10 用户需求：~12h 周期性简单滑块——人味
                         # 轨迹拖动自动通过；无滑块/未通过=回落原人工路径。良性超时
                         # 无风控信号不触发——T2 实证 captcha 形态必带网络层信号）
                         await asyncio.sleep(1.5)  # 验证浮层挂载窗口
                         knob_sel = await self._try_pass_slider(page)
                         if knob_sel is not None:
-                            logger.info(f"[taobao-mtop] stage=slider 滑块后重试 mtop room={room_id}")
-                            try:
-                                result = await asyncio.wait_for(
-                                    page.evaluate(
-                                        EVAL_SEND_JS,
-                                        {"api": PUBLISH_API, "v": PUBLISH_VERSION, "appKey": PUBLISH_APPKEY,
-                                         "data": {"topic": topic, "content": content}}),
-                                    timeout=EVAL_TIMEOUT_S)
-                                eval_timeout = False
-                            except asyncio.TimeoutError:
-                                result = None
-                                eval_timeout = True
+                            if eval_timeout:
+                                # 双发防线（2026-10-10 用户实测双弹幕根因）：验证通过后
+                                # 原挂起请求自行完成——读它的响应，不盲重试
+                                logger.info(f"[taobao-mtop] stage=slider 验证后等待原请求完成 room={room_id}")
+                                outcome = await self._await_publish_response(publish_responses, 15.0)
+                                if outcome is not None:
+                                    result = outcome
+                                else:
+                                    logger.info("[taobao-mtop] 原请求 15s 未决——重试（可能双发一次）")
+                                    try:
+                                        result = await asyncio.wait_for(
+                                            page.evaluate(
+                                                EVAL_SEND_JS,
+                                                {"api": PUBLISH_API, "v": PUBLISH_VERSION, "appKey": PUBLISH_APPKEY,
+                                                 "data": {"topic": topic, "content": content}}),
+                                            timeout=EVAL_TIMEOUT_S)
+                                        eval_timeout = False
+                                    except asyncio.TimeoutError:
+                                        result = None
+                                        eval_timeout = True
+                            else:
+                                # ret 风控形态——原请求已被服务端拒绝未发布，重试安全
+                                logger.info(f"[taobao-mtop] stage=slider 滑块后重试 mtop room={room_id}")
+                                try:
+                                    result = await asyncio.wait_for(
+                                        page.evaluate(
+                                            EVAL_SEND_JS,
+                                            {"api": PUBLISH_API, "v": PUBLISH_VERSION, "appKey": PUBLISH_APPKEY,
+                                             "data": {"topic": topic, "content": content}}),
+                                        timeout=EVAL_TIMEOUT_S)
+                                    eval_timeout = False
+                                except asyncio.TimeoutError:
+                                    result = None
+                                    eval_timeout = True
                     if eval_timeout:
                         if risk["hit"] or risk_ret:
                             logger.warning(f"[taobao-mtop] stage=eval x5sec_signal elapsed={time.monotonic()-t0:.1f}s room={room_id}")
@@ -346,6 +389,28 @@ class TaobaoMtopSender(BaseSender):
                     await context.close()
                 except Exception:  # noqa: BLE001
                     pass
+
+    async def _await_publish_response(self, responses: list,
+                                      timeout_s: float) -> Optional[dict[str, Any]]:
+        """等待 publish 响应并解析 ret（eval 超时形态——原挂起请求验证通过后
+        自行完成，读它即可，重试会双发；2026-10-10 用户实测双弹幕根因）"""
+        deadline = time.monotonic() + timeout_s
+        seen: set = set()
+        while time.monotonic() < deadline:
+            for resp in list(responses):
+                if id(resp) in seen:
+                    continue
+                seen.add(id(resp))
+                try:
+                    body = await asyncio.wait_for(resp.text(), timeout=3.0)
+                except Exception:  # noqa: BLE001  响应体未就绪/连接断
+                    continue
+                ret = extract_mtop_ret(body or "")
+                if ret is not None:
+                    logger.info(f"[taobao-mtop] stage=slider 原请求响应 ret={str(ret)[:80]}")
+                    return {"ret": ret}
+            await asyncio.sleep(0.5)
+        return None
 
     async def _try_pass_slider(self, page) -> Optional[str]:
         """自动滑块（简单滑块——人味轨迹拖动，2026-10-10 用户需求）
