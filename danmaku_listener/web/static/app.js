@@ -619,9 +619,7 @@ class DanmakuApp {
       badge.textContent = STATUS_NAMES[r.status] || r.status || "";
       name.append(tag, rid, badge);
 
-      // 启停/移除按钮组
-      const actions = document.createElement("span");
-      actions.className = "room-actions";
+      // 启停/删除/发送/登录 四宫格（2026-10-10 用户裁定：四按钮 2×2 对齐）
       const running = r.status === "running";
       const toggle = document.createElement("button");
       toggle.textContent = running ? "停止" : "启动";
@@ -630,22 +628,22 @@ class DanmakuApp {
       toggle.onclick = () => this.toggleRoom(r.platform, r.room_id, running ? "stop" : "start");
       const del = document.createElement("button");
       del.textContent = "删除";
-      del.className = "room-del room-del-btn";  // 2026-10-10 用户裁定：与启动同规格红按钮（原 × 过小难点按）
+      del.className = "room-del-btn";
       del.setAttribute("aria-label", `移除 ${r.platform}:${r.room_id}`);
       del.onclick = async () => {
         await this.api(`/api/rooms/${r.platform}/${encodeURIComponent(r.room_id)}`, "DELETE");
         this.loadRooms();
       };
-      actions.append(toggle, del);
 
-      // 两行布局（CEO 计划 D-A）：上行=身份/状态/操作，下行=行内发送表单
+      // 上行=身份/状态（操作按钮全部移入下方宫格）
       const mainRow = document.createElement("div");
       mainRow.className = "room-main-row";
-      mainRow.append(name, actions);
+      mainRow.append(name);
 
-      const sendRow = document.createElement("div");
-      sendRow.className = "room-send-row";
+      const grid = document.createElement("div");
+      grid.className = "room-grid";
       const sendInput = document.createElement("input");
+      sendInput.className = "room-send-input";
       sendInput.type = "text";
       sendInput.placeholder = "发送弹幕到该房间";
       sendInput.setAttribute("aria-label", `发送弹幕到 ${pname}:${r.room_id}`);
@@ -690,8 +688,8 @@ class DanmakuApp {
       loginBtn.addEventListener("click", () =>
         this.reloginRoom(r.platform, r.room_id, loginBtn, sendResult));
 
-      sendRow.append(sendInput, sendBtn, loginBtn);
-      li.append(mainRow, sendRow, sendResult);
+      grid.append(sendInput, toggle, del, sendBtn, loginBtn);
+      li.append(mainRow, grid, sendResult);
       list.appendChild(li);
     }
     document.getElementById("stop-all-btn").disabled = rooms.length === 0;

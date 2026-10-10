@@ -138,7 +138,7 @@ class TestWebFrontendAssets:
     def test_app_js_has_room_send_functions(self):
         """app.js 含房间行发送核心函数（防未来重构静默删功能）"""
         js = (WEB_DIR / "static" / "app.js").read_text(encoding="utf-8")
-        for needle in ("sendFromRoom", "getSendToken", "room-send-row",
+        for needle in ("sendFromRoom", "getSendToken", "room-grid",
                        "room-send-result", "SEND_REASON_NAMES"):
             assert needle in js, f"app.js missing {needle}"
 

@@ -136,7 +136,7 @@ body {
 
 /* 左栏：房间管理 */
 .left-panel {
-    width: 264px;
+    width: 380px;  /* 2026-10-10 用户裁定：264px 过窄挤压弹幕输入框 */
     flex-shrink: 0;
     padding: 12px;
     background-color: var(--bg-panel);
@@ -438,15 +438,17 @@ section h2 {
     gap: 6px;
 }
 
-/* 两行布局下行：行内发送表单（v11 T2/T4） */
-.room-send-row {
-    display: flex;
-    gap: 6px;
-    align-items: center;
+/* 四宫格行（2026-10-10 用户裁定）：输入跨两行 + 启动/删除/发送/登录 2×2 对齐 */
+.room-grid {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    grid-template-rows: auto auto;
+    gap: 5px 6px;
 }
 
-.room-send-row input {
-    flex: 1;
+.room-grid .room-send-input {
+    grid-column: 1;
+    grid-row: 1 / span 2;
     min-width: 0;
     padding: 3px 8px;
     font-size: 12px;
@@ -456,23 +458,37 @@ section h2 {
     color: var(--text-primary);
 }
 
-.room-send-row input:hover { border-color: var(--border-strong); }
+.room-grid .room-send-input:hover { border-color: var(--border-strong); }
 
-.room-send-btn {
-    flex-shrink: 0;
-    padding: 3px 10px;
+.room-grid button {
+    padding: 4px 10px;
     font-size: 11px;
     border-radius: 4px;
-    background: var(--accent);
-    color: #fff;
+    width: 100%;
+    white-space: nowrap;
 }
 
-.room-send-btn:hover:not(:disabled) { background: var(--accent-hover); }
-.room-send-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.room-grid .room-toggle-btn { background: var(--accent); color: #fff; }
+.room-grid .room-toggle-btn:hover { background: var(--accent-hover); }
+.room-grid .room-stop-btn { background: var(--bg-elevated); color: var(--text-primary); }
+.room-grid .room-stop-btn:hover { background: var(--border-strong); }
+.room-grid .room-del-btn { background: var(--danger); color: #fff; }
+.room-grid .room-del-btn:hover { background: #dc2626; }
+.room-grid .room-send-btn { background: var(--accent); color: #fff; }
+.room-grid .room-send-btn:hover:not(:disabled) { background: var(--accent-hover); }
+.room-grid .room-send-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.room-grid .room-login-btn { background: var(--success); color: #fff; }
+.room-grid .room-login-btn:hover { background: #15803d; }
+
+/* 网格定位：输入跨两行；上行=启动/删除，下行=发送/登录 */
+.room-grid .room-toggle-btn, .room-grid .room-stop-btn { grid-column: 2; grid-row: 1; }
+.room-grid .room-del-btn { grid-column: 3; grid-row: 1; }
+.room-grid .room-send-btn { grid-column: 2; grid-row: 2; }
+.room-grid .room-login-btn { grid-column: 3; grid-row: 2; }
 
 /* 可达性（设计评审 P5/P6）：焦点环 2px accent；结果行语义色 + 溢出省略 */
-.room-send-row input:focus-visible,
-.room-send-btn:focus-visible {
+.room-grid .room-send-input:focus-visible,
+.room-grid button:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 1px;
 }
@@ -535,29 +551,9 @@ section h2 {
 .status-badge.login_failed,
 .status-badge.error { background-color: rgba(220, 38, 38, 0.15); color: #f87171; }
 
-.room-item .room-actions {
-    display: flex;
-    gap: 4px;
-    flex-shrink: 0;
-}
-
-.room-actions button {
-    padding: 2px 9px;
-    font-size: 11px;
-    border-radius: 4px;
-}
-
-.room-toggle-btn { background: var(--accent); color: #fff; }
-.room-toggle-btn:hover { background: var(--accent-hover); }
-.room-stop-btn { background: var(--bg-elevated); color: var(--text-primary); }
-.room-stop-btn:hover { background: var(--border-strong); }
 .room-del { background: none; color: var(--text-muted); font-size: 14px; padding: 0 5px; }
 .room-del:hover { color: var(--danger); }
-/* 房间行删除按钮标准规格红样式（2026-10-10 用户裁定——原 × 过小难点按） */
-.room-del-btn { background: var(--danger); color: #fff; }
-.room-del-btn:hover { background: #dc2626; }
-.room-login-btn { background: var(--bg-elevated); color: var(--text-primary); }
-.room-login-btn:hover { background: var(--border-strong); }
+/* ↑ 关键词列表小 × 专用（房间行删除已改宫格内标准规格红按钮） */
 
 .error-msg {
     color: #f87171;
