@@ -36,6 +36,7 @@ from loguru import logger
 from playwright.async_api import async_playwright  # 模块级：测试注入点（T2 测试卫生先例）
 
 from danmaku_listener.contract.models import SendRejectReason, SendStatus
+from danmaku_listener.engines import login_state_store
 from danmaku_listener.senders.base import SendResult
 
 PAGE_OP_TIMEOUT_S = 30.0          # ENG-1：单次页面操作超时（防卡死队头阻塞）
@@ -97,7 +98,9 @@ class ResidentSendSession:
                  window_mode: str = MODE_HEADLESS_NEW,
                  idle_timeout_s: int = 1800,
                  user_agent: Optional[str] = None,
-                 viewport: Optional[dict] = None):
+                 viewport: Optional[dict] = None,
+                 init_scripts: Optional[list] = None,
+                 login_cookie_names: tuple = ()):
         self.name = name
         self._profile_dir = profile_dir
         self._window_mode = window_mode
@@ -114,6 +117,9 @@ class ResidentSendSession:
         self._idle_task: Optional[asyncio.Task] = None
         self._stale = False                   # DX-D7：close 失败→下次启动前清理
         self._closed = False
+        self._init_scripts = init_scripts or []  # 平台反检测脚本（context 级，全部页面生效）
+        self._login_cookie_names = tuple(login_cookie_names)  # F1：登录判定 cookie 名（空=不启用快照）
+        self._login_state_path = f"{profile_dir}_login_state.json"
 
     # ---- 生命周期 ----
 
@@ -132,6 +138,9 @@ class ResidentSendSession:
             self._context = await self._pw.chromium.launch_persistent_context(
                 self._profile_dir, user_agent=self._user_agent,
                 viewport=self._viewport, args=args, **launch_kwargs)
+            for script in self._init_scripts:
+                await self._context.add_init_script(script)
+            await self._restore_login(self._context)  # F1：profile 丢登录时快照自愈
         except Exception as e:  # noqa: BLE001
             await self._pw_stack.__aexit__(None, None, None)
             self._pw_stack = self._pw = None
@@ -146,17 +155,19 @@ class ResidentSendSession:
 
     async def login_takeover(self, room_id: str, url: str, cookie_names: tuple,
                              grace_s: float = 30.0, timeout_s: float = 240.0) -> Any:
-        """关闭当前（无头）context，弹可见登录窗，登录后该 context 转正为会话上下文。
+        """关闭当前（无头）context，弹可见登录窗，登录后快照落盘并转无感后台会话。
 
-        背景（2026-10-09 虎牙验收实证）：huya 登录令牌为会话级 cookie——登录窗关闭
-        即丢失，常驻无头会话永远匿名。方案 A：登录发生在发送会话自己的浏览器里，
-        登录后窗口不关、转正为常驻上下文（headed 保持，用户可手动最小化）。
+        背景（2026-10-10 XHS 修复经验移植）：原设计"登录后窗口不关、转正为
+        headed 常驻"基于"huya 登录令牌为会话级 cookie"的误判——磁盘取证推翻
+        （yyuid 持久至 2026-10-24；XHS id_token 1 年期，同款结论同日废除）。
+        新语义：登录 cookie 检测点立即快照（F1，硬杀免疫）→ 保窗宽限（滑块）
+        → 关闭可见窗 → 按会话 window_mode 重启（无感后台）→ 快照恢复注入。
 
         Returns:
             已登录的 per-room page（已导航到 url；_pages/_context 均已登记）。
 
         Raises:
-            LoginTakeoverError: 登录未完成（超时/用户关窗）。
+            LoginTakeoverError: 登录未完成（超时/用户关窗）或无感转正失败。
         """
         from playwright.async_api import async_playwright
 
@@ -183,14 +194,30 @@ class ResidentSendSession:
                 logger.debug(f"[{self.name}] login takeover goto warning: {e}")
             deadline = time.monotonic() + timeout_s
             logged = False
+            # baseline 差分（controlled_base._wait_login_visible 同款）：yyuid 等
+            # cookie 可能是登录前就种的设备/追踪 cookie（huya 2026-10-10 实证——
+            # 注入监听侧 yyuid 后 TT_PROFILE_INFO 无访客身份）——按"登录名 cookie
+            # 新出现/值变化"判定，防 takeover 瞬间假成功
+            baseline: Dict[str, str] = {}
+            try:
+                baseline = {c["name"]: (c.get("value") or "")
+                            for c in await self._context.cookies()}
+            except Exception:  # noqa: BLE001
+                baseline = {}
             while time.monotonic() < deadline:
                 try:
-                    cookies = {c["name"] for c in await self._context.cookies() if c.get("value")}
+                    cookies_list = await self._context.cookies()
                 except Exception:  # noqa: BLE001  窗口被用户关闭
                     break
-                if set(cookie_names) & cookies:
+                cookies = {c["name"] for c in cookies_list if c.get("value")}
+                new_hit = any(c.get("name") in cookie_names
+                              and (c.get("value") or "")
+                              and c.get("value") != baseline.get(c.get("name"))
+                              for c in cookies_list)
+                if new_hit:
                     logged = True
-                    # 保窗 grace：供安全验证（滑块等）——验证完用户可关窗（会话已入 profile）
+                    await self._snapshot_login()  # F1：登录落地立即快照
+                    # 保窗 grace：供安全验证（滑块等）——验证完关窗转无感（快照已保底）
                     g = time.monotonic() + grace_s
                     while time.monotonic() < g:
                         try:
@@ -198,6 +225,7 @@ class ResidentSendSession:
                         except Exception:  # noqa: BLE001
                             break
                         await asyncio.sleep(2)
+                    await self._snapshot_login()  # F1：宽限后补快照（令牌可能已刷新）
                     break
                 try:
                     if page.is_closed():
@@ -212,7 +240,23 @@ class ResidentSendSession:
                     pass
                 self._pw_stack = self._pw = self._context = None
                 raise LoginTakeoverError("登录未完成（超时/关窗）——重试发送将再次弹出登录窗口")
-            logger.info(f"[{self.name}] login takeover OK——登录窗转正为发送会话（headed 保持）")
+            # 无感转正：关可见窗 → 按会话形态重启（headless_new 完整指纹）→ 快照恢复
+            logger.info(f"[{self.name}] login takeover OK——快照落盘，关闭可见窗转"
+                        f"无感后台会话（mode={self._window_mode}）")
+            try:
+                await self._context.close()
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                await self._pw_stack.__aexit__(None, None, None)
+            except Exception:  # noqa: BLE001
+                pass
+            self._pw_stack = self._pw = self._context = None
+            self._pages.clear()
+            await self._launch()
+            page = (self._context.pages[0] if self._context.pages
+                    else await asyncio.wait_for(self._context.new_page(),
+                                                timeout=PAGE_OP_TIMEOUT_S))
             try:
                 await page.goto(url, timeout=45000, wait_until="domcontentloaded")
             except Exception as e:  # noqa: BLE001
@@ -220,13 +264,31 @@ class ResidentSendSession:
             self._pages[room_id] = page
             self._last_activity = time.monotonic()
             return page
-        except Exception:
+        except LoginTakeoverError:
+            raise
+        except Exception as e:  # noqa: BLE001  无感转正失败——明确报错不悬挂
             try:
-                await self._context.close()
+                await self.close()
             except Exception:  # noqa: BLE001
                 pass
-            self._pw_stack = self._pw = self._context = None
-            raise
+            self._closed = False
+            raise LoginTakeoverError(f"无感转正失败: {type(e).__name__}: {str(e)[:100]}") from e
+
+    async def _snapshot_login(self) -> bool:
+        """F1：登录态快照（login_cookie_names 为空=未启用，返回 False）"""
+        if not self._login_cookie_names or self._context is None:
+            return False
+        return await login_state_store.snapshot_login_state(
+            self._context, names=self._login_cookie_names,
+            path=self._login_state_path, label=self.name)
+
+    async def _restore_login(self, context) -> bool:
+        """F1：profile 丢登录 → 快照恢复（未启用返回 False）"""
+        if not self._login_cookie_names:
+            return False
+        return await login_state_store.restore_login_state(
+            context, names=self._login_cookie_names,
+            path=self._login_state_path, label=self.name)
 
     async def close(self) -> None:
         """关闭会话（ENG-12 关闭日志；DX-D7 close 超时→stale 标记）"""

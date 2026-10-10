@@ -1,0 +1,132 @@
+{
+  "room": "152746",
+  "title": "拾光、是点妹官方直播间-王者荣耀-虎牙直播",
+  "ts": "2026-10-10 15:05:55",
+  "speaker_exists": true,
+  "candidates": [
+    {
+      "sel": "#J_RoomChatSpeaker > div > div",
+      "count": 1,
+      "info": [
+        {
+          "tag": "DIV",
+          "cls": "ChatSpeaker--p0LYFyyO48HEblplJEDs",
+          "visible": true,
+          "rect": [
+            978,
+            668,
+            185,
+            48
+          ],
+          "placeholder": null,
+          "text": ""
+        }
+      ]
+    },
+    {
+      "sel": "#pub_msg_input",
+      "count": 1,
+      "info": [
+        {
+          "tag": "TEXTAREA",
+          "cls": "",
+          "visible": true,
+          "rect": [
+            978,
+            668,
+            185,
+            48
+          ],
+          "placeholder": "发个弹幕吧~",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "sel": "#msg_send_bt",
+      "count": 1,
+      "info": [
+        {
+          "tag": "SPAN",
+          "cls": "btn-sendMsg btn-sendMsg-enable",
+          "visible": true,
+          "rect": [
+            1163,
+            667,
+            50,
+            50
+          ],
+          "placeholder": null,
+          "text": "发送"
+        }
+      ]
+    },
+    {
+      "sel": "textarea",
+      "count": 1,
+      "info": [
+        {
+          "tag": "TEXTAREA",
+          "cls": "",
+          "visible": true,
+          "rect": [
+            978,
+            668,
+            185,
+            48
+          ],
+          "placeholder": "发个弹幕吧~",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "sel": "div[contenteditable=true]",
+      "count": 0,
+      "info": []
+    },
+    {
+      "sel": "input[placeholder*=弹幕]",
+      "count": 1,
+      "info": [
+        {
+          "tag": "INPUT",
+          "cls": "player-full-input-txt",
+          "visible": false,
+          "rect": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "placeholder": "按回车键可以快速发弹幕",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "sel": "input[placeholder*=说]",
+      "count": 0,
+      "info": []
+    }
+  ],
+  "editables": [],
+  "placeholders": [
+    {
+      "tag": "INPUT",
+      "ph": "主播、频道、游戏",
+      "visible": true
+    },
+    {
+      "tag": "INPUT",
+      "ph": "按回车键可以快速发弹幕",
+      "visible": false
+    },
+    {
+      "tag": "TEXTAREA",
+      "ph": "发个弹幕吧~",
+      "visible": true
+    }
+  ],
+  "speaker_html": "<div class=\"chat-speaker\" id=\"J_RoomChatSpeaker\"><div class=\"app--PbZwcXClohthHWLCwjs4\"><div class=\"ChatSpeaker--p0LYFyyO48HEblplJEDs\"><textarea placeholder=\"发个弹幕吧~\" id=\"pub_msg_input\"></textarea></div></div></div>"
+}

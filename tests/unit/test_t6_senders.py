@@ -24,22 +24,36 @@ from danmaku_listener.senders.kuaishou_douyu import DouyuCookieSender, KuaishouS
 class FakeLocator:
     def __init__(self, count=1):
         self._count = count
+        self.typed = ""  # 逐键/fill 写入（引擎回读语义）
         self.first = self  # playwright locator 链式 .first
 
     async def count(self):
         return self._count
 
+    def nth(self, i):
+        return self  # 逐匹配扫描——fake 单元素恒等
+
     async def is_visible(self):
         return self._count > 0
+
+    async def is_editable(self):
+        return True  # 可见且可编辑过滤——fake 输入面恒可编辑
 
     async def click(self, timeout=None):
         pass
 
     async def press_sequentially(self, text, delay=None):
-        pass
+        self.typed = text
+
+    async def fill(self, text):
+        self.typed = text
 
     async def press(self, key):
         pass
+
+    async def evaluate(self, js, args=None):
+        # 元素级回读表达式（提交前/后输入读法）——返回已键入文本
+        return self.typed
 
 
 class FakePage:

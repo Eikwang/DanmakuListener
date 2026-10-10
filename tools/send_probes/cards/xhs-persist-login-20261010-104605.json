@@ -1,0 +1,141 @@
+{
+  "probe": "xhs_profile_persistence",
+  "stage": "login",
+  "profile": "D:\\AI\\DanmakuListener\\cookie\\xhs_profile",
+  "ts": "2026-10-10 10:44:13",
+  "login_page_before": {
+    "memory_id_token": false,
+    "memory_web_session": true,
+    "visible:#input-area": true,
+    "visible:text=登录": false,
+    "visible:text=扫码": false
+  },
+  "login": {
+    "memory_login_at_s": 104.6,
+    "disk_commit_at_s": null,
+    "disk_polls": [
+      {
+        "t": 104.6,
+        "login_on_disk": false,
+        "web_session_created": null
+      }
+    ]
+  },
+  "storage_state_snapshot": "cookie\\xhs_send_state.json",
+  "storage_state_cookie_count": 17,
+  "login_page_after": {
+    "memory_id_token": true,
+    "memory_web_session": true,
+    "visible:#input-area": true,
+    "visible:text=登录": false,
+    "visible:text=扫码": false
+  },
+  "login_screenshot": "D:\\AI\\DanmakuListener\\tools\\send_probes\\cards\\xhs-persist-login-104605.png",
+  "login_disk_after_clean_close": {
+    "login_on_disk": true,
+    "cookies": [
+      {
+        "name": "a1",
+        "persistent": 1,
+        "created": "2026-10-09 21:32:28",
+        "expires": "2027-10-09 21:32:28"
+      },
+      {
+        "name": "abRequestId",
+        "persistent": 1,
+        "created": "2026-10-09 21:32:27",
+        "expires": "2027-10-09 21:32:27"
+      },
+      {
+        "name": "webId",
+        "persistent": 1,
+        "created": "2026-10-09 21:32:28",
+        "expires": "2027-10-09 21:32:28"
+      },
+      {
+        "name": "acw_tc",
+        "persistent": 1,
+        "created": "2026-10-10 10:39:21",
+        "expires": "2026-10-10 11:09:21"
+      },
+      {
+        "name": "acw_tc",
+        "persistent": 1,
+        "created": "2026-10-10 10:39:21",
+        "expires": "2026-10-10 11:09:21"
+      },
+      {
+        "name": "acw_tc",
+        "persistent": 1,
+        "created": "2026-10-10 10:39:21",
+        "expires": "2026-10-10 11:09:21"
+      },
+      {
+        "name": "ets",
+        "persistent": 1,
+        "created": "2026-10-10 10:44:00",
+        "expires": "2026-11-09 10:44:00"
+      },
+      {
+        "name": "gid",
+        "persistent": 1,
+        "created": "2026-10-09 21:42:36",
+        "expires": "2027-11-14 10:44:27"
+      },
+      {
+        "name": "loadts",
+        "persistent": 1,
+        "created": "2026-10-10 10:44:14",
+        "expires": "2027-10-10 10:44:14"
+      },
+      {
+        "name": "sec_poison_id",
+        "persistent": 1,
+        "created": "2026-10-10 10:44:24",
+        "expires": "2026-10-10 10:54:29"
+      },
+      {
+        "name": "webBuild",
+        "persistent": 0,
+        "created": "2026-10-10 10:44:14",
+        "expires": "1601-01-01 08:00:00"
+      },
+      {
+        "name": "websectiga",
+        "persistent": 1,
+        "created": "2026-10-10 10:44:24",
+        "expires": "2026-10-13 10:44:24"
+      },
+      {
+        "name": "xsecappid",
+        "persistent": 1,
+        "created": "2026-10-09 21:32:28",
+        "expires": "2027-10-10 10:44:14"
+      },
+      {
+        "name": "id_token",
+        "persistent": 1,
+        "created": "2026-10-10 10:46:03",
+        "expires": "2027-10-10 10:46:03"
+      },
+      {
+        "name": "web_session",
+        "persistent": 1,
+        "created": "2026-10-10 10:46:03",
+        "expires": "2027-10-10 10:46:03"
+      },
+      {
+        "name": "x-rednote-datactry",
+        "persistent": 1,
+        "created": "2026-10-10 10:46:03",
+        "expires": "2027-10-10 10:46:03"
+      },
+      {
+        "name": "x-rednote-holderctry",
+        "persistent": 1,
+        "created": "2026-10-10 10:46:03",
+        "expires": "2027-10-10 10:46:03"
+      }
+    ]
+  }
+}

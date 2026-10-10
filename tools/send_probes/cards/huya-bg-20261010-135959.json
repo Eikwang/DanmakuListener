@@ -1,0 +1,20 @@
+{
+  "probe": "huya_bg_send",
+  "room": "152746",
+  "mode": "headless_new+stealth",
+  "ts": "2026-10-10 13:59:51",
+  "injected_cookies": 44,
+  "login": {
+    "names_hit": [
+      "yyuid"
+    ],
+    "udb_mask": 1,
+    "logged": false,
+    "title": "拾光、是点妹官方直播间-王者荣耀-虎牙直播"
+  },
+  "send": {
+    "content": "[M0] huya-bg 135951",
+    "verdict": "SENT(回显)"
+  },
+  "screenshot": "D:\\AI\\DanmakuListener\\tools\\send_probes\\cards\\huya-bg-send-135959.png"
+}

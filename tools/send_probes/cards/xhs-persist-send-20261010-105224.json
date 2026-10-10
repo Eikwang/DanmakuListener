@@ -1,0 +1,19 @@
+{
+  "probe": "xhs_profile_persistence",
+  "stage": "send",
+  "profile": "D:\\AI\\DanmakuListener\\cookie\\xhs_profile",
+  "ts": "2026-10-10 10:52:15",
+  "send_login_state": {
+    "memory_id_token": true,
+    "memory_web_session": true,
+    "visible:#input-area": true,
+    "visible:text=登录": false,
+    "visible:text=扫码": false
+  },
+  "send": {
+    "content": "[M0] profile重测 105216",
+    "verdict": "SENT(仅DOM列表)",
+    "ws_text_frames": 0
+  },
+  "send_screenshot": "D:\\AI\\DanmakuListener\\tools\\send_probes\\cards\\xhs-persist-send-105224.png"
+}

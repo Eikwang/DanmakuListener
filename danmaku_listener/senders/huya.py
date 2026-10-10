@@ -1,12 +1,18 @@
 """虎牙常驻会话 sender（AutoDanmu T6/X1——ResidentSendSession 第二实例）
 
-形态：huya_login_profile persistent + headed minimized（虎牙无 headless 探针证据——
-保守用有头最小化窗口；ENG-8 flag 族由会话管理器统一注入）。冷却约束（普通账号
-~30s，10-14s 实测失败、35s 补发全过）由 guard 的 per-platform 覆写内置默认
-{"huya": 35} 兜底（senders/guard.py）——sender 内不再自设限速。
+形态：huya_login_profile persistent + headless_new 完全后台（2026-10-10 用户
+验收通过后裁定终态；STEALTH_JS 7 信号伪装经 init_scripts 接线；诊断期前台
+形态完成使命回退——当日实证链：卡片 huya-dom-*（输入面 DOM 取证）/
+huya-bg-*（后台形态）+ 用户可见窗口 a/b/c 流程）。ENG-8 flag 族由会话
+管理器统一注入。冷却约束（普通账号 ~30s，10-14s 实测失败、35s 补发全过）
+由 guard 的 per-platform 覆写内置默认 {"huya": 35} 兜底（senders/guard.py）
+——sender 内不再自设限速。
 
-配方（M0 补发卡 found 字段）：`#pub_msg_input` + `[class*=send]`；
-候选 .send-btn 实测不可见。登录失效回执同快手/斗鱼（DX-D1 CLI 重登）。
+配方（2026-10-10 DOM 取证终版，卡片 huya-dom-*）：输入面 `#pub_msg_input`
+（textarea，placeholder"发条弹幕呗~"）+ `#msg_send_bt`；发现逻辑=逐匹配
+扫描+可见且可编辑过滤（用户 devtools 路径实为包裹层 div 的教训固化）。
+登录态：F1 快照/恢复（login_state_store 共享实现）+ 登录失效时可见窗转正
+（login_takeover——登录后快照落盘自动转回后台会话形态）。
 """
 from __future__ import annotations
 
@@ -18,7 +24,7 @@ from loguru import logger
 from danmaku_listener.contract.models import SendRejectReason, SendStatus
 from danmaku_listener.senders.base import BaseSender, SendResult
 from danmaku_listener.senders.resident_session import (
-    MODE_MINIMIZED,
+    MODE_HEADLESS_NEW,
     LoginTakeoverError,
     ResidentSendSession,
 )
@@ -44,10 +50,14 @@ STEALTH_JS = """
 }
 """
 
-INPUT_SELECTORS = ("#pub_msg_input",  # 2026-10-09 验收用户 devtools 实测（真输入框；
-                   # #J_RoomChatSpeaker 是容器——此前打容器导致假 UNKNOWN）
-                   "#J_RoomChatSpeaker", "input[placeholder*=弹幕]", "textarea")
-BUTTON_SELECTORS = ("#msg_send_bt",  # 2026-10-09 验收用户 devtools 实测（真发送按钮）
+INPUT_SELECTORS = ("#pub_msg_input",  # 2026-10-10 DOM 取证实测（真输入面=textarea
+                   # placeholder"发条弹幕呗~"，卡片 huya-dom-20261010-*；用户
+                   # devtools 路径 #J_RoomChatSpeaker > div > div 实为包裹层 div
+                   # ——不可编辑，打字全空，已移除）
+                   "#J_RoomChatSpeaker textarea",  # 结构兜底（speaker 容器内 textarea）
+                   "textarea", "div[contenteditable=true]",
+                   "input[placeholder*=弹幕]")
+BUTTON_SELECTORS = ("#msg_send_bt",  # 2026-10-10 验收用户 devtools 实测（与 10-09 一致）
                     "[class*=send]", 'button:has-text("发送")', ".send-btn")
 ECHO_WAIT_S = 12.0
 
@@ -55,24 +65,30 @@ ECHO_WAIT_S = 12.0
 _session: ResidentSendSession | None = None
 
 
-def _get_session(idle_timeout_s: int, window_mode: str) -> ResidentSendSession:  # noqa: 保持 STEALTH_JS 常量供后续对抗参考
+def _get_session(idle_timeout_s: int, window_mode: str) -> ResidentSendSession:
     global _session
     if _session is None or _session._window_mode != window_mode:
         _session = ResidentSendSession(
             "huya-send", PROFILE_DIR,
-            # 2026-10-08 验收用户裁定：默认完全后台无痕（原 headed minimized 可见最小化）；
-            # headless=new 完整 Blink 指纹+--mute-audio 静音；INI send_window_mode 可覆写
-            window_mode=window_mode, idle_timeout_s=idle_timeout_s)
+            # 2026-10-10 纯后台终态：headless=new 完整 Blink 指纹 + STEALTH_JS
+            # 7 信号伪装（10-09 备而未接线——当日回退的对抗实验缺此变量）+
+            # --mute-audio；INI send_window_mode 可覆写
+            window_mode=window_mode, idle_timeout_s=idle_timeout_s,
+            init_scripts=[f"({STEALTH_JS})()"],
+            login_cookie_names=("yyuid", "hicl_imid", "huya_uid"))
     return _session
 
 
 class HuyaResidentSender(BaseSender):
-    """虎牙常驻会话 sender（headless_new 完全后台；profile 持久会话）"""
+    """虎牙常驻会话 sender（headless_new 纯后台；F1 登录快照/恢复）"""
 
     platform = "huya"
 
     def __init__(self, settings=None):
-        mode = MODE_MINIMIZED  # 2026-10-09 回退：headless=new 指纹被虎牙风控静默吞（对比实验实证），headed minimized 为 T6 实证可用形态
+        # 2026-10-10 终态（用户验收通过裁定）：纯后台 headless_new；DX-D9 三件套
+        # settings.send_window_mode 可覆写（注意全局默认即"headless_new"——INI
+        # 未配置时同样后台；前台诊断期绕过 settings 的临时逻辑已移除）
+        mode = MODE_HEADLESS_NEW
         idle = 1800
         if settings is not None:
             mode = getattr(settings, "send_window_mode", mode) or mode
@@ -88,10 +104,12 @@ class HuyaResidentSender(BaseSender):
 
     def _page_action(self, content: str):
         async def action(page, rid: str) -> SendResult:
-            # 登录态检测（2026-10-09 方案 A：UDB 遮罩/登录 cookie 缺失 → 可见登录窗
-            # 转正——huya 登录令牌为会话级 cookie，profile cookie 无法跨页恢复登录态）
+            # 登录态检测（cookie 基准 + UDB 遮罩可见性判定——2026-10-10 探针
+            # 实证 mask 节点 DOM 常驻：count 判定把已登录页误判为未登录）
             try:
-                mask = await page.locator("#UDBSdkLgn-mask").count()
+                mask_loc = page.locator("#UDBSdkLgn-mask")
+                mask = (await mask_loc.count() > 0
+                        and await mask_loc.first.is_visible())
                 cookies = {c["name"] for c in await page.context.cookies() if c.get("value")}
                 logged = bool({"yyuid", "hicl_imid", "huya_uid"} & cookies) and not mask
             except Exception:  # noqa: BLE001  探测失败不阻断（fake page 兼容）
@@ -111,17 +129,31 @@ class HuyaResidentSender(BaseSender):
                     return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
                                       detail=f"登录窗异常: {type(e).__name__}: {str(e)[:80]}",
                                       fix_hint="重试发送将再次弹出登录窗口")
-            # 渲染等待：goto 返回后 SPA 输入框延迟挂载（1s 即查会假阴性）
+            # 渲染等待：goto 返回后 SPA 输入框延迟挂载（1s 即查会假阴性）。
+            # 2026-10-10 发现逻辑升级：逐匹配扫描（.first 抓错元素教训）+
+            # 可见且可编辑过滤（包裹层 div 不可编辑——选它打字全空）
             inp = None
+            inp_sel = None
             for _ in range(10):
                 for sel in INPUT_SELECTORS:
                     try:
-                        loc = page.locator(sel).first
-                        if await loc.count() > 0 and await loc.is_visible():
-                            inp = loc
-                            break
+                        loc = page.locator(sel)
+                        n = await loc.count()
                     except Exception:  # noqa: BLE001
                         continue
+                    for i in range(min(n, 5)):
+                        cand = loc.nth(i)
+                        try:
+                            if not await cand.is_visible():
+                                continue
+                            if not await cand.is_editable():
+                                continue
+                        except Exception:  # noqa: BLE001
+                            continue
+                        inp, inp_sel = cand, sel
+                        break
+                    if inp is not None:
+                        break
                 if inp is not None:
                     break
                 await asyncio.sleep(2)
@@ -134,6 +166,30 @@ class HuyaResidentSender(BaseSender):
             await asyncio.sleep(0.4)
             await inp.press_sequentially(content, delay=40)
             await asyncio.sleep(0.3)
+            # 诊断观测（2026-10-10）：提交前回读输入框——contenteditable 用
+            # innerText、input/textarea 落 value 双读法；区分"没打进去"与
+            # "打进去了但被吞"（用户可见窗口期的人眼判定补充硬证据）
+            typed = None
+            try:
+                typed = await inp.evaluate(
+                    "el => ((el.innerText || el.textContent || '') || (el.value ?? '')).trim()")
+            except Exception:  # noqa: BLE001  回读失败按 None 记
+                typed = None
+            typed_ok = (typed == content)
+            if not typed_ok and inp is not None:
+                # 逐键失败自愈：textarea 直填（fill 触发 input 事件——React 受控
+                # 组件通常可感知）；contenteditable 的 fill 会抛错，落 except 跳过
+                try:
+                    await inp.fill(content)
+                    await asyncio.sleep(0.2)
+                    typed = await inp.evaluate(
+                        "el => ((el.innerText || el.textContent || '') || (el.value ?? '')).trim()")
+                    typed_ok = (typed == content)
+                    logger.info(f"[huya] room {rid} 逐键失败→fill 重试: typed_ok={typed_ok}")
+                except Exception:  # noqa: BLE001
+                    pass
+            logger.info(f"[huya] room {rid} 提交前输入回读: sel={inp_sel} typed_ok={typed_ok} "
+                        f"len={len(typed or '')}/{len(content)}")
             sent_btn = None
             for sel in BUTTON_SELECTORS:
                 try:
@@ -154,9 +210,10 @@ class HuyaResidentSender(BaseSender):
             # 观测晚了读到的就是重建后的世界，2026-10-09 实测教训）
             input_after = None
             try:
-                ta = page.locator("#pub_msg_input").first
+                ta = page.locator(inp_sel).first
                 if await ta.count() > 0:
-                    input_after = (await ta.input_value()).strip()
+                    input_after = await ta.evaluate(
+                        "el => ((el.innerText || el.textContent || '') || (el.value ?? '')).trim()")
             except Exception:  # noqa: BLE001  节点已被页面重建替换——按 None 记
                 input_after = None
             # F5：get_by_text 穿透 shadow DOM 回显；兜底=聊天容器 innerText 扫描
@@ -175,8 +232,11 @@ class HuyaResidentSender(BaseSender):
                 except Exception:  # noqa: BLE001
                     pass
                 await asyncio.sleep(1.5)
-            state = ("空(已提交——回显与观测均未命中)" if input_after == ""
+            state = ("空(已提交——回显与观测均未命中)" if (typed_ok and input_after == "")
                      else ("有内容(提交未触发)" if input_after else "无法读取(节点已重建)"))
+            if not typed_ok:
+                state = f"输入未落地(提交前回读={typed!r})"
             return SendResult(SendStatus.UNKNOWN, SendRejectReason.SEND_TIMEOUT.value,
-                              detail=f"无回显无显式错误；提交后输入框={state}（虎牙冷却/虚拟列表可能）")
+                              detail=f"无回显无显式错误；提交前输入={'正确' if typed_ok else repr(typed)}；"
+                                     f"提交后输入框={state}（虎牙冷却/虚拟列表可能）")
         return action

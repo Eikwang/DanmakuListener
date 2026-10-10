@@ -18,7 +18,7 @@
 
 import asyncio
 import time
-from typing import Dict, Iterable
+from typing import Dict, Iterable, Optional
 
 from loguru import logger
 
@@ -29,6 +29,7 @@ from danmaku_listener.contract.models import (
     RouteFailedPayload,
     UnifiedMessage,
 )
+from danmaku_listener.engines import login_state_store
 from danmaku_listener.engines.base import BaseEngine
 from danmaku_listener.engines import login_gate as LOGIN_GATE
 
@@ -143,6 +144,8 @@ class ControlledPageEngine(BaseEngine):
                             return "window_closed"
                         if LOGIN_GATE.has_login_cookie(cookies, cookie_names):
                             logged = True
+                            # F1：登录落地立即快照（保窗期硬杀也保得住登录态）
+                            await self._snapshot_login_state(context)
                             names = {c.get("name") for c in cookies}
                             new_names = sorted(n for n in names
                                                if n and n not in baseline_names)
@@ -173,6 +176,7 @@ class ControlledPageEngine(BaseEngine):
                                 await sleep_fn(poll_interval)
                             logger.info(f"[{self.platform}] room {room_id} "
                                         f"login grace ended ({LOGIN_GATE.LOGIN_POST_GRACE_S:.0f}s)")
+                            await self._snapshot_login_state(context)  # F1：宽限期后补快照（令牌可能已刷新）
                             return "logged_in"
                         await sleep_fn(poll_interval)
                     logger.info(f"[{self.platform}] room {room_id} login wait timeout "
@@ -224,15 +228,35 @@ class ControlledPageEngine(BaseEngine):
         os.makedirs(d, exist_ok=True)
         return d
 
-    async def _launch(self, pw, headless: bool = True):
+    def _login_state_path(self) -> str:
+        """登录态快照路径（F1——2026-10-10 xhs profile 重测裁定）"""
+        return f"{self._cookie_dir}/{self.profile_name}_login_state.json"
+
+    async def _snapshot_login_state(self, context) -> bool:
+        """登录 cookie 出现瞬间快照 storage_state 落盘（F1——共享实现见
+        engines/login_state_store.py，背景与机制注释在彼处）"""
+        return await login_state_store.snapshot_login_state(
+            context, names=LOGIN_GATE.LOGIN_COOKIE_NAMES.get(self.platform, ()),
+            path=self._login_state_path(), label=self.platform)
+
+    async def _restore_login_state(self, context) -> bool:
+        """profile 丢登录 → 从快照恢复（F1 共享实现）"""
+        return await login_state_store.restore_login_state(
+            context, names=LOGIN_GATE.LOGIN_COOKIE_NAMES.get(self.platform, ()),
+            path=self._login_state_path(), label=self.platform)
+
+    async def _launch(self, pw, headless: bool = True,
+                      extra_args: Optional[list] = None):
         """persistent context 启动（统一反检测参数；子类可用 _launch_args 扩展）"""
-        return await pw.chromium.launch_persistent_context(
+        context = await pw.chromium.launch_persistent_context(
             self._profile_dir(),
             headless=headless,
             user_agent=self._user_agent(),
             viewport={"width": 1280, "height": 800},
-            args=COMMON_LAUNCH_ARGS + self._launch_args(),
+            args=COMMON_LAUNCH_ARGS + self._launch_args() + (extra_args or []),
         )
+        await self._restore_login_state(context)  # F1：profile 丢登录时快照自愈
+        return context
 
     def _user_agent(self) -> str:
         return COMMON_UA

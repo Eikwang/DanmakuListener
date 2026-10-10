@@ -1,0 +1,17 @@
+{
+  "probe": "xhs_profile_persistence",
+  "stage": "repersist",
+  "profile": "D:\\AI\\DanmakuListener\\cookie\\xhs_profile",
+  "ts": "2026-10-10 10:49:06",
+  "repersist": {
+    "memory_id_token": true,
+    "memory_web_session": true,
+    "visible:#input-area": true,
+    "visible:text=登录": false,
+    "visible:text=扫码": false
+  },
+  "repersist_disk": {
+    "login_on_disk": false
+  },
+  "repersist_screenshot": "D:\\AI\\DanmakuListener\\tools\\send_probes\\cards\\xhs-persist-repersist-104913.png"
+}

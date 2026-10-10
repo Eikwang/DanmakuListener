@@ -23,7 +23,7 @@ import base64
 import json
 import re
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from loguru import logger
 
@@ -36,6 +36,11 @@ PROTOCOL_VERSION = "xiaohongshu-1"
 
 LIVE_URL_TEMPLATE = "https://www.xiaohongshu.com/livestream/{room_id}"
 SILENCE_TIMEOUT = 90.0  # 业务帧静默阈值（refresh 类帧持续流动时不会触发）
+
+#: 无感模式后台发送参数（2026-10-10 探针实证：登录态 + headless=new 实发 SENT——
+#: 旧"headless 提交被吞"实为游客态混杂因素；--headless=new 完整 Blink 指纹，
+#: douyin CEO-F5 同款形态；--mute-audio 静音后台直播流）
+SEND_BG_EXTRA_ARGS = ["--headless=new", "--mute-audio"]
 
 
 class XiaohongshuParseError(ValueError):
@@ -211,6 +216,29 @@ def map_custom_data(cd: Dict[str, Any], seq: int, ts: int,
     return None
 
 
+def ws_echo_frame(frames: Iterable[Any], content: str) -> Optional[Dict[str, Any]]:
+    """从 WS 帧集合提取本人弹幕的服务端回环 customData（F3——回显判定唯一真源）
+
+    2026-10-10 探针实证：DOM 列表匹配受本地乐观渲染与虚拟列表影响（10-09
+    16:06 两次假 SENT 的来源），WS text 帧是服务端确认。frames 为
+    framereceived payload 原始集合（str/bytes/None 混合），用 parse_ws_frame
+    解析。命中返回业务对象（供 F4 自发声回环注入消息流），未命中 None。
+    纯函数供单测。
+    """
+    for raw in frames:
+        if raw is None:
+            continue
+        for cd in parse_ws_frame(raw):
+            if cd.get("type") == "text" and (cd.get("desc") or "").strip() == content:
+                return cd
+    return None
+
+
+def ws_echo_hit(frames: Iterable[Any], content: str) -> bool:
+    """bool 包装（ws_echo_frame——既有单测与判定语义保留）"""
+    return ws_echo_frame(frames, content) is not None
+
+
 class XiaohongshuEngine(ControlledPageEngine):
     """小红书受控页面引擎（AutoDanmu send 钩子同 E5 纪律——选择器待 M0 校准）"""
 
@@ -221,40 +249,32 @@ class XiaohongshuEngine(ControlledPageEngine):
     SEND_BUTTON_SELECTORS = ["#input-area button", "#msg_send_bt"]
     LOGIN_WAIT_TIMEOUT_S = 240.0   # 页内登录等待（用户扫码/验证期间发送挂起）
 
-    # ---- 方案 A：headed 持久发送页（2026-10-09 验收实证）----
-    # XHS 登录令牌为会话级 cookie——浏览器关闭即丢（headless 瞬态页每次都是
-    # 匿名态，提交被静默吞）。 headed 持久页跨发送存活：登录态随浏览器存活，
-    # 未登录时用户直接在页内完成登录（登录弹窗就在房间页上）。
-    _send_pw: Any = None
-    _send_ctx: Any = None
-    _send_page: Any = None
+    # ---- 方案 B：瞬态 headed 发送会话（2026-10-10 profile 重测探针裁定）----
+    # 探针实证链（cards/xhs-persist-*）：
+    # 1. 登录 cookie 为持久型（id_token/web_session 1 年期）——"会话级"旧结论废除；
+    #    历史登录全丢根因=硬杀丢未提交窗口 + 登录从未在 profile 内完成落盘
+    # 2. 同 profile 双 persistent context 必然 TargetClosedError——方案 A 常驻发送页
+    #    与监听会话互杀（监听被饿死/发送撞锁 busy 的来源）→ 发送改瞬态会话，
+    #    发送前关停监听 context + _send_active 门，用完干净关闭（cookie 落盘）
+    # 3. 游客态 #input-area 可见——输入框可见性判登录失真 → 改 cookie（id_token）判定
+    # 4. 登录态持久化=F1 快照（登录检测点立即落盘）+ _launch 恢复，不再依赖浏览器存活
+    _send_active: bool = False
+    _listen_ctx: Any = None
 
-    async def _ensure_send_page(self) -> Any:
-        """headed 持久发送页（跨发送存活；死亡时重建）。"""
-        if self._send_page is not None:
+    async def _close_listen_ctx(self) -> None:
+        """F2：发送前关停监听 context（同 profile 单实例——TargetClosedError 实证）"""
+        ctx = self._listen_ctx
+        self._listen_ctx = None
+        if ctx is not None:
             try:
-                if not self._send_page.is_closed():
-                    return self._send_page
-            except Exception:  # noqa: BLE001
+                await ctx.close()
+                logger.info("[xhs] 发送前关停监听 context（F2 profile 单实例让位）")
+            except Exception:  # noqa: BLE001  已死 context——忽略
                 pass
-            self._send_page = None
-            try:
-                if self._send_ctx is not None:
-                    await self._send_ctx.close()
-            except Exception:  # noqa: BLE001
-                pass
-            self._send_ctx = None
-        from playwright.async_api import async_playwright
-        self._send_pw = await async_playwright().start()
-        # 引擎自己的 _launch（统一反检测参数）——headed 形态
-        self._send_ctx = await self._launch(self._send_pw, headless=False)
-        self._send_page = (self._send_ctx.pages[0] if self._send_ctx.pages
-                           else await self._send_ctx.new_page())
-        return self._send_page
 
     async def send_danmu(self, room_id: str, content: str):
-        """小红书发送（方案 A）：headed 持久页 + 未登录时页内等待用户登录 +
-        #input-area 配方（逐键+按钮时序）+ 回显排除输入面。"""
+        """小红书发送（方案 B）：瞬态 headed 会话 + cookie 判登录（未登录窗内等待）
+        + #input-area 配方（逐键+按钮时序）+ WS 帧服务端回环判定。"""
         from danmaku_listener.contract.models import SendRejectReason, SendStatus
         from danmaku_listener.senders.base import SendResult
 
@@ -264,40 +284,73 @@ class XiaohongshuEngine(ControlledPageEngine):
         except asyncio.TimeoutError:
             return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
                               fix_hint="profile 锁被监听操作占用——稍后重试（busy）")
-        page = None
+        self._send_active = True
         try:
             from playwright.async_api import async_playwright
 
             # 房间 URL：链接形态原样携带（含 xsec_token）；纯数字才拼模板
             url = (room_id.strip() if "xiaohongshu.com" in room_id
                    else self._send_room_url(room_id))
-            page = await self._ensure_send_page()
-            try:
-                await page.goto(url, timeout=45000, wait_until="domcontentloaded")
-            except Exception as e:  # noqa: BLE001
-                return SendResult(SendStatus.UNKNOWN, SendRejectReason.SEND_TIMEOUT.value,
-                                  detail=f"goto: {type(e).__name__}")
-            # 等输入区出现（最长 10s）——未登录时页面弹登录窗
-            inp = None
-            for _ in range(5):
-                for sel in self.SEND_INPUT_SELECTORS:
+            async with async_playwright() as pw:
+                await self._close_listen_ctx()  # F2：监听让位（会话侧 _send_active 门等待归还）
+                # 无感模式：headless=new 后台发送（登录态探针实证 SENT）；
+                # 登录续期必须可见窗（扫码）——唯一弹窗场景，登录后快照落盘
+                # 即回到无感
+                context = await self._launch(pw, headless=False,
+                                             extra_args=SEND_BG_EXTRA_ARGS)
+                try:
+                    logged = await self._ctx_has_login(context)
+                    if not logged:
+                        logger.info("[xhs] 后台会话无登录态——改弹可见窗口等待登录")
+                        try:
+                            await context.close()
+                        except Exception:  # noqa: BLE001
+                            pass
+                        context = await self._launch(pw, headless=False)  # headed 可见（登录窗）
+                    page = (context.pages[0] if context.pages
+                            else await context.new_page())
+                    # F3：WS 帧收集必须先于 goto（已有连接不触发 websocket 事件——
+                    # 2026-10-10 探针实证后挂收集器 0 帧）
+                    ws_frames: List[Any] = []
+
+                    def _on_ws(ws) -> None:
+                        ws.on("framereceived",
+                              lambda p: ws_frames.append(
+                                  p.get("payload") if isinstance(p, dict) else p))
+
+                    page.on("websocket", _on_ws)
                     try:
-                        loc = page.locator(sel).first
-                        if await loc.count() > 0 and await loc.is_visible():
-                            inp = loc
-                            break
-                    except Exception:  # noqa: BLE001
-                        continue
-                if inp is not None:
-                    break
-                await asyncio.sleep(2)
-            if inp is None:
-                # 未登录（登录弹窗遮挡）——等待用户在可见窗口内完成登录（最长 240s）
-                logger.info(f"[xhs] room {room_id} 未登录——等待用户在 headed 窗口完成登录"
-                            f"（最长 {self.LOGIN_WAIT_TIMEOUT_S:.0f}s，完成后自动继续发送）")
-                wait_deadline = time.monotonic() + self.LOGIN_WAIT_TIMEOUT_S
-                while time.monotonic() < wait_deadline:
+                        await page.goto(url, timeout=45000,
+                                        wait_until="domcontentloaded")
+                    except Exception as e:  # noqa: BLE001
+                        return SendResult(SendStatus.UNKNOWN,
+                                          SendRejectReason.SEND_TIMEOUT.value,
+                                          detail=f"goto: {type(e).__name__}")
                     await asyncio.sleep(3)
+                    # 登录判定已在启动前完成（cookie 基准——_launch 已做快照恢复，
+                    # 无登录=快照也无效，已在 headed 窗口等待）；此处仅 headed
+                    # 路径进入等待循环（最长 240s），登录即快照（F1）
+                    if not logged:
+                        logger.info(f"[xhs] room {room_id} 未登录——等待用户在 headed 窗口"
+                                    f"完成登录（最长 {self.LOGIN_WAIT_TIMEOUT_S:.0f}s，"
+                                    "完成后自动继续发送）")
+                        wait_deadline = time.monotonic() + self.LOGIN_WAIT_TIMEOUT_S
+                        while time.monotonic() < wait_deadline:
+                            await asyncio.sleep(3)
+                            logged = await self._ctx_has_login(context)
+                            if logged:
+                                await self._snapshot_login_state(context)  # F1
+                                await asyncio.sleep(10)  # 滑块/安全验证宽限（046c3e0 同源）
+                                break
+                        if not logged:
+                            return SendResult(
+                                SendStatus.FAILED,
+                                SendRejectReason.PLATFORM_REJECTED.value,
+                                detail="登录未完成（等待超时）",
+                                fix_hint="小红书游客发送会被服务端静默吞——重试发送"
+                                         "将再次弹出登录窗口，完成登录后自动继续")
+                    # 输入框发现（发现模式：候选序+可见性）
+                    inp = None
                     for sel in self.SEND_INPUT_SELECTORS:
                         try:
                             loc = page.locator(sel).first
@@ -306,52 +359,80 @@ class XiaohongshuEngine(ControlledPageEngine):
                                 break
                         except Exception:  # noqa: BLE001
                             continue
-                    if inp is not None:
-                        logger.info(f"[xhs] room {room_id} 登录完成——继续发送")
-                        break
-                if inp is None:
-                    return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
-                                      detail="登录未完成（240s 等待超时）",
-                                      fix_hint="重试发送将再次打开登录页——完成登录后自动继续发送")
-            await inp.click()
-            await inp.press_sequentially(content, delay=50)
-            # 发送按钮输入文字后才出现（验收用户实测）——先 Enter 兜底再按钮
-            await inp.press("Enter")
-            btn = page.locator("#input-area button").first
-            if await btn.count() > 0 and await btn.is_visible():
-                try:
-                    await btn.click(timeout=3_000)
-                except Exception:  # noqa: BLE001
-                    pass
-            # 回显核查：消息列表出现标记（排除输入面自身假阳性）
-            echo = time.monotonic() + 12
-            hit = False
-            while time.monotonic() < echo:
-                txt = await page.evaluate(
-                    "(m) => { const el = document.querySelector('#input-area');"
-                    " const main = el ? (el.closest('.main-comment') || el.parentElement) : null;"
-                    " if (!main) return '';"
-                    " const area = main.querySelector('#input-area');"
-                    " const base = area ? area.innerText : '';"
-                    " return main.innerText.replace(base, '').slice(-400); }", content)
-                if content in (txt or ""):
-                    hit = True
-                    break
-                await asyncio.sleep(1.5)
-            if hit:
-                return SendResult(SendStatus.SENT, sent_at=int(time.time()))
-            return SendResult(SendStatus.UNKNOWN, SendRejectReason.SEND_TIMEOUT.value,
-                              detail="无回显（消息列表未见标记——本地乐观渲染已排除）")
+                    if inp is None:
+                        return SendResult(SendStatus.FAILED,
+                                          SendRejectReason.PLATFORM_REJECTED.value,
+                                          fix_hint="未发现发送输入框（页面结构变更）"
+                                                   "——重跑 M0 探针核对选择器")
+                    await inp.click()
+                    await inp.press_sequentially(content, delay=50)
+                    # 发送按钮输入文字后才出现（验收用户实测）——先 Enter 兜底再按钮
+                    await inp.press("Enter")
+                    btn = page.locator("#input-area button").first
+                    if await btn.count() > 0 and await btn.is_visible():
+                        try:
+                            await btn.click(timeout=3_000)
+                        except Exception:  # noqa: BLE001
+                            pass
+                    # F3 回显判定：WS text 帧服务端回环 = SENT 唯一真源；
+                    # 命中帧同时注入消息流（F4 自发声回环——F2 让位窗口内监听
+                    # 离线，自弹幕广播恰好落在窗口里，发送侧是唯一可靠来源）
+                    echo_deadline = time.monotonic() + 15
+                    while time.monotonic() < echo_deadline:
+                        hit_cd = ws_echo_frame(ws_frames, content)
+                        if hit_cd is not None:
+                            await self._emit_self_echo(room_id, hit_cd)
+                            return SendResult(SendStatus.SENT,
+                                              sent_at=int(time.time()))
+                        await asyncio.sleep(1)
+                    return SendResult(SendStatus.UNKNOWN,
+                                      SendRejectReason.SEND_TIMEOUT.value,
+                                      detail="无服务端 WS 回环（弹幕可能已进聊天流——"
+                                             "乐观渲染不可信，按未知处理）",
+                                      fix_hint="查看弹幕流回环确认；连续 UNKNOWN "
+                                               "请核对账号是否被禁言/风控")
+                finally:
+                    try:
+                        await context.close()  # 干净关闭——cookie 提交落盘（F2 归还 profile）
+                    except Exception:  # noqa: BLE001
+                        pass
         except Exception as e:  # noqa: BLE001  E5 隔离：异常不出引擎边界
             logger.warning(f"[xiaohongshu] send_danmu error: {type(e).__name__}: {str(e)[:100]}")
             return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
                               detail=f"{type(e).__name__}: {str(e)[:100]}")
         finally:
-            if page is not None:
-                try:
-                    await page.close()
-                except Exception:  # noqa: BLE001
-                    pass
+            self._send_active = False
+            self._profile_lock.release()
+
+    async def _ctx_has_login(self, context) -> bool:
+        """context cookie 登录判定（游客态输入框可见——可见性判定失真实证）"""
+        try:
+            cookies = await context.cookies()
+        except Exception:  # noqa: BLE001
+            return False
+        return LOGIN_GATE.has_login_cookie(
+            cookies, LOGIN_GATE.LOGIN_COOKIE_NAMES["xiaohongshu"])
+
+    async def _emit_self_echo(self, room_id: str, cd: Dict[str, Any]) -> None:
+        """F4 自发声回环：把发送侧拿到的服务端确认帧注入消息流
+
+        背景（2026-10-10 用户实测）：F2 让位窗口内监听离线，自弹幕的房间
+        广播恰好落在窗口里（WS 广播不补发）——监听永远收不到自己发的弹幕。
+        发送流程手里本就握着这条帧（SENT 判定依据），直接按监听同款信封
+        注入；监听侧若因时序竞态也收到同帧，由 _self_echo_mark 10s 去重。
+        """
+        try:
+            mapped = map_custom_data(cd, self.next_seq(room_id),
+                                     int(time.time()), self._nick_cache)
+            if not mapped or mapped["type"] != "DANMU":
+                return
+            self._self_echo_mark = (mapped["payload"].get("content", ""),
+                                    time.monotonic())
+            await self._emit_message(self._envelope(room_id, mapped))
+            logger.info(f"[xhs] 自发声回环注入: room={room_id} "
+                        f"content={mapped['payload'].get('content', '')[:20]!r}")
+        except Exception as e:  # noqa: BLE001  回环失败不影响发送回执
+            logger.debug(f"[xhs] self echo emit failed: {type(e).__name__}: {e}")
 
     def _send_room_url(self, room_id: str) -> str:
         return LIVE_URL_TEMPLATE.format(room_id=room_id)
@@ -373,6 +454,9 @@ class XiaohongshuEngine(ControlledPageEngine):
         self._last_room_stats: Dict[str, tuple] = {}
         # 未识别 customData 类型首见集合（校准日志——follow 真实 type 名确认用）
         self._unmapped_seen: set = set()
+        # F4 自发声回环去重标记：(content, monotonic)——发送侧注入后 10s 内
+        # 监听侧同内容 DANMU 跳过（danmu-send 计划 R39 义务落地）
+        self._self_echo_mark: Optional[tuple] = None
 
     def validate_room_id(self, room_id: str) -> None:
         try:
@@ -444,8 +528,13 @@ class XiaohongshuEngine(ControlledPageEngine):
         deadline = time.monotonic() + 14400.0
         self._touch_frame(room_id)  # 静默计时起点
 
+        # F2：发送占用 profile 时让位（同 profile 双开 TargetClosedError 实证——
+        # 发送前会关停本 context；等待发送完成归还后再重建）
+        while self._send_active and not self._stopped(room_id):
+            await asyncio.sleep(2)
         async with async_playwright() as pw:
             context = await self._launch(pw, headless=True)
+            self._listen_ctx = context
             try:
                 page = context.pages[0] if context.pages else await context.new_page()
                 self._wire_ws_intercept(room_id, page)
@@ -478,12 +567,21 @@ class XiaohongshuEngine(ControlledPageEngine):
                 # 有界会话 + 业务帧静默检测（t==4 帧含 refresh 心跳，正常持续流动）
                 while time.monotonic() < deadline and not self._stopped(room_id):
                     await asyncio.sleep(2)
+                    if self._listen_ctx is not context:
+                        logger.info(f"[xhs] room {room_id} 监听 context 已让位给"
+                                    "发送（F2）——发送完成后自动重建")
+                        return
                     if self._frame_silent(room_id, SILENCE_TIMEOUT):
                         raise XiaohongshuParseError(
                             "xiaohongshu.session.silent: 90s 无业务帧"
                             "（可能未开播/已下播/风控——确认直播中）")
             finally:
-                await context.close()
+                if self._listen_ctx is context:
+                    self._listen_ctx = None
+                try:
+                    await context.close()
+                except Exception:  # noqa: BLE001  context 已被发送侧关停（F2）
+                    pass
         elapsed = int(time.time()) - session_start
         if elapsed >= 14400.0:
             logger.info(f"[xhs] room {room_id} session rebuilt after {elapsed}s")
@@ -512,6 +610,17 @@ class XiaohongshuEngine(ControlledPageEngine):
                     logger.info(f"[xhs] room {room_id} unmapped customData type "
                                 f"first seen: {cd_type!r} keys={sorted(cd.keys())[:8]}")
                 continue
+            # F4 自发声回环去重（R39）：发送侧已注入的弹幕，监听侧 10s 内
+            # 同内容 DANMU 跳过（时序竞态双份防护——正常让位窗口内监听离线，
+            # 此分支极少命中）
+            if mapped["type"] == "DANMU" and self._self_echo_mark is not None:
+                echo_content, echo_t = self._self_echo_mark
+                if (mapped["payload"].get("content") == echo_content
+                        and time.monotonic() - echo_t < 10):
+                    self._self_echo_mark = None
+                    logger.debug(f"[xhs] room {room_id} 自发声回环去重"
+                                 "（监听侧同帧竞态）")
+                    continue
             # ROOM_STATS 同值去重（refresh 高频，名单数不变时跳过 emit——
             # 对齐 taobao _last_room_stats 模式；seq 已消耗同现状无害）
             if mapped["type"] == "ROOM_STATS":

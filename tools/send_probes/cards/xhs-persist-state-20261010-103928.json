@@ -1,0 +1,186 @@
+{
+  "probe": "xhs_profile_persistence",
+  "stage": "state",
+  "profile": "D:\\AI\\DanmakuListener\\cookie\\xhs_profile",
+  "ts": "2026-10-10 10:39:20",
+  "state_disk_before": {
+    "login_on_disk": false,
+    "cookies": [
+      {
+        "name": "a1",
+        "persistent": 1,
+        "created": "2026-10-09 21:32:28",
+        "expires": "2027-10-09 21:32:28"
+      },
+      {
+        "name": "abRequestId",
+        "persistent": 1,
+        "created": "2026-10-09 21:32:27",
+        "expires": "2027-10-09 21:32:27"
+      },
+      {
+        "name": "acw_tc",
+        "persistent": 1,
+        "created": "2026-10-09 21:32:27",
+        "expires": "2026-10-09 22:02:27"
+      },
+      {
+        "name": "ets",
+        "persistent": 1,
+        "created": "2026-10-09 21:32:28",
+        "expires": "2026-11-08 21:32:28"
+      },
+      {
+        "name": "webId",
+        "persistent": 1,
+        "created": "2026-10-09 21:32:28",
+        "expires": "2027-10-09 21:32:28"
+      },
+      {
+        "name": "acw_tc",
+        "persistent": 1,
+        "created": "2026-10-09 21:42:33",
+        "expires": "2026-10-09 22:12:33"
+      },
+      {
+        "name": "acw_tc",
+        "persistent": 1,
+        "created": "2026-10-09 21:42:33",
+        "expires": "2026-10-09 22:12:33"
+      },
+      {
+        "name": "web_session",
+        "persistent": 1,
+        "created": "2026-10-09 21:42:33",
+        "expires": "2027-10-09 21:42:33"
+      },
+      {
+        "name": "sec_poison_id",
+        "persistent": 1,
+        "created": "2026-10-09 21:47:33",
+        "expires": "2026-10-09 21:57:38"
+      },
+      {
+        "name": "websectiga",
+        "persistent": 1,
+        "created": "2026-10-09 21:47:33",
+        "expires": "2026-10-12 21:47:33"
+      },
+      {
+        "name": "gid",
+        "persistent": 1,
+        "created": "2026-10-09 21:42:36",
+        "expires": "2027-11-13 21:47:39"
+      },
+      {
+        "name": "loadts",
+        "persistent": 1,
+        "created": "2026-10-09 21:47:35",
+        "expires": "2027-10-09 21:47:35"
+      },
+      {
+        "name": "xsecappid",
+        "persistent": 1,
+        "created": "2026-10-09 21:32:28",
+        "expires": "2027-10-09 21:47:35"
+      }
+    ]
+  },
+  "state_page": {
+    "memory_id_token": false,
+    "memory_web_session": true,
+    "visible:#input-area": true,
+    "visible:text=登录": false,
+    "visible:text=扫码": false
+  },
+  "state_screenshot": "D:\\AI\\DanmakuListener\\tools\\send_probes\\cards\\xhs-persist-state-103927.png",
+  "state_disk_after_clean_close": {
+    "login_on_disk": false,
+    "cookies": [
+      {
+        "name": "a1",
+        "persistent": 1,
+        "created": "2026-10-09 21:32:28",
+        "expires": "2027-10-09 21:32:28"
+      },
+      {
+        "name": "abRequestId",
+        "persistent": 1,
+        "created": "2026-10-09 21:32:27",
+        "expires": "2027-10-09 21:32:27"
+      },
+      {
+        "name": "ets",
+        "persistent": 1,
+        "created": "2026-10-09 21:32:28",
+        "expires": "2026-11-08 21:32:28"
+      },
+      {
+        "name": "webId",
+        "persistent": 1,
+        "created": "2026-10-09 21:32:28",
+        "expires": "2027-10-09 21:32:28"
+      },
+      {
+        "name": "web_session",
+        "persistent": 1,
+        "created": "2026-10-09 21:42:33",
+        "expires": "2027-10-09 21:42:33"
+      },
+      {
+        "name": "acw_tc",
+        "persistent": 1,
+        "created": "2026-10-10 10:39:21",
+        "expires": "2026-10-10 11:09:21"
+      },
+      {
+        "name": "acw_tc",
+        "persistent": 1,
+        "created": "2026-10-10 10:39:21",
+        "expires": "2026-10-10 11:09:21"
+      },
+      {
+        "name": "acw_tc",
+        "persistent": 1,
+        "created": "2026-10-10 10:39:21",
+        "expires": "2026-10-10 11:09:21"
+      },
+      {
+        "name": "gid",
+        "persistent": 1,
+        "created": "2026-10-09 21:42:36",
+        "expires": "2027-11-14 10:39:24"
+      },
+      {
+        "name": "loadts",
+        "persistent": 1,
+        "created": "2026-10-10 10:39:21",
+        "expires": "2027-10-10 10:39:21"
+      },
+      {
+        "name": "sec_poison_id",
+        "persistent": 1,
+        "created": "2026-10-10 10:39:21",
+        "expires": "2026-10-10 10:49:26"
+      },
+      {
+        "name": "webBuild",
+        "persistent": 0,
+        "created": "2026-10-10 10:39:21",
+        "expires": "1601-01-01 08:00:00"
+      },
+      {
+        "name": "websectiga",
+        "persistent": 1,
+        "created": "2026-10-10 10:39:21",
+        "expires": "2026-10-13 10:39:21"
+      },
+      {
+        "name": "xsecappid",
+        "persistent": 1,
+        "created": "2026-10-09 21:32:28",
+        "expires": "2027-10-10 10:39:21"
+      }
+    ]
+  }
+}

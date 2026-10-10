@@ -1,0 +1,7 @@
+{
+  "probe": "xhs_profile_persistence",
+  "stage": "singleton",
+  "profile": "D:\\AI\\DanmakuListener\\cookie\\xhs_profile",
+  "ts": "2026-10-10 10:39:15",
+  "singleton": "SECOND_LAUNCH_BLOCKED: TargetClosedError: BrowserType.launch_persistent_context: Target page, context or browser has been closed\nBrowser logs:\n\n<launching> C:\\Users\\admin\\AppData\\Local\\ms-playwright\\chr"
+}

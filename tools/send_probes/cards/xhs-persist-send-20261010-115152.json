@@ -1,0 +1,21 @@
+{
+  "probe": "xhs_profile_persistence",
+  "stage": "send",
+  "profile": "C:\\Users\\admin\\.claude\\jobs\\e8b5122b\\tmp\\xhs_probe_bg_profile2",
+  "ts": "2026-10-10 11:51:44",
+  "send_mode": "headless_new_bg",
+  "restore_snapshot": "cookie/xhs_profile_login_state.json",
+  "send_login_state": {
+    "memory_id_token": true,
+    "memory_web_session": true,
+    "visible:#input-area": true,
+    "visible:text=登录": false,
+    "visible:text=扫码": false
+  },
+  "send": {
+    "content": "[M0] profile重测 115144",
+    "verdict": "SENT(WS服务端回环)",
+    "ws_text_frames": 1
+  },
+  "send_screenshot": "D:\\AI\\DanmakuListener\\tools\\send_probes\\cards\\xhs-persist-send-115152.png"
+}

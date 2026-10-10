@@ -1,0 +1,32 @@
+{
+  "platform": "1688",
+  "room_url": "https://live.1688.com/zb/play.html?userId=2222065065309&feedId=1768962314754091&__pageId__=190453&cms_id=190453",
+  "sends_planned": 1,
+  "started": "2026-10-08 17:05:28",
+  "route": "DOM（R22 探针）",
+  "sends": [
+    {
+      "seq": 1,
+      "marker": "[M0] 发送探针 1/170532",
+      "verdict": "SUCCESS",
+      "detail": "marker 回显于聊天流"
+    }
+  ],
+  "risk_signals": [],
+  "selector_notes": {
+    "input": {
+      "found": "input[placeholder*=说]",
+      "tried": [
+        "textarea(不可见/不存在)"
+      ]
+    },
+    "button": {
+      "found": "text=发送",
+      "tried": [
+        "button:has-text(\"发送\")(不可见/不存在)"
+      ]
+    }
+  },
+  "verdicts_summary": "SUCCESS=1",
+  "blocked_reason": null
+}
