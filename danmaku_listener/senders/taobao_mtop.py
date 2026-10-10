@@ -78,8 +78,8 @@ def plan_slider_drag(track_width: float, knob_width: float, *,
     """
     rng = rng or random.Random()
     distance = max(120.0, track_width - knob_width + 2.0)
-    steps = rng.randint(24, 34)
-    total_ms = rng.uniform(550.0, 900.0)
+    steps = rng.randint(28, 38)
+    total_ms = rng.uniform(800.0, 1300.0)  # 人类 260px 拖动常见 0.8~1.5s（首版 0.55~0.9 偏快被判机器）
     weights = [0.5 + abs(2.0 * (i + 1) / steps - 1.0) for i in range(steps)]
     wsum = sum(weights)
     delays = [total_ms * w / wsum for w in weights]
@@ -87,13 +87,14 @@ def plan_slider_drag(track_width: float, knob_width: float, *,
         delays[rng.randrange(steps)] += rng.uniform(30.0, 70.0)
     overshoot = rng.uniform(2.0, 5.0)
     out: list[tuple[float, float, float]] = []
+    dy_walk = 0.0  # 纵向平滑随机游走（30Hz 独立抖动非人手特征——首版教训）
     for i in range(steps):
         t = (i + 1) / steps
         x = distance * (1.0 - (1.0 - min(t / 0.9, 1.0)) ** 2)
         if t > 0.9:
             x = distance + overshoot * math.sin((t - 0.9) / 0.1 * math.pi)
-        out.append((round(x, 2), round(rng.uniform(-1.5, 1.5), 2),
-                    round(delays[i], 1)))
+        dy_walk = max(-2.0, min(2.0, dy_walk + rng.uniform(-0.6, 0.6)))
+        out.append((round(x, 2), round(dy_walk, 2), round(delays[i], 1)))
     return out
 
 

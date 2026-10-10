@@ -453,7 +453,7 @@ def test_plan_slider_drag_reaches_track_end_with_overshoot():
 def test_plan_slider_drag_total_duration_bounded():
     plan = plan_slider_drag(300.0, 40.0, rng=random.Random(7))
     total = sum(s[2] for s in plan)
-    assert 550.0 <= total <= 1050.0   # 0.55~0.9s 基础 + 微停顿上界
+    assert 800.0 <= total <= 1450.0   # 0.8~1.3s 基础 + 微停顿上界（二轮加时——首版偏快被判机器）
     assert all(0.0 < s[2] for s in plan)
 
 
