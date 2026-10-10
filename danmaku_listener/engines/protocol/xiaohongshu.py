@@ -29,18 +29,16 @@ from loguru import logger
 
 from danmaku_listener.contract.models import GapReason
 from danmaku_listener.engines import login_gate as LOGIN_GATE
-from danmaku_listener.engines.protocol.controlled_base import ControlledPageEngine
+from danmaku_listener.engines.protocol.controlled_base import (
+    SEND_BG_EXTRA_ARGS,
+    ControlledPageEngine,
+)
 from danmaku_listener.engines.protocol.xhs_gift_prices import lookup_price
 
 PROTOCOL_VERSION = "xiaohongshu-1"
 
 LIVE_URL_TEMPLATE = "https://www.xiaohongshu.com/livestream/{room_id}"
 SILENCE_TIMEOUT = 90.0  # 业务帧静默阈值（refresh 类帧持续流动时不会触发）
-
-#: 无感模式后台发送参数（2026-10-10 探针实证：登录态 + headless=new 实发 SENT——
-#: 旧"headless 提交被吞"实为游客态混杂因素；--headless=new 完整 Blink 指纹，
-#: douyin CEO-F5 同款形态；--mute-audio 静音后台直播流）
-SEND_BG_EXTRA_ARGS = ["--headless=new", "--mute-audio"]
 
 
 class XiaohongshuParseError(ValueError):
@@ -249,28 +247,13 @@ class XiaohongshuEngine(ControlledPageEngine):
     SEND_BUTTON_SELECTORS = ["#input-area button", "#msg_send_bt"]
     LOGIN_WAIT_TIMEOUT_S = 240.0   # 页内登录等待（用户扫码/验证期间发送挂起）
 
-    # ---- 方案 B：瞬态 headed 发送会话（2026-10-10 profile 重测探针裁定）----
+    # ---- 方案 B：瞬态后台发送会话（2026-10-10 profile 重测探针裁定）----
     # 探针实证链（cards/xhs-persist-*）：
     # 1. 登录 cookie 为持久型（id_token/web_session 1 年期）——"会话级"旧结论废除；
     #    历史登录全丢根因=硬杀丢未提交窗口 + 登录从未在 profile 内完成落盘
-    # 2. 同 profile 双 persistent context 必然 TargetClosedError——方案 A 常驻发送页
-    #    与监听会话互杀（监听被饿死/发送撞锁 busy 的来源）→ 发送改瞬态会话，
-    #    发送前关停监听 context + _send_active 门，用完干净关闭（cookie 落盘）
+    # 2. 同 profile 双 persistent context 必然 TargetClosedError（F2——基类公共件）
     # 3. 游客态 #input-area 可见——输入框可见性判登录失真 → 改 cookie（id_token）判定
     # 4. 登录态持久化=F1 快照（登录检测点立即落盘）+ _launch 恢复，不再依赖浏览器存活
-    _send_active: bool = False
-    _listen_ctx: Any = None
-
-    async def _close_listen_ctx(self) -> None:
-        """F2：发送前关停监听 context（同 profile 单实例——TargetClosedError 实证）"""
-        ctx = self._listen_ctx
-        self._listen_ctx = None
-        if ctx is not None:
-            try:
-                await ctx.close()
-                logger.info("[xhs] 发送前关停监听 context（F2 profile 单实例让位）")
-            except Exception:  # noqa: BLE001  已死 context——忽略
-                pass
 
     async def send_danmu(self, room_id: str, content: str):
         """小红书发送（方案 B）：瞬态 headed 会话 + cookie 判登录（未登录窗内等待）
@@ -334,14 +317,8 @@ class XiaohongshuEngine(ControlledPageEngine):
                         logger.info(f"[xhs] room {room_id} 未登录——等待用户在 headed 窗口"
                                     f"完成登录（最长 {self.LOGIN_WAIT_TIMEOUT_S:.0f}s，"
                                     "完成后自动继续发送）")
-                        wait_deadline = time.monotonic() + self.LOGIN_WAIT_TIMEOUT_S
-                        while time.monotonic() < wait_deadline:
-                            await asyncio.sleep(3)
-                            logged = await self._ctx_has_login(context)
-                            if logged:
-                                await self._snapshot_login_state(context)  # F1
-                                await asyncio.sleep(10)  # 滑块/安全验证宽限（046c3e0 同源）
-                                break
+                        logged = await self._wait_login_interactive(
+                            context, self.LOGIN_WAIT_TIMEOUT_S)
                         if not logged:
                             return SendResult(
                                 SendStatus.FAILED,
@@ -403,15 +380,6 @@ class XiaohongshuEngine(ControlledPageEngine):
         finally:
             self._send_active = False
             self._profile_lock.release()
-
-    async def _ctx_has_login(self, context) -> bool:
-        """context cookie 登录判定（游客态输入框可见——可见性判定失真实证）"""
-        try:
-            cookies = await context.cookies()
-        except Exception:  # noqa: BLE001
-            return False
-        return LOGIN_GATE.has_login_cookie(
-            cookies, LOGIN_GATE.LOGIN_COOKIE_NAMES["xiaohongshu"])
 
     async def _emit_self_echo(self, room_id: str, cd: Dict[str, Any]) -> None:
         """F4 自发声回环：把发送侧拿到的服务端确认帧注入消息流

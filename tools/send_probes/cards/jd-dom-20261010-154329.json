@@ -1,0 +1,40 @@
+{
+  "room": "48511841",
+  "title": "一加官方旗舰店-京东直播",
+  "ts": "2026-10-10 15:43:29",
+  "login_cookies": [],
+  "main_frame": {
+    "inputs": [],
+    "editables": [],
+    "sendButtons": [
+      {
+        "tag": "DIV",
+        "id": "",
+        "cls": "LiveMessage_errorSendWrapper__Wj-Re",
+        "text": "请登录，登录后参与互动",
+        "visible": true,
+        "rect": [
+          872,
+          717,
+          272,
+          44
+        ]
+      },
+      {
+        "tag": "P",
+        "id": "",
+        "cls": "LiveMessage_sendTipsWrapper__AGu87",
+        "text": "请登录，登录后参与互动",
+        "visible": true,
+        "rect": [
+          931,
+          732,
+          154,
+          14
+        ]
+      }
+    ],
+    "frames": []
+  },
+  "frames": []
+}

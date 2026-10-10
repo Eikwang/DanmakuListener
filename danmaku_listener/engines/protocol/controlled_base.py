@@ -18,7 +18,7 @@
 
 import asyncio
 import time
-from typing import Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, Optional
 
 from loguru import logger
 
@@ -44,6 +44,11 @@ COMMON_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
              "AppleWebKit/537.36 (KHTML, like Gecko) "
              "Chrome/131.0.0.0 Safari/537.36")  # 126→131（2026-10-03 阿里登录页风控对旧 UA 敏感）
 
+#: 无感模式后台发送参数（2026-10-10 探针实证：登录态 + headless=new 实发 SENT
+#: ——旧"headless 提交被吞"实为游客态混杂因素；--headless=new 完整 Blink 指纹，
+#: douyin CEO-F5 同款形态；--mute-audio 静音后台直播流）
+SEND_BG_EXTRA_ARGS = ["--headless=new", "--mute-audio"]
+
 
 class ControlledPageEngine(BaseEngine):
     """受控页面引擎公共基类"""
@@ -51,6 +56,55 @@ class ControlledPageEngine(BaseEngine):
     platform: str = ""
     profile_name: str = ""       # cookie/<profile_name> 目录名
     protocol_version: str = "1.0"
+
+    # ---- F2 发送/监听 profile 互斥（2026-10-10 xhs 移植 jd 时上收基类）----
+    # 同 profile 双 persistent context 必然 TargetClosedError（Windows
+    # ProcessSingleton）——发送前关停监听 context，监听经 _send_active 门让位
+    _send_active: bool = False
+    _listen_ctx: Any = None
+
+    async def _close_listen_ctx(self) -> None:
+        """F2：发送前关停监听 context（同 profile 单实例——TargetClosedError 实证）"""
+        ctx = self._listen_ctx
+        self._listen_ctx = None
+        if ctx is not None:
+            try:
+                await ctx.close()
+                logger.info(f"[{self.platform}] 发送前关停监听 context（F2 profile 单实例让位）")
+            except Exception:  # noqa: BLE001  已死 context——忽略
+                pass
+
+    async def _ctx_has_login(self, context) -> bool:
+        """context cookie 登录判定（各平台登录名——LOGIN_COOKIE_NAMES[self.platform]）"""
+        try:
+            cookies = await context.cookies()
+        except Exception:  # noqa: BLE001
+            return False
+        return LOGIN_GATE.has_login_cookie(
+            cookies, LOGIN_GATE.LOGIN_COOKIE_NAMES.get(self.platform, ()))
+
+    async def _wait_login_interactive(self, context, timeout_s: float) -> bool:
+        """可见窗登录等待（F1 快照 + 关窗即止）。
+
+        每 2s 轮询登录 cookie：出现→快照→10s 安全验证宽限→True；关窗/超时→
+        False。关窗竞态（登录落地后 2s 内手动关窗）由调用方以 profile 复检
+        兜底——登录 cookie 随浏览器干净关闭落盘，重开一次会话即可复检。
+        """
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            await asyncio.sleep(2)
+            try:
+                pages = context.pages
+                if not pages or await pages[0].is_closed():
+                    logger.info(f"[{self.platform}] 登录窗已关闭——结束等待")
+                    break
+            except Exception:  # noqa: BLE001  context 已死
+                break
+            if await self._ctx_has_login(context):
+                await self._snapshot_login_state(context)  # F1：登录落地立即快照
+                await asyncio.sleep(10)  # 安全验证宽限（046c3e0 同源教训）
+                return True
+        return False
 
     def __init__(self, state_store=None, cookie_dir: str = "./cookie"):
         super().__init__(state_store=state_store)

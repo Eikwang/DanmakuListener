@@ -38,7 +38,10 @@ LOGIN_POST_GRACE_S = 30.0
 LOGIN_COOKIE_NAMES = {
     "taobao": ("unb",),                      # 阿里系统一账号标识（live1688 同源）
     "1688": ("unb",),
-    "jd": ("pt_key", "pt_pin"),              # 京东账号对（pt_key 为会话、pt_pin 为账号）
+    "jd": ("thor", "pin"),                   # 京东现代登录令牌（2026-10-10 用户真实扫码
+                                             # 登录的 Cookies 库取证：thor/pin 均持久
+                                             # 至 2027-11-14；pt_key/pt_pin 为老体系
+                                             # 从未出现——此前判定恒假致门/发送全废）
     "xiaohongshu": ("id_token",),            # 小红书登录凭证（2026-10-06 实机 probe
                                              # 实证：游客态就带 web_session 匿名会话——
                                              # 用它判定即虚假登录；登录后才新增 id_token JWT）
