@@ -629,8 +629,8 @@ class DanmakuApp {
       toggle.setAttribute("aria-label", `${running ? "停止" : "启动"} ${r.platform}:${r.room_id}`);
       toggle.onclick = () => this.toggleRoom(r.platform, r.room_id, running ? "stop" : "start");
       const del = document.createElement("button");
-      del.textContent = "×";
-      del.className = "room-del";
+      del.textContent = "删除";
+      del.className = "room-del room-del-btn";  // 2026-10-10 用户裁定：与启动同规格红按钮（原 × 过小难点按）
       del.setAttribute("aria-label", `移除 ${r.platform}:${r.room_id}`);
       del.onclick = async () => {
         await this.api(`/api/rooms/${r.platform}/${encodeURIComponent(r.room_id)}`, "DELETE");
@@ -681,7 +681,16 @@ class DanmakuApp {
       sendBtn.addEventListener("click", () =>
         this.sendFromRoom(r.platform, r.room_id, sendInput, sendBtn, sendResult));
 
-      sendRow.append(sendInput, sendBtn);
+      // 手动重新登录（2026-10-10 用户需求）：清平台登录载体→既有登录门接管弹窗
+      const loginBtn = document.createElement("button");
+      loginBtn.textContent = "登录";
+      loginBtn.className = "room-login-btn";
+      loginBtn.title = "清除该平台登录状态并弹出登录窗口重新登录";
+      loginBtn.setAttribute("aria-label", `重新登录 ${pname}:${r.room_id}`);
+      loginBtn.addEventListener("click", () =>
+        this.reloginRoom(r.platform, r.room_id, loginBtn, sendResult));
+
+      sendRow.append(sendInput, sendBtn, loginBtn);
       li.append(mainRow, sendRow, sendResult);
       list.appendChild(li);
     }
@@ -761,6 +770,44 @@ class DanmakuApp {
 
   // 房间行内发送（T3）：AbortController 60s（D-E）+ request_id 随机后缀（spec 1.3b）
   // + 全分支反馈（D-C）+ 完成仅更新状态行不重绘列表（spec 2.2）+ 焦点回位（连续发送）
+  // 手动重新登录（2026-10-10）：清载体→既有登录门弹窗；鉴权/反馈复用行内发送模式
+  async reloginRoom(platform, roomId, btnEl, resultEl) {
+    const token = this.getSendToken();
+    if (!token) {
+      this.setRoomSendResult(resultEl, "✗ 未提供 token，未执行", "error");
+      return;
+    }
+    if (!window.confirm(`将清除 ${platform} 的登录状态（profile/cookie）并弹出登录窗口，确认继续？`)) {
+      return;
+    }
+    const prevLabel = btnEl.textContent;
+    btnEl.disabled = true;
+    btnEl.textContent = "登录中…";
+    try {
+      const resp = await fetch("/api/relogin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+        body: JSON.stringify({ platform, room_id: roomId }),
+      });
+      if (resp.status === 401) {
+        localStorage.removeItem("send_token");
+        this.setRoomSendResult(resultEl, "✗ token 无效——已清除，请重试", "error");
+        return;
+      }
+      const data = await resp.json();
+      if (data.success) {
+        this.setRoomSendResult(resultEl, "↻ " + (data.msg || "登录窗口已弹出——请完成登录，登录后自动恢复监听"), "success");
+      } else {
+        this.setRoomSendResult(resultEl, `✗ ${data.error || "重新登录失败"}`, "error");
+      }
+    } catch (e) {
+      this.setRoomSendResult(resultEl, `✗ 重新登录请求失败: ${e}`, "error");
+    } finally {
+      btnEl.disabled = false;
+      btnEl.textContent = prevLabel;
+    }
+  }
+
   async sendFromRoom(platform, roomId, inputEl, btnEl, resultEl) {
     const content = inputEl.value.trim();
     if (!content || btnEl.disabled) return;

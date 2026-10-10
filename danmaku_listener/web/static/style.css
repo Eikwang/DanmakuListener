@@ -553,6 +553,11 @@ section h2 {
 .room-stop-btn:hover { background: var(--border-strong); }
 .room-del { background: none; color: var(--text-muted); font-size: 14px; padding: 0 5px; }
 .room-del:hover { color: var(--danger); }
+/* 房间行删除按钮标准规格红样式（2026-10-10 用户裁定——原 × 过小难点按） */
+.room-del-btn { background: var(--danger); color: #fff; }
+.room-del-btn:hover { background: #dc2626; }
+.room-login-btn { background: var(--bg-elevated); color: var(--text-primary); }
+.room-login-btn:hover { background: var(--border-strong); }
 
 .error-msg {
     color: #f87171;
