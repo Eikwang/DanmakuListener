@@ -154,3 +154,36 @@
 - **Context**: /autoplan 2026-10-13 重登会话刷新计划的 S2 显式假设（sessionid 长生命周期）；native CEO 发现 2 登记。起点=engines/protocol/douyin.py cookie 加载处+senders/douyin.py _get_session 探测。
 - **Effort**: human S / CC S | **Depends on**: 本计划 S2 落地（导出过滤函数复用）
 - 来源: /autoplan CEO 双声部发现2 + Eng E4（自动写入）
+
+## P1: 斗鱼监听专项——入口迁移 12601→8501 + TLS 指纹反爬（2026-10-13 验收实证）
+- **What**: 斗鱼弹幕入口已从 danmuproxy.douyu.com:12601（明文 TCP/WSS）迁移到
+  wss://danmuproxy.douyu.com:8501/，且新入口带 TLS 指纹校验（python ssl 握手
+  直接 SSLV3_ALERT_HANDSHAKE_FAILURE，网页版 Chromium 正常收帧 25s/45 帧）。
+  引擎传输层需改造：playwright 受控页 WS 桥接（风控最稳，抓 8501 帧验 STT
+  载荷兼容性）或 curl_cffi TLS 指纹伪装（保持协议直连）。载荷格式是否仍为
+  明文 STT 需桥接后验证。
+- **Why**: 验收实证三房间（301049/7877/9999）明文 TCP 与 WSS 均被服务器断开
+  （0 包+EOF）；网页版正常——平台侧变更，10-09 验收时尚正常。用户报告「斗鱼
+  可以发送弹幕但不能监听」（发送走浏览器不受影响）。
+- **Pros**: 恢复斗鱼监听（12 平台矩阵完整性）。
+- **Cons**: playwright 桥接=受控页面模式（内存/部署形态回归 ADR 预算）；指纹
+  伪装=curl_cffi 新依赖+军备风险。
+- **Context**: /autoplan 会话刷新计划验收期发现；与虎牙「检测在会话/环境信誉
+  层」同族（风控在传输层而非载荷层）。证据：本机三房间+不存在房间一致拒绝。
+- **Effort**: human L / CC L | **Depends on**: 无
+- 来源: /autoplan 验收反馈（2026-10-13，用户报告）
+
+## P2: 快手发送假弹幕专项——headless 瞬态页静默吞验证（2026-10-13 验收反馈）
+- **What**: 用户报告快手发送「只在系统回显，不进直播间」——症状精确匹配虎牙
+  headless=new 指纹静默吞模式（本地回显有、服务端广播无）。需探针验证：
+  直播间开播后瞬态 headless 发送 → 监听 WS 流（或用户肉眼）确认自发声是否
+  到达；确认后修复方向=常驻会话改造（抖音 T3 先例）或 headed 形态试验。
+- **Why**: 假 SENT 回执比失败更糟（AUTOlive 以为已互动）。快手 sender
+  （DomTransientSender headless 瞬态）本次未改动——怀疑平台侧新增指纹检测。
+- **Pros**: 消除假成功回执；守住回执可信度。
+- **Cons**: 常驻化改造=senders 层结构变更；headed 试验有运营形态风险。
+- **Context**: 学习记录 huya-send-technical-difficulties-full-map 同款症状；
+  用户验收时快手 cookie/storage_state 为旧态（登录态过期也可能导致服务端
+  吞）——探针时先刷新登录态排除干扰。
+- **Effort**: human M / CC M（探针先行） | **Depends on**: 用户直播间开播配合
+- 来源: /autoplan 验收反馈（2026-10-13，用户报告）
