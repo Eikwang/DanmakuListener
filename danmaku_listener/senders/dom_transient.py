@@ -42,6 +42,12 @@ class DomTransientSender(BaseSender):
     cookie_file: str = ""                # 凭证文件路径（子类定）
     storage_state_mode: bool = False     # True=playwright storage_state 注入；False=cookie 数组注入
     home_url: str = ""                   # 注入后先访问的域首页（cookie 作用域激活）
+    # 诊断观察模式（2026-10-13 快手假弹幕取证——用户指令）：force_headed=True
+    # 去掉 --headless=new flag（真 headed 可见窗——headless=new 指纹=虎牙实证
+    # 的静默吞弹幕同款嫌疑）；observe_window_s>0=回执后保窗 N 秒供肉眼确认
+    # 「弹幕是否真进直播间」（手动关窗或超时）。
+    force_headed: bool = False
+    observe_window_s: int = 0
 
     async def send(self, room_id: str, content: str) -> SendResult:
         if not self.room_url_template:
@@ -52,12 +58,17 @@ class DomTransientSender(BaseSender):
             # headless=new（完整 Chrome 指纹）——旧 headless（headless_shell）被平台
             # 检测/前端降级（T1 抖音实证 bd_ticket_guard；快手"请求过快"/"错误代码22"
             # 同源嫌疑）——2026-10-07 T6 实测对齐抖音形态
+            launch_args = ["--disable-blink-features=AutomationControlled",
+                           "--disable-setuid-sandbox", "--hide-crash-restore-bubble"]
+            if not self.force_headed:
+                launch_args.append("--headless=new")
+            elif self.observe_window_s > 0:
+                logger.info(f"[{self.platform}] 诊断观察模式：真 headed 可见窗，"
+                            f"回执后保窗 {self.observe_window_s}s——肉眼确认弹幕是否进直播间")
             context = await pw.chromium.launch_persistent_context(
                 self._temp_profile_dir(), headless=False,
                 user_agent=self._ua(), viewport={"width": 1280, "height": 800},
-                args=["--disable-blink-features=AutomationControlled",
-                      "--disable-setuid-sandbox", "--hide-crash-restore-bubble",
-                      "--headless=new"])
+                args=launch_args)
             try:
                 if not await self._inject_credentials(context):
                     return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
@@ -118,6 +129,15 @@ class DomTransientSender(BaseSender):
                 return SendResult(SendStatus.UNKNOWN, SendRejectReason.SEND_TIMEOUT.value,
                                   detail="无回显无显式错误（shadow DOM/虚拟列表/慢渲染可能）")
             finally:
+                if self.observe_window_s > 0:
+                    # 观察保窗：回执已产出，窗口留给用户肉眼核验
+                    # （弹幕是否真进直播间/页面登录态/风控信号）
+                    logger.info(f"[{self.platform}] 保窗 {self.observe_window_s}s 供观察——"
+                                "确认后可手动关窗提前结束")
+                    try:
+                        await asyncio.sleep(self.observe_window_s)
+                    except asyncio.CancelledError:  # noqa: BLE001
+                        pass
                 try:
                     await context.close()
                 except Exception:  # noqa: BLE001

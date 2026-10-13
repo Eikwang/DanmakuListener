@@ -23,6 +23,11 @@ class KuaishouStateSender(DomTransientSender):
     cookie_file = "cookie/kuaishou_storage_state.json"
     storage_state_mode = True
     home_url = "https://live.kuaishou.com/"
+    # 2026-10-13 假弹幕诊断（用户指令）：真 headed 可见窗+回执后保窗 90s——
+    # headless=new 指纹=虎牙静默吞同款嫌疑；观察项=页面登录态/输入回显/
+    # 弹幕是否真进直播间。诊断结论出来前回执 SENT 视为待核验。
+    force_headed = True
+    observe_window_s = 90
 
 
 class DouyuCookieSender(DomTransientSender):
