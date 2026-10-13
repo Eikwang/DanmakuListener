@@ -139,17 +139,63 @@ def has_profile_login(profile_dir: str = PROFILE_DIR) -> bool:
     return (d / "Default" / "Network" / "Cookies").is_file() or            (d / "Default" / "Cookies").is_file()
 
 
+#: 监听侧 cookie 域白名单（Eng 发现11：douyin.com 系；排除式→白名单式）
+_DOUYIN_COOKIE_DOMAIN_SUFFIXES = ("douyin.com", ".douyin.com", "douyincom")
+#: 监听注入约定排除项（douyin.py:124-128——白名单之上的额外排除）
+_DOUYIN_COOKIE_EXCLUDE_NAMES = {"ttwid", "msToken"}
+
+
+async def _export_listen_cookies(context, export_path: str) -> str:
+    """从 profile context 导出监听侧 cookie（域白名单过滤→原子落盘）
+
+    Returns: "ok" | "failed"（失败不抛——调用方 finally 关窗不被阻断）
+    """
+    try:
+        state = await context.storage_state()
+        cookies = []
+        for c in state.get("cookies", []):
+            domain = str(c.get("domain", ""))
+            if not any(domain == d or domain.endswith(d) for d in _DOUYIN_COOKIE_DOMAIN_SUFFIXES):
+                continue
+            if c.get("name") in _DOUYIN_COOKIE_EXCLUDE_NAMES:
+                continue
+            if not c.get("value"):
+                continue
+            cookies.append(c)
+        if not cookies:
+            logger.warning("[douyin-login] 导出过滤后 cookie 为空——白名单未命中")
+            return "failed"
+        payload = json.dumps(cookies, ensure_ascii=False)
+        tmp = export_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(payload)
+        os.replace(tmp, export_path)
+        logger.info(f"[douyin-login] 监听 cookie 导出 OK（{len(cookies)} 条）→ {export_path}")
+        return "ok"
+    except Exception as e:  # noqa: BLE001  导出失败不阻断关窗 finally（Eng 发现12）
+        logger.warning(f"[douyin-login] 监听 cookie 导出失败: {type(e).__name__}: {str(e)[:100]}")
+        return "failed"
+
+
 async def run_profile_login_flow(
     room_id: str = "",
     profile_dir: str = PROFILE_DIR,
     headless: bool = False,
     timeout: float = DEFAULT_TIMEOUT,
     on_status: Optional[Callable[[str], Any]] = None,
+    export_cookie_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """可见窗口扫码登录进 persistent profile：sessionid 出现即成功（指纹随之绑定）
 
+    export_cookie_path（2026-10-13 会话刷新编排 S2 单窗双喂）：登录落地后、
+    finally 关 context 前从该 context 导出 storage_state，按 douyin.com 域白名单
+    过滤（Eng 发现11：排除式会把 profile 积累的无关 cookie 一并写入；ttwid/
+    msToken 排除约定保留为白名单之上的额外排除）后原子落盘。导出失败→返回
+    "export": "failed"（不阻断关窗 finally；编排层映射 refresh_failed）。
+
     Returns:
-        {"status": "ok" | "timeout_or_closed", "profile_dir": profile_dir}
+        {"status": "ok" | "timeout_or_closed", "profile_dir": profile_dir,
+         "export": "ok" | "skipped" | "failed"（无 export_cookie_path 时=skipped）}
     """
     from playwright.async_api import async_playwright
 
@@ -215,10 +261,14 @@ async def run_profile_login_flow(
 
             if not logged_in:
                 notify("login_timeout_or_closed")
-                return {"status": "timeout_or_closed", "profile_dir": profile_dir}
+                return {"status": "timeout_or_closed", "profile_dir": profile_dir,
+                        "export": "skipped" if not export_cookie_path else "failed"}
+            export_status = "skipped"
+            if export_cookie_path:
+                export_status = await _export_listen_cookies(context, export_cookie_path)
             notify("login_ok")
-            logger.info(f"[douyin-login] profile login OK → {profile_dir}")
-            return {"status": "ok", "profile_dir": profile_dir}
+            logger.info(f"[douyin-login] profile login OK → {profile_dir} (export={export_status})")
+            return {"status": "ok", "profile_dir": profile_dir, "export": export_status}
         finally:
             try:
                 await context.close()
