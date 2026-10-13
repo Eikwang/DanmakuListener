@@ -350,6 +350,36 @@ async def api_relogin(request: web.Request) -> web.Response:
         return web.json_response({"success": False, "error": str(e)}, status=500)
 
 
+async def api_relogin_status(request: web.Request) -> web.Response:
+    """重登异步段回执（2026-10-13 会话刷新编排——计划 §3.1-6）
+
+    鉴权与 /api/relogin 同源（load_token + constant_time_equal）；id 形态校验
+    （uuid4）；未知 id 统一 404（AUTOlive 契约：停止轮询按未知终局处理）。
+    """
+    from danmaku_listener.config.settings import get_settings
+    from danmaku_listener.push.ws_server import load_token, constant_time_equal
+    from danmaku_listener.web.relogin import get_relogin_status
+
+    settings = get_settings()
+    token = load_token(settings.ws_token_file, os.environ.get("DANMAKU_TOKEN"))
+    if not token:
+        return web.json_response({"success": False, "error": "AUTH_UNCONFIGURED",
+                                  "fix_hint": "配置 ws_token_file 或 DANMAKU_TOKEN 后重启"},
+                                 status=503)
+    provided = request.headers.get("Authorization", "")
+    if not provided.startswith("Bearer ") or not constant_time_equal(provided[len("Bearer "):], token):
+        return web.json_response({"success": False, "error": "unauthorized"}, status=401)
+    rid = request.query.get("id", "")
+    if not rid or len(rid) > 64 or not all(c in "0123456789abcdef-" for c in rid.lower()):
+        return web.json_response({"success": False, "error": "id 形态非法"}, status=400)
+    rec = get_relogin_status(rid)
+    if rec is None:
+        return web.json_response({"success": False, "error": "relogin_id 不可得（已淘汰或进程重启）"
+                                  "——停止轮询按未知终局处理；重 POST 有停房+弹窗副作用，先确认真需重登"},
+                                 status=404)
+    return web.json_response({"success": True, **rec})
+
+
 async def api_send_danmu(request: web.Request) -> web.Response:
     """发送弹幕命令（AutoDanmu T5——REST 备用通道；R9/F6/S1-1）
 
@@ -459,6 +489,7 @@ def create_app() -> web.Application:
     # AutoDanmu 发送 API（T5：R9 备用通道+R18 对账；Bearer 硬要求 F6/S1-1）
     cors.add(app.router.add_post("/api/send-danmu", api_send_danmu))
     cors.add(app.router.add_post("/api/relogin", api_relogin))
+    cors.add(app.router.add_get("/api/relogin/status", api_relogin_status))
     cors.add(app.router.add_get("/api/send-results", api_send_results))
 
     # 静态文件服务
