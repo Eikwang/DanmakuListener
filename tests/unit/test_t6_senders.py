@@ -260,6 +260,7 @@ async def test_storage_state_import_never_exports(monkeypatch, tmp_path):
     """事故防护：注入=只读文件+add_cookies；context.storage_state(path=)（导出）不得被调用——
     2026-10-07 实损事故回归防护（kuaishou_storage_state.json 被空 context 导出覆盖）"""
     sender = KuaishouStateSender()
+    sender.observe_window_s = 0  # 诊断保窗不进单测
     cf = tmp_path / "kuaishou_storage_state.json"
     cf.write_text(json.dumps({"cookies": [{"name": "sessionToken", "value": "v"}],
                               "origins": []}), encoding="utf-8")
