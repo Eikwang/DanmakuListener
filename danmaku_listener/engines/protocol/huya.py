@@ -112,16 +112,39 @@ class HuyaProtocolEngine(BaseEngine):
         # 判定→弹窗→存档。诚实边界：登录态不进当前 Tars 协议连接（协议无注入路径）。
         try:
             from danmaku_listener.config.settings import get_settings
+            import json as _json
             import os as _os
             cookie_path = _os.path.join(get_settings().cookie_dir,
                                         f"{self.platform}_login_cookies.json")
-            outcome = await LOGIN_GATE.ensure_cookie_file_login(
-                room_id, self.platform, "https://www.huya.com/",
-                cookie_path,
-                self._stop_flags, self._login_budgets, self._budget_warned,
-                lambda detail: self._emit_system_status(room_id, detail))
-            if outcome == "stopped":
-                return
+            # 一次登录门（2026-10-13 用户验收裁定）：存档缺失→发送侧 takeover
+            # 一次扫码（登录态入发送 profile+快照+同步写监听存档）——替代旧
+            # 非持久存档窗两段式。takeover 失败回退旧存档窗兜底。
+            archived = False
+            if _os.path.isfile(cookie_path):
+                try:
+                    with open(cookie_path, encoding="utf-8") as fh:
+                        _cookies = _json.load(fh).get("cookies", [])
+                    archived = any(c.get("name") in ("yyuid", "hicl_imid", "huya_uid")
+                                   and c.get("value") for c in _cookies)
+                except Exception:  # noqa: BLE001
+                    archived = False
+            if not archived:
+                from danmaku_listener.senders.huya import takeover_login_and_archive
+                await self._emit_system_status(
+                    room_id, f"{LOGIN_GATE.LOGIN_EVENT_FIRST_LOGIN}: 虎牙登录——"
+                    "已弹出浏览器，一次扫码同时开通监听存档与弹幕发送")
+                if await takeover_login_and_archive(room_id):
+                    self._emit_system_status(room_id, "登录成功——监听存档与发送登录态已同步")
+                else:
+                    outcome = await LOGIN_GATE.ensure_cookie_file_login(
+                        room_id, self.platform, "https://www.huya.com/",
+                        cookie_path,
+                        self._stop_flags, self._login_budgets, self._budget_warned,
+                        lambda detail: self._emit_system_status(room_id, detail))
+                    if outcome == "stopped":
+                        return
+            else:
+                self._emit_system_status(room_id, "登录存档有效——跳过登录门")
         except asyncio.CancelledError:
             raise
         except Exception as e:  # noqa: BLE001  登录门槛故障不阻塞监听（降级游客）

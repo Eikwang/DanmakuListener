@@ -79,6 +79,59 @@ def _get_session(idle_timeout_s: int, window_mode: str) -> ResidentSendSession:
     return _session
 
 
+async def export_huya_archive(context) -> bool:
+    """huya 域登录 cookie 写监听存档（login_gate 同格式 {"cookies":[...]}）
+
+    一次登录两态齐（2026-10-13 用户验收裁定）：takeover 快照入发送 profile
+    后同步写存档文件——引擎存档门见存档即过，不再二次弹窗。
+    """
+    import json as _json
+    import os as _os
+    from pathlib import Path as _Path
+    from danmaku_listener.config.settings import get_settings
+
+    names = {"yyuid", "hicl_imid", "huya_uid"}
+    try:
+        cookies = [c for c in await context.cookies()
+                   if c.get("value") and "huya.com" in str(c.get("domain", ""))]
+        if not ({c["name"] for c in cookies} & names):
+            logger.warning("[huya] 存档导出：context 无 huya 登录 cookie（未登录？）")
+            return False
+        path = _Path(get_settings().cookie_dir) / "huya_login_cookies.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = str(path) + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(_json.dumps({"cookies": cookies}, ensure_ascii=False, indent=2))
+        _os.replace(tmp, path)
+        logger.info(f"[huya] 监听存档已同步（{len(cookies)} 条）→ {path}")
+        return True
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[huya] 监听存档导出失败: {type(e).__name__}: {str(e)[:80]}")
+        return False
+
+
+async def takeover_login_and_archive(room_id: str) -> bool:
+    """发送侧登录闭环（引擎一次登录门委托）：takeover 可见窗一次扫码→
+    快照入发送 profile →huya 域 cookie 写监听存档。False=用户关窗/超时/异常。
+    """
+    from danmaku_listener.config.settings import get_settings
+    st = get_settings()
+    mode = getattr(st, "send_window_mode", MODE_HEADLESS_NEW) or MODE_HEADLESS_NEW
+    idle = int(getattr(st, "send_session_idle_timeout_seconds", 1800) or 1800)
+    session = _get_session(idle, mode)
+    try:
+        page = await session.login_takeover(
+            room_id, "https://www.huya.com/",
+            ("yyuid", "hicl_imid", "huya_uid"), grace_s=30.0)
+        return await export_huya_archive(page.context)
+    except LoginTakeoverError as e:
+        logger.warning(f"[huya] takeover 登录未完成: {e}")
+        return False
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[huya] takeover 异常: {type(e).__name__}: {str(e)[:80]}")
+        return False
+
+
 class HuyaResidentSender(BaseSender):
     """虎牙常驻会话 sender（headless_new 纯后台；F1 登录快照/恢复）"""
 
@@ -129,6 +182,10 @@ class HuyaResidentSender(BaseSender):
                     return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
                                       detail=f"登录窗异常: {type(e).__name__}: {str(e)[:80]}",
                                       fix_hint="重试发送将再次弹出登录窗口")
+                else:
+                    # 一次登录（2026-10-13）：takeover 成功即同步监听存档——
+                    # 引擎存档门不再二次弹窗
+                    await export_huya_archive(page.context)
             # 渲染等待：goto 返回后 SPA 输入框延迟挂载（1s 即查会假阴性）。
             # 2026-10-10 发现逻辑升级：逐匹配扫描（.first 抓错元素教训）+
             # 可见且可编辑过滤（包裹层 div 不可编辑——选它打字全空）

@@ -225,6 +225,7 @@ async def run_profile_login_flow(
             # 旧态存活预检（S2：profile 已有存活会话→直接导出复用，不强迫重扫；
             # 回执 reused_existing 标注供 AUTOlive 区分「刷新了登录态」与「复用旧态」）
             reused_existing = False
+            first_export = None
             try:
                 pre = {c["name"] for c in await context.cookies() if c.get("value")}
                 reused_existing = bool(LOGIN_MARKER_COOKIES & pre)
@@ -246,6 +247,13 @@ async def run_profile_login_flow(
                 names = {c["name"] for c in cookies if c.get("value")}
                 if LOGIN_MARKER_COOKIES & names:
                     logged_in = True
+                    # 落地即导（2026-10-13 验收实证修复）：此刻 context 必活——
+                    # 用户扫码后秒关窗（人的自然动作）会让 grace 后的导出撞上
+                    # 已死 context（storage_state 抛错→export failed→监听
+                    # cookie 文件不回→二次登录）。先导一次保底，grace 后活窗
+                    # 再补导拿最新令牌（幂等原子落盘）。
+                    if export_cookie_path:
+                        first_export = await _export_listen_cookies(context, export_cookie_path)
                     # 登录后保窗宽限（淘宝同款修复——2026-10-08 验收实证）：
                     # 保窗 30s 供人工完成登录后安全验证；用户手动关窗立即提前
                     # 结束（登录态已入 profile，仍算成功）
@@ -274,7 +282,12 @@ async def run_profile_login_flow(
                         "reused_existing": reused_existing}
             export_status = "skipped"
             if export_cookie_path:
-                export_status = await _export_listen_cookies(context, export_cookie_path)
+                export_status = first_export or "failed"
+                if not page.is_closed():
+                    # 补导（grace 期新令牌/首次失败重试）——失败保留落地即导结果
+                    second = await _export_listen_cookies(context, export_cookie_path)
+                    if second == "ok":
+                        export_status = "ok"
             notify("login_ok")
             logger.info(f"[douyin-login] profile login OK → {profile_dir} "
                         f"(export={export_status}, reused_existing={reused_existing})")
