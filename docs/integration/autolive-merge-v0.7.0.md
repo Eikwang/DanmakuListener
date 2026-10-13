@@ -123,12 +123,34 @@ python -m danmaku_listener serve --web     （AUTOlive 根；或沿用 start-ser
 （`login.first_login`/`login.timeout_budget_exhausted` 等）——按契约规则
 忽略未知 type 即正确；建议 AUTOlive 界面呈现登录事件（引导操作人扫码）。
 
-### 4.4 手动重登按钮（webui）
+### 4.4 手动重登 = 会话刷新编排（webui，2026-10-13 升级）
 
-房间行"登录"按钮：清该平台登录载体（profile/快照/cookie 文件）→ 停该平台
-在听房间 → 既有登录门自动弹窗 → 登录后自动恢复监听。虎牙/抖音为双载体
-平台（监听+发送），将先后弹两个登录窗口。载体清单见 `web/relogin.py`
-`PLATFORM_LOGIN_CARRIERS`。
+房间行"登录"按钮（AUTOlive 经 `POST /api/relogin`）现在执行**会话刷新编排**：
+停该平台在听房间 → 关发送会话（存在才关）→ 按平台路由登录闭环（监听侧与发送
+侧一并刷新）→ 自动恢复监听 → **异步两段式回执**。
+
+**API 契约与五态样例、curl 示例、send_refresh 判定表：见
+[session-topology.md](session-topology.md)**（唯一事实源，随本版交付）。
+
+各平台行为（v2 实际语义，替代旧"先后弹两个窗口"表述）：
+
+| 平台 | 弹窗 | 发送侧刷新 | 恢复 |
+|---|---|---|---|
+| 抖音 | profile 登录窗 ×1（单窗双喂） | 登录落地+导出成功后 | 自动 |
+| 虎牙 | 发送登录窗 ×1（takeover） | takeover 成功后 | 触发即直启（匿名可听） |
+| 其余 8 平台 | 监听登录窗 ×1（既有登录门） | 同载体自动 | 登录后自动 |
+| 抖音（降级开关 `DANMU_RELOGIN_FORCE_TWO_WINDOW=1`） | 监听窗+发送窗 ×2 串行 | profile 窗成功后 | 监听窗完成后 |
+
+**AUTOlive 触发回路**：侦测 NEEDS_LOGIN（SYSTEM_STATUS 词表）或发送拒绝携
+`relogin_in_progress`（reason_code=`ROOM_NOT_LISTENED`/`RELOGIN_IN_PROGRESS`，
+payload 附 `relogin_id`/`retry_after_s: 30`）→ `POST /api/relogin` → 轮询
+`GET /api/relogin/status?id=`（同源 Bearer 鉴权，建议 2-5s）→ 终局处置。
+404 playbook：记录不可得（进程重启/淘汰 10 条或 1h）→ 停止轮询按未知终局
+处理；**重 POST 有停房+弹窗副作用**——距上次已知活动超过轮询窗口时先确认
+真需重登。失败回执 error 携 docs 锚点（problem+cause+fix）。
+
+载体全清单见 `web/relogin.py` `PLATFORM_LOGIN_CARRIERS`；清理子集与双载体
+语义见 `RELOGIN_CLEAN_SUBSETS`。会话拓扑总表：session-topology.md。
 
 ### 4.5 冷却与风控
 
@@ -148,5 +170,6 @@ python -m danmaku_listener serve --web     （AUTOlive 根；或沿用 start-ser
 - 机读 Schema：[../contract/schema.json](../contract/schema.json)
 - 发送运维手册：[../ops/send-runbook.md](../ops/send-runbook.md)
 - 发送约束与边界：[../ops/adr-002-danmu-send-constraint-revision.md](../ops/adr-002-danmu-send-constraint-revision.md)
+- 会话拓扑与重登契约：[session-topology.md](session-topology.md)
 - 进程拓扑：[../ops/adr-001-engine-topology.md](../ops/adr-001-engine-topology.md)
 - 变更明细：[../../CHANGELOG.md](../../CHANGELOG.md)（v0.7.0 段）

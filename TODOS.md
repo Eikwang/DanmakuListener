@@ -145,3 +145,12 @@
 - **Context**: 发送矩阵见 docs/testing/m0-send-probe-cards.md（pdd/美团无行）；受控页面组接线模式见 senders/wiring.py EngineHookSender 循环；重启条件=客户对 pdd/美团发声有实际需求，或 AUTOlive 自动发声场景铺开到这两平台。
 - **Effort**: human S / CC M（探针判定+接线+回归）| **Depends on**: 无（E5 模式已验证）
 - 来源: /plan-ceo-review CEO-4 范围裁定（2026-10-08，defer 决策——验收战役交付物 3）
+
+## P3: 抖音监听侧 cookie 读通式重导出（Eng-E4，2026-10-13）
+- **What**: 监听引擎启动/重连前，若发送侧 douyin_profile 会话存活，从 profile context 读通式重导出 douyin_cookies.json（域白名单过滤），消除「重登时刻单向快照」的监听侧陈旧窗口。
+- **Why**: 重登导出发生在登录落地时刻，此后发送侧自然续期/轮换 cookie 时监听侧文件陈旧（sessionid 为长身份 cookie，窗口可接受但非零）。
+- **Pros**: 监听侧礼物事件登录态与发送侧持续同步；与登录健康度面板（S8）共用载体探测。
+- **Cons**: 引擎启动路径增加一次 profile context 探测（发送会话可能被拉起）；与 ResidentSendSession 生命周期耦合。
+- **Context**: /autoplan 2026-10-13 重登会话刷新计划的 S2 显式假设（sessionid 长生命周期）；native CEO 发现 2 登记。起点=engines/protocol/douyin.py cookie 加载处+senders/douyin.py _get_session 探测。
+- **Effort**: human S / CC S | **Depends on**: 本计划 S2 落地（导出过滤函数复用）
+- 来源: /autoplan CEO 双声部发现2 + Eng E4（自动写入）
