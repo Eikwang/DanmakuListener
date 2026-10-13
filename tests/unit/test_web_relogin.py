@@ -343,6 +343,24 @@ async def test_douyin_export_domain_whitelist(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_douyin_reused_existing_flag_propagates(tmp_path, monkeypatch):
+    """S2 旧态存活分支：profile 已有 sessionid → 复用导出，回执标 reused_existing"""
+    import danmaku_listener.engines.douyin_login as dl
+
+    async def reused_login(*args, **kwargs):
+        return {"status": "ok", "profile_dir": "x", "export": "ok", "reused_existing": True}
+
+    monkeypatch.setattr(dl, "run_profile_login_flow", reused_login)
+    bridge = FakeBridge()
+    (tmp_path / "douyin_cookies.json").write_text("[]")
+    result = await run_relogin_flow(bridge, "douyin", "1", cookie_dir=str(tmp_path))
+    await _await_platform_task("douyin")
+    status = get_relogin_status(result["relogin_id"])
+    assert status["state"] == "completed"
+    assert status["login_flows"][0]["reused_existing"] is True
+
+
+@pytest.mark.asyncio
 async def test_douyin_export_failure_returns_failed(tmp_path, monkeypatch):
     """导出异常不抛（不阻断关窗 finally）→ failed"""
     from danmaku_listener.engines.douyin_login import _export_listen_cookies

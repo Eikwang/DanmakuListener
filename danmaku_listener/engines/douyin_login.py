@@ -222,6 +222,14 @@ async def run_profile_login_flow(
         )
         try:
             page = context.pages[0] if context.pages else await context.new_page()
+            # 旧态存活预检（S2：profile 已有存活会话→直接导出复用，不强迫重扫；
+            # 回执 reused_existing 标注供 AUTOlive 区分「刷新了登录态」与「复用旧态」）
+            reused_existing = False
+            try:
+                pre = {c["name"] for c in await context.cookies() if c.get("value")}
+                reused_existing = bool(LOGIN_MARKER_COOKIES & pre)
+            except Exception:  # noqa: BLE001
+                pass
             notify("login_page_opened")
             try:
                 await page.goto(url, wait_until="domcontentloaded", timeout=45000)
@@ -262,13 +270,16 @@ async def run_profile_login_flow(
             if not logged_in:
                 notify("login_timeout_or_closed")
                 return {"status": "timeout_or_closed", "profile_dir": profile_dir,
-                        "export": "skipped" if not export_cookie_path else "failed"}
+                        "export": "skipped" if not export_cookie_path else "failed",
+                        "reused_existing": reused_existing}
             export_status = "skipped"
             if export_cookie_path:
                 export_status = await _export_listen_cookies(context, export_cookie_path)
             notify("login_ok")
-            logger.info(f"[douyin-login] profile login OK → {profile_dir} (export={export_status})")
-            return {"status": "ok", "profile_dir": profile_dir, "export": export_status}
+            logger.info(f"[douyin-login] profile login OK → {profile_dir} "
+                        f"(export={export_status}, reused_existing={reused_existing})")
+            return {"status": "ok", "profile_dir": profile_dir, "export": export_status,
+                    "reused_existing": reused_existing}
         finally:
             try:
                 await context.close()

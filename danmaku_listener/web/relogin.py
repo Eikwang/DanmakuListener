@@ -356,6 +356,8 @@ async def _douyin_profile_login_and_export(rec: dict, bridge, room_id: str,
         return
     export = result.get("export", "failed")
     rec["send_refresh"] = "refresh_ok" if export == "ok" else "refresh_failed"
+    if result.get("reused_existing"):
+        rec["login_flows"][0]["reused_existing"] = True  # S2：复用存活旧态（非新扫码）
     if export != "ok":
         rec["error"] = ("douyin_cookies.json 导出失败（登录已成功，发送侧新态在 profile）"
                         "——重跑重登即可（docs/integration/autolive-merge-v0.7.0.md §4.4）")
