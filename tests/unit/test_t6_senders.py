@@ -171,6 +171,7 @@ def make_settings(**overrides):
 async def test_transient_send_success(monkeypatch, sender_cls, tmp_path):
     """快手/斗鱼：凭证注入→选择器→逐键+发送→回显 SENT"""
     sender = sender_cls()
+    sender.observe_window_s = 0  # 诊断保窗仅产品观察模式；单测不测 sleep
     # 凭证文件（tmp_path 隔离——不改真实 cookie/）
     cf = tmp_path / "cred.json"
     if sender.storage_state_mode:
@@ -189,6 +190,7 @@ async def test_transient_send_success(monkeypatch, sender_cls, tmp_path):
 async def test_missing_credential_maps_to_login_hint(monkeypatch, sender_cls, tmp_path):
     """ENG-10 空路径：凭证文件不存在→FAIL+登录 fix_hint（不触发 playwright）"""
     sender = sender_cls()
+    sender.observe_window_s = 0
     monkeypatch.setattr(sender, "cookie_file", str(tmp_path / "nonexistent.json"))
     install_pw(monkeypatch, FakeContext(FakePage()))
     result = await sender.send("12345", "[M0] t6")
@@ -202,6 +204,7 @@ async def test_missing_credential_maps_to_login_hint(monkeypatch, sender_cls, tm
 async def test_login_signal_maps_to_login_hint(monkeypatch, sender_cls, tmp_path):
     """CEO-F8 登录路径：页面'请登录'信号→登录 fix_hint（非风控误导）"""
     sender = sender_cls()
+    sender.observe_window_s = 0
     cf = tmp_path / "cred.json"
     cf.write_text("{}", encoding="utf-8")
     monkeypatch.setattr(sender, "cookie_file", str(cf))
@@ -216,6 +219,7 @@ async def test_login_signal_maps_to_login_hint(monkeypatch, sender_cls, tmp_path
 async def test_risk_signal_maps_to_platform_rejected(monkeypatch, sender_cls, tmp_path):
     """滑块/风控感知→FAIL+勿重扫码（不误报登录）"""
     sender = sender_cls()
+    sender.observe_window_s = 0
     cf = tmp_path / "cred.json"
     cf.write_text("{}", encoding="utf-8")
     monkeypatch.setattr(sender, "cookie_file", str(cf))
