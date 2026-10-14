@@ -408,3 +408,71 @@ async def test_login_gate_takeover_success_resets_budget(monkeypatch, tmp_path):
     await engine._run_room("1")
     assert engine._login_budgets.get("1", LOGIN_GATE.LOGIN_BUDGET) == LOGIN_GATE.LOGIN_BUDGET
     assert "1" not in engine._budget_warned
+
+
+# ---- 未开播/回放分流（2026-10-14 用户实测回归：未开播误记 NETWORK GAP）----
+
+def _page(body):
+    class _Resp:
+        def raise_for_status(self):
+            pass
+        text = body
+    return _Resp()
+
+
+TT_HEAD = 'var TT_ROOM_DATA = {"type":"NORMAL","state":"%s","isOn":%s,"isOff":false,"isReplay":%s,"id":0,"startTime":1791882443};'
+
+
+def test_fetch_tid_sync_replay_suffix(monkeypatch):
+    """回放房（isReplay:true）文案显式标注——用户不再把回放误读为在播"""
+    from danmaku_listener.engines.protocol.huya import RoomNotLiveError
+
+    monkeypatch.setattr("requests.get", lambda url, **k: _page(
+        TT_HEAD % ("REPLAY", "false", "true") + '"tid":123'))
+    with pytest.raises(RoomNotLiveError) as ei:
+        HuyaProtocolEngine._fetch_tid_sync("amazingj")
+    assert "回放" in str(ei.value)
+
+
+def test_fetch_tid_sync_offline_no_replay_suffix(monkeypatch):
+    """普通未开播（isReplay:false）不带回放标注，类型仍为 RoomNotLiveError"""
+    from danmaku_listener.engines.protocol.huya import RoomNotLiveError
+
+    monkeypatch.setattr("requests.get", lambda url, **k: _page(
+        TT_HEAD % ("OFF", "false", "false") + '"tid":123'))
+    with pytest.raises(RoomNotLiveError) as ei:
+        HuyaProtocolEngine._fetch_tid_sync("1")
+    assert "回放" not in str(ei.value)
+
+
+def test_fetch_tid_sync_live_returns_tid(monkeypatch):
+    """在播房（isOn:true）不触发未开播，正常提取 tid"""
+    monkeypatch.setattr("requests.get", lambda url, **k: _page(
+        TT_HEAD % ("ON", "true", "false") + '"tid":679257140'))
+    assert HuyaProtocolEngine._fetch_tid_sync("102411") == 679257140
+
+
+@pytest.mark.asyncio
+async def test_run_room_not_live_no_gap_marks_live_false(monkeypatch, tmp_path):
+    """2026-10-14 回归守护：未开播不得记 NETWORK GAP（base「下播不计 GAP」
+    承诺接线）——live=False 上报基类、未决缺口作废、诚实状态只发一次。
+    修复前（ValueError 落通用 except）：gap_pending_start 被置位、本测试红。"""
+    from danmaku_listener.engines.protocol.huya import RoomNotLiveError
+
+    engine, statuses, write_archive = _make_gate_engine(monkeypatch, tmp_path)
+    write_archive([{"name": "yyuid", "value": "u-123", "domain": ".huya.com"}])
+
+    async def _not_live(room_id):
+        engine._stop_flags["1"] = True  # 首次异常分支后即停（stop 检查先于 sleep——不真等 15s）
+        raise RoomNotLiveError(
+            f"虎牙房间 {room_id} 未开播（正在播放回放，并非实时直播）"
+            "——开播后引擎将自动开始监听（持续重试中）")
+
+    monkeypatch.setattr(engine, "_fetch_tid", _not_live)
+    await engine._run_room("1")
+
+    assert engine._room("1").live is False
+    assert engine._room("1").gap_pending_start is None
+    assert any("未开播" in str(m) for m in statuses)
+    # 转换沿去重：同状态二次上报不再触发（引擎据此静默重试轮询）
+    assert engine.mark_live_change("1", False) is False
