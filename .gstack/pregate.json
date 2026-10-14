@@ -10,6 +10,7 @@
     "danmaku_listener/engines/protocol/douyin.py": ["tests/unit/test_douyin_protocol.py", "tests/unit/test_douyin_protocols.py"],
     "danmaku_listener/engines/send_login.py": ["tests/unit/test_huya_protocol.py", "tests/unit/test_huya_send_archive.py"],
     "danmaku_listener/engines/registry.py": ["tests/unit/test_registry.py"],
+    "danmaku_listener/engines/base.py": ["tests/unit/test_bilibili_protocol.py", "tests/unit/test_huya_protocol.py"],
     "danmaku_listener/senders/_stealth.py": ["tests/unit/test_t6_senders.py"],
     "danmaku_listener/senders/resident_session.py": ["tests/unit/test_resident_session.py", "tests/unit/test_huya_send_archive.py"],
     "danmaku_listener/senders/dom_transient.py": ["tests/unit/test_t6_senders.py"],

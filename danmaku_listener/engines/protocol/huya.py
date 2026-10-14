@@ -34,6 +34,16 @@ HTTP_HEADERS = {
 }
 
 
+class RoomNotLiveError(ValueError):
+    """房间未开播（区分未开播与房间不存在/页面结构变更）。
+
+    2026-10-14 用户实测回归：未开播此前落入通用 except 记 NETWORK GAP，
+    前端显示「缺口 network」误导排查方向（房间根本没连上、无缺失语义）。
+    专用类型供 _run_room 分流：上报 mark_live_change(False)（下播裁剪，
+    base 承诺「下播不计 GAP」）+ 诚实状态文案，不再走缺口/ERROR 路径。
+    """
+
+
 class HuyaProtocolEngine(BaseEngine):
     """虎牙协议直连引擎（Tars 栈完整实现）"""
 
@@ -97,8 +107,15 @@ class HuyaProtocolEngine(BaseEngine):
         m_state = re.search(
             r'TT_ROOM_DATA\s*=\s*\{[^}]*"isOn"\s*:\s*(true|false)', body)
         if m_state and m_state.group(1) == "false":
-            raise ValueError(
-                f"虎牙房间 {room_id} 未开播——开播后引擎将自动开始监听（持续重试中）")
+            # 回放细分（2026-10-14 用户实测困惑：虎牙下播后自动播放回放，
+            # 观感酷似在播——「未开播」文案让用户误判检测失效。isReplay
+            # 与 isOn 同层扁平字段，[^}]* 同一窗口可达）
+            m_replay = re.search(
+                r'TT_ROOM_DATA\s*=\s*\{[^}]*"isReplay"\s*:\s*(true|false)', body)
+            replay = bool(m_replay and m_replay.group(1) == "true")
+            suffix = "（正在播放回放，并非实时直播）" if replay else ""
+            raise RoomNotLiveError(
+                f"虎牙房间 {room_id} 未开播{suffix}——开播后引擎将自动开始监听（持续重试中）")
         m = re.search(r'"tid"\s*:\s*(\d+)', body) or re.search(
             r'"lChannelId"\s*:\s*"?(\d+)', body
         )
@@ -182,6 +199,9 @@ class HuyaProtocolEngine(BaseEngine):
                     await ws.send(codec.build_gift_list_req())
                     logger.info(f"[huya] room {room_id} doLaunch+registerGroup sent (tid={tid})")
                     self._set_status(self.status.__class__.RUNNING)
+                    # 上报开播（2026-10-14 接线：base 的 GAP 裁剪依赖 live 状态，
+                    # 下播后重连的未决缺口起点需 live_changed_at 裁剪）
+                    self.mark_live_change(room_id, True)
                     hb_task = asyncio.create_task(self._heartbeat(room_id, ws, tid))
                     try:
                         await self._read_loop(room_id, ws)
@@ -189,6 +209,17 @@ class HuyaProtocolEngine(BaseEngine):
                         hb_task.cancel()
             except asyncio.CancelledError:
                 raise
+            except RoomNotLiveError as e:
+                # 2026-10-14 用户实测回归：未开播此前落入通用 except 记 NETWORK
+                # GAP——房间根本没连上、无缺失语义，前端「缺口 network」误导
+                # 排查方向。mark_live_change(False) 落实 base「下播不计 GAP」
+                # 承诺（未决缺口作废）；状态转换沿只发一次，重试静默轮询。
+                logger.info(f"[huya] room {room_id} not live: {e}")
+                if self.mark_live_change(room_id, False):
+                    await self._emit_system_status(room_id, str(e))
+                if self._stop_flags.get(room_id):
+                    return
+                await asyncio.sleep(15)
             except Exception as e:
                 logger.warning(f"[huya] room {room_id} error: {e}")
                 if self._is_stopping(room_id):
