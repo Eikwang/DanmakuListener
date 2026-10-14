@@ -18,6 +18,8 @@
     "danmaku_listener/senders/pipeline.py": ["tests/unit/test_send_pipeline.py", "tests/unit/test_send_pipeline_fence.py"],
     "CHANGELOG.md": [],
     "TODOS.md": [],
+    "CLAUDE.md": [],
+    "docs/ops/send-runbook.md": [],
     "VERSION": [],
     "pyproject.toml": [],
     "docs/integration/session-topology.md": [],
