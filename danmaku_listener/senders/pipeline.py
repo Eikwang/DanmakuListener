@@ -95,9 +95,11 @@ class DanmuCommandPipeline:
         active_relogin = self._get_active_relogin(platform)
         relogin_extra = None
         if active_relogin:
+            # 懒 import 同 _get_active_relogin（F19：retry_after_s 单源 relogin.RETRY_AFTER_S）
+            from danmaku_listener.web.relogin import RETRY_AFTER_S
             relogin_extra = {"relogin_in_progress": True,
                              "relogin_id": active_relogin.get("relogin_id"),
-                             "retry_after_s": 30}
+                             "retry_after_s": RETRY_AFTER_S}
         if not self._registry.is_room_listened(platform, room_id):
             hint = "发送目标限定当前监听中的房间"
             if relogin_extra:
@@ -217,7 +219,8 @@ class DanmuCommandPipeline:
         wire = self._build_result_wire(platform, room_id, request_id, status,
                                        reason_code, fix_hint, docs_anchor, sent_at, content)
         if extra:
-            # 附加字段仅入 REST 回执（additive；WS 契约 DanmuSendResultPayload 不动）
+            # 附加字段 additive 携带进 REST 回执与 WS 广播（{**wire, **extra} 后
+            # _broadcast 同样广播；消费端忽略未知字段——2026-10-14 F24 勘误原注释）
             wire = {**wire, **extra}
         await self._broadcast(wire)
         if detail:

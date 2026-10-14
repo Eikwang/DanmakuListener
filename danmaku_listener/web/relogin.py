@@ -17,7 +17,8 @@
 
 执行模型（Eng 发现1/2，计划 §3.1-5）：
 - Playwright 登录流（async API）在主事件循环 await（子进程驱动，非线程阻塞）
-- 真·阻塞文件操作（rmtree/原子落盘）用 asyncio.to_thread 包裹，不占事件循环
+- 清理类大 IO（rmtree）用 asyncio.to_thread 包裹；导出类小落盘（10-100KB）
+  同步写（登录低频路径，量级判定见 2026-10-14 ship perf 审查）
 - **每平台串行**：per-platform asyncio.Lock——同一平台禁止两个登录窗并发
   （persistent profile 目录锁/可见窗互斥）；跨平台编排可并发
 - supersede 取消 = task.cancel() + 带超时 join 等待实际退出（旧任务 finally
@@ -42,7 +43,7 @@
 from __future__ import annotations
 
 import asyncio
-import json
+import copy
 import os
 import shutil
 import time
@@ -51,6 +52,11 @@ from pathlib import Path
 from typing import Any, Optional
 
 from loguru import logger
+
+# 跨层常量单源（2026-10-14 D5/F21：登录窗超时与 huya takeover 参数组——
+# douyin_login/send_login 均只依赖 stdlib+loguru，web→engines 方向无环）
+from danmaku_listener.engines.douyin_login import DEFAULT_TIMEOUT
+from danmaku_listener.engines.send_login import HUYA_TAKEOVER_PARAMS
 
 #: 平台登录载体全清单（相对 cookie/ 目录；values 顺序=清理顺序）——
 #: 语义不变：ReloginUnsupported 判定 + 兼容既有调用方（clear_login_state 缺省）
@@ -81,7 +87,9 @@ RELOGIN_CLEAN_SUBSETS: dict[str, list[str]] = {
 DUAL_CARRIER_PLATFORMS = ("douyin", "huya")
 
 #: 监听引擎登录超时常量锚点（watcher 预算下限=登录窗自身超时+缓冲，Eng C6/R9）
-LOGIN_WINDOW_TIMEOUT_S = {"huya": 240.0, "douyin": 300.0}  # resident_session.py:157 / douyin_login.py:27
+#: douyin=DEFAULT_TIMEOUT 引用（engines/douyin_login.py，F21 单源）；huya 240.0
+#: 与 resident_session.login_takeover 的 timeout_s 缺省对齐（该处无常量——字面量锚定）
+LOGIN_WINDOW_TIMEOUT_S = {"huya": 240.0, "douyin": DEFAULT_TIMEOUT}
 #: 显式 hard-coded 常量（DX F8：内部单一消费方、无常量调优实证，暂不开配置面）
 WATCHER_POLL_S = 2.0
 RETRY_AFTER_S = 30
@@ -91,6 +99,8 @@ REGISTRY_KEEP_S = 3600.0
 RECOVERY_BUDGET_PER_ROOM_S = 30.0
 #: supersede join 超时（旧任务 finally 清理上限；超时则记录告警后放行）
 SUPERSEDE_JOIN_TIMEOUT_S = 15.0
+#: 发送会话 close join 超时（close 超时→DX-D7 stale 补偿路径接管）
+CLOSE_JOIN_TIMEOUT_S = 20.0
 
 #: 平台重登提示（v2 语义：如实描述各平台行为——修 RELOGIN_NOTES 失真，S4-C）
 RELOGIN_NOTES = {
@@ -116,8 +126,6 @@ def clear_login_state(platform: str, cookie_dir: str = "./cookie",
     names = PLATFORM_LOGIN_CARRIERS.get(platform) if carriers is None else carriers
     if not names and carriers is None:
         raise ReloginUnsupported(f"平台 {platform} 不支持手动重登（无登录载体定义）")
-    if names is None:
-        names = []
     base = Path(cookie_dir).resolve()
     deleted: list[str] = []
     for name in names:
@@ -127,10 +135,16 @@ def clear_login_state(platform: str, cookie_dir: str = "./cookie",
             continue
         if target.is_dir():
             shutil.rmtree(target, ignore_errors=True)
-            deleted.append(name)
+            # ship 对抗F4：rmtree(ignore_errors=True) 会静默吞部分删除（Windows
+            # 句柄延迟释放常态）——以实际消失为准，未消失的进 missing 差集告警
+            if not target.exists():
+                deleted.append(name)
         elif target.is_file():
-            target.unlink(missing_ok=True)
-            deleted.append(name)
+            try:
+                target.unlink(missing_ok=True)
+                deleted.append(name)
+            except OSError as e:  # 文件占用（PermissionError 等）不炸同步段
+                logger.warning(f"[relogin] {platform} 载体删除失败: {name}: {e}")
     return deleted
 
 
@@ -171,9 +185,6 @@ async def _close_send_session(platform: str) -> str:
     except Exception as e:  # noqa: BLE001
         logger.warning(f"[relogin] {platform} 发送会话 close 异常: {type(e).__name__}: {str(e)[:80]}")
         return "close_failed_stale_marked"
-
-
-CLOSE_JOIN_TIMEOUT_S = 20.0
 
 
 # ---------------------------------------------------------------------------
@@ -307,6 +318,27 @@ def get_active_relogin(platform: str) -> Optional[dict]:
 # 平台路由登录闭环（后台任务体）
 # ---------------------------------------------------------------------------
 
+async def _recover_rooms(rec: dict, bridge, platform: str, *,
+                         guard_terminal: bool = False) -> None:
+    """恢复循环：逐房 start_room，失败计入 recovery_error；guard_terminal=True 时终态早退（幂等守卫）
+
+    2026-10-14 D5：douyin/huya/orchestrate 单载体 三处同构循环收口（running 跳过
+    判定统一为 rec["rooms"].get(rid, {}).get("status")——原 douyin 版
+    `rid in rec["rooms"] and ...` 语义等价）；文案统一「已触发恢复」。
+    """
+    for rid in list(REGISTRY.recovery_rooms(platform).keys()):
+        if guard_terminal and rec["state"] != "recovering":
+            return
+        if rec["rooms"].get(rid, {}).get("status") == "running":
+            continue
+        try:
+            await bridge.start_room(platform, rid)
+            logger.info(f"[relogin][{platform}] 房间 {rid} 已触发恢复")
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[relogin][{platform}] 房间 {rid} start_room 失败: {e}")
+            REGISTRY.set_room(platform, rid, "failed", recovery_error=str(e)[:120])
+
+
 async def _douyin_profile_login_and_export(rec: dict, bridge, room_id: str,
                                            cookie_dir: str) -> None:
     """抖音单窗双喂（S2）：profile 登录→域白名单导出→start_room 恢复
@@ -318,12 +350,13 @@ async def _douyin_profile_login_and_export(rec: dict, bridge, room_id: str,
     降级两窗形态（D4 测试开关 DANMU_RELOGIN_FORCE_TWO_WINDOW=1）：先触发监听
     侧登录门（start_room 写 douyin_cookies.json——原闭环）再跑 profile 登录，
     两窗串行；单窗固化后降级路径仍可回归验证（计划 §5.6）。
-    """
-    import os as _os
 
+    独立 Playwright 实例（run_profile_login_flow 内部 finally 已关 context）
+    ——编排层无需会话级清理（2026-10-14 F17：原空 finally 注释上移至此）。
+    """
     from danmaku_listener.engines.douyin_login import run_profile_login_flow
 
-    if _os.environ.get("DANMU_RELOGIN_FORCE_TWO_WINDOW") == "1":
+    if os.environ.get("DANMU_RELOGIN_FORCE_TWO_WINDOW") == "1":
         logger.info("[relogin][douyin] 降级两窗形态（测试开关）——先监听登录门后 profile 登录")
         rec["login_flows"] = [
             {"side": "listen", "kind": "login_gate", "triggered": True, "reused_existing": False},
@@ -357,20 +390,16 @@ async def _douyin_profile_login_and_export(rec: dict, bridge, room_id: str,
     export = result.get("export", "failed")
     rec["send_refresh"] = "refresh_ok" if export == "ok" else "refresh_failed"
     if result.get("reused_existing"):
-        rec["login_flows"][0]["reused_existing"] = True  # S2：复用存活旧态（非新扫码）
+        profile_flow = next((f for f in rec["login_flows"]
+                             if f["kind"] == "profile_login"), None)
+        if profile_flow is not None:
+            # 按 kind 定位（F23：防降级两窗路径把 listen 项错标 reused_existing）
+            profile_flow["reused_existing"] = True  # S2：复用存活旧态（非新扫码）
     if export != "ok":
         rec["error"] = ("douyin_cookies.json 导出失败（登录已成功，发送侧新态在 profile）"
                         "——重跑重登即可（docs/integration/autolive-merge-v0.7.0.md §4.4）")
     # 登录落地→恢复监听房间（携新 cookie 直启；失败计入房间恢复失败）
-    for rid in list(REGISTRY.recovery_rooms("douyin").keys()):
-        if rid in rec["rooms"] and rec["rooms"][rid].get("status") == "running":
-            continue
-        try:
-            await bridge.start_room("douyin", rid)
-            logger.info(f"[relogin][douyin] 房间 {rid} 已触发恢复")
-        except Exception as e:  # noqa: BLE001
-            logger.warning(f"[relogin][douyin] 房间 {rid} start_room 失败: {e}")
-            REGISTRY.set_room("douyin", rid, "failed", recovery_error=str(e)[:120])
+    await _recover_rooms(rec, bridge, "douyin")
 
 
 async def _huya_takeover_and_recover(rec: dict, bridge, room_id: str) -> None:
@@ -390,8 +419,7 @@ async def _huya_takeover_and_recover(rec: dict, bridge, room_id: str) -> None:
         idle = int(getattr(st, "send_session_idle_timeout_seconds", 1800) or 1800)
         session = _get_session(idle, mode)
     try:
-        await session.login_takeover(room_id, "https://www.huya.com/",
-                                     ("yyuid", "hicl_imid", "huya_uid"), grace_s=30.0)
+        await session.login_takeover(room_id, *HUYA_TAKEOVER_PARAMS)
         rec["send_refresh"] = "refresh_ok"
         logger.info("[relogin][huya] 发送侧登录刷新完成（takeover→快照→转后台）")
     except asyncio.CancelledError:
@@ -402,26 +430,20 @@ async def _huya_takeover_and_recover(rec: dict, bridge, room_id: str) -> None:
         rec["error"] = (f"虎牙发送登录未完成: {type(e).__name__}——监听不受影响，"
                         "稍后发送将懒弹登录窗自愈（docs/integration/autolive-merge-v0.7.0.md §4.4）")
     # takeover 触发后即直启恢复监听（匿名可听，不依赖发送侧结果——S3）
-    for rid in list(REGISTRY.recovery_rooms("huya").keys()):
-        if rec["rooms"].get(rid, {}).get("status") == "running":
-            continue
-        try:
-            await bridge.start_room("huya", rid)
-            logger.info(f"[relogin][huya] 房间 {rid} 已直启恢复")
-        except Exception as e:  # noqa: BLE001
-            logger.warning(f"[relogin][huya] 房间 {rid} start_room 失败: {e}")
-            REGISTRY.set_room("huya", rid, "failed", recovery_error=str(e)[:120])
+    await _recover_rooms(rec, bridge, "huya")
 
 
 async def _orchestrate(rec: dict, bridge, platform: str, room_id: str,
                        cookie_dir: str) -> None:
     """后台编排任务体：路由登录闭环 → watcher（恢复判定/终局）——计划 §3.1-3/4
 
-    幂等守卫（Eng 发现6）：每次 start_room 前检查记录是否已终态，已终态跳过恢复。
-    被取消（supersede）时 finally 走既有 close() 幂等清理（虎牙可见窗/抖音 profile 窗）。
+    幂等守卫（Eng 发现6）：每次 start_room 前检查记录是否已终态，已终态跳过恢复
+    （单载体分支经 _recover_rooms(guard_terminal=True)）。被取消（supersede）时
+    走既有 close() 幂等清理（虎牙可见窗/发送会话；抖音 profile 登录窗是独立
+    Playwright 实例——run_profile_login_flow 内部 finally 已关 context，编排层
+    无需会话级清理，2026-10-14 F17 空 finally 已删）。
     """
     platform_lock = _platform_locks.setdefault(platform, asyncio.Lock())
-    session_obj = _peek_send_session(platform)
     try:
         async with platform_lock:
             if platform == "douyin":
@@ -429,32 +451,25 @@ async def _orchestrate(rec: dict, bridge, platform: str, room_id: str,
             elif platform == "huya":
                 await _huya_takeover_and_recover(rec, bridge, room_id)
             else:
-                # 单载体组：维持现有闭环——start_room 登录门弹窗（登录完成自动恢复）
-                for rid in list(REGISTRY.recovery_rooms(platform).keys()):
-                    if rec["rooms"].get(rid, {}).get("status") == "running":
-                        continue
-                    if rec["state"] != "recovering":
-                        return  # 幂等守卫：已终态（superseded/failed）跳过恢复
-                    try:
-                        await bridge.start_room(platform, rid)
-                        logger.info(f"[relogin][{platform}] 房间 {rid} 登录门已触发")
-                    except Exception as e:  # noqa: BLE001
-                        logger.warning(f"[relogin][{platform}] 房间 {rid} start_room 失败: {e}")
-                        REGISTRY.set_room(platform, rid, "failed", recovery_error=str(e)[:120])
+                # 单载体组：维持现有闭环——start_room 登录门弹窗（登录完成自动恢复）；
+                # guard_terminal=True：幂等守卫（已终态跳过恢复）
+                await _recover_rooms(rec, bridge, platform, guard_terminal=True)
             await _watch_recovery(rec, bridge, platform)
     except asyncio.CancelledError:
         logger.info(f"[relogin][{platform}] 编排任务被取消（supersede）——幂等清理")
-        if platform == "huya" and session_obj is not None:
-            try:
-                await asyncio.wait_for(session_obj.close(), timeout=CLOSE_JOIN_TIMEOUT_S)
-            except Exception:  # noqa: BLE001  close 失败由 DX-D7 stale 兜底
-                pass
+        if platform == "huya":
+            # F5：此处重新 peek 现值——编排开头 peek 的旧引用关不到懒创建的
+            # huya 会话；_close_send_session 内部已有 wait_for close+stale 映射语义
+            await _close_send_session("huya")
         raise
-    finally:
-        if platform == "douyin":
-            # 抖音 profile 登录窗是独立 Playwright 实例（run_profile_login_flow
-            # 内部 finally 已关 context）——无需会话级清理
-            pass
+    except Exception as e:  # noqa: BLE001  ship 对抗F3：编排意外死亡必须终局化
+        # 否则 rec 永久 recovering → fence 对该平台发送永久 RELOGIN_IN_PROGRESS、
+        # status 端点永不终局（AUTOlive 契约只有 404 才停轮询）。
+        logger.error(f"[relogin][{platform}] 编排任务异常退出: {type(e).__name__}: {str(e)[:120]}")
+        if rec["state"] == "recovering":  # 幂等：watcher 可能已终局
+            REGISTRY.finish(rec["relogin_id"], "failed",
+                            error=f"编排内部异常: {type(e).__name__}——重跑重登即可"
+                                  "（docs/integration/autolive-merge-v0.7.0.md §4.4）")
 
 
 async def _watch_recovery(rec: dict, bridge, platform: str) -> None:
@@ -468,7 +483,6 @@ async def _watch_recovery(rec: dict, bridge, platform: str) -> None:
     n_rooms = max(1, len(REGISTRY.recovery_rooms(platform)))
     budget = max(login_timeout + 30.0, n_rooms * RECOVERY_BUDGET_PER_ROOM_S)
     deadline = time.monotonic() + budget
-    login_kind = rec["login_flows"][0]["kind"] if rec["login_flows"] else "login_gate"
     login_done = platform not in DUAL_CARRIER_PLATFORMS  # 单载体：登录完成=房间恢复
 
     while True:
@@ -484,7 +498,9 @@ async def _watch_recovery(rec: dict, bridge, platform: str) -> None:
             st = room.get("status")
             if st == "running":
                 REGISTRY.set_room(platform, rid, "running")
-            elif st in ("error", "failed"):
+            elif st in ("error", "failed", "login_failed", "login_required"):
+                # bridge._rooms 实际值域含登录失败态（bridge.py :129/:166 login_failed、
+                # :198/:211/:226 login_required）——F4：不识别会白等满恢复预算
                 REGISTRY.set_room(platform, rid, "failed", recovery_error="房间启动失败")
         all_running = (not pool) or all(i.get("status") == "running" for i in pool.values())
         # 早停（Eng 发现6 镜像）：全部恢复房间 failed → 无可等待，立即 failed 终局
@@ -514,6 +530,10 @@ async def _watch_recovery(rec: dict, bridge, platform: str) -> None:
     if rec["send_refresh"] == "pending" and platform in DUAL_CARRIER_PLATFORMS \
             and not login_done:
         # 登录窗自身超时应已判负（预算≥窗口+30s）——此处兜底判 login_required
+        # ship 对抗终审F4 留档：当前生产不可达（watcher 严格在登录流程返回后启动，
+        # 此时 send_refresh 必为 refresh_ok/refresh_failed；同步段只写 close_*/not_
+        # applicable，无 pending）——该分支守护的是「未来重构把 watcher 提前并发」
+        # 的假想形态；若删测试参数化 (pending→login_required) 会红。
         REGISTRY.finish(rec["relogin_id"], "login_required",
                         error="登录窗口超时未完成——房间保持停止，重跑重登即可")
         return
@@ -533,94 +553,105 @@ _platform_locks: dict[str, asyncio.Lock] = {}
 # 同步段入口（POST /api/relogin 处理体）——计划 §3.1-1/2
 # ---------------------------------------------------------------------------
 
+#: per-platform 同步段互斥（2026-10-14 D3：并发双编排防护）——supersede 检查与
+#: bind_active 之间有多个 await，无互斥时并发 POST 同平台会产生双编排。与
+#: _platform_locks 分开：orchestrate 的锁覆盖整个登录闭环（可达数分钟），同步段
+#: 若复用该锁会被在途编排阻塞；本锁只覆盖秒级同步段，两锁无共享临界区、不成环。
+_RELOGIN_SYNC_LOCKS: dict[str, asyncio.Lock] = {}
+
+
 async def run_relogin_flow(bridge, platform: str, room_id: str,
                            cookie_dir: str = "./cookie") -> dict:
     """会话刷新编排同步段：停房→关发送会话→清载体（子集）→后台触发登录闭环
 
     立即返回同步段回执（即时事实）；登录与恢复由后台任务推进，AUTOlive 轮询
     GET /api/relogin/status?id= 消费终局。同平台再次重登=supersede（cancel+join）。
+    同步段全程持有 _RELOGIN_SYNC_LOCKS[platform]（D3 并发双编排防护）。
     """
     if platform not in PLATFORM_LOGIN_CARRIERS:
         raise ReloginUnsupported(f"平台 {platform} 不支持手动重登（无登录载体定义）")
 
-    # supersede：同平台旧活跃编排先取消并 join（防新旧窗争抢 profile 目录锁）
-    old_id = REGISTRY.active_id(platform)
-    old_task = _active_tasks.get(platform)
-    if old_id and old_task and not old_task.done():
-        old_rec = REGISTRY.get(old_id) or {}
-        logger.info(f"[relogin][{platform}] supersede 旧编排 {old_id[:8]}…（cancel+join）")
-        old_task.cancel()
-        try:
-            await asyncio.wait_for(old_task, timeout=SUPERSEDE_JOIN_TIMEOUT_S)
-        except (asyncio.CancelledError, asyncio.TimeoutError, Exception):  # noqa: BLE001
-            pass  # 旧任务 finally 已走 close() 幂等清理；join 超时放行（DX-D7 兜底）
+    async with _RELOGIN_SYNC_LOCKS.setdefault(platform, asyncio.Lock()):
+        # supersede：同平台旧活跃编排先取消并 join（防新旧窗争抢 profile 目录锁）
+        old_id = REGISTRY.active_id(platform)
+        old_task = _active_tasks.get(platform)
+        if old_id and old_task and not old_task.done():
+            logger.info(f"[relogin][{platform}] supersede 旧编排 {old_id[:8]}…（cancel+join）")
+            old_task.cancel()
+            # asyncio.wait 不传播被等任务的取消/异常，且当前协程被取消时本 await
+            # 处正常抛 CancelledError（2026-10-14 D4：替代 wait_for 的异常混入语义）
+            done, _ = await asyncio.wait({old_task}, timeout=SUPERSEDE_JOIN_TIMEOUT_S)
+            if not done:
+                logger.info(f"[relogin][{platform}] supersede join 超时放行（DX-D7 兜底）")
+            elif not old_task.cancelled():
+                old_task.exception()  # 取走旧任务异常防 GC "never retrieved" 噪音（不传播）
+            # 旧任务 finally 已走 close() 幂等清理
 
-    # 1. 停该平台全部在听房间（profile 单实例独占）
-    stopped: list[str] = []
-    for key, info in list(getattr(bridge, "_rooms", {}).items()):
-        if not key.startswith(f"{platform}:"):
-            continue
-        if info.get("status") != "running":
-            continue
-        rid = info.get("room_id", "")
-        try:
-            await bridge.stop_room(platform, rid)
-            stopped.append(rid)
-        except Exception as e:  # noqa: BLE001  单房间停止失败不阻断
-            logger.warning(f"[relogin] {key} stop failed: {e}")
+        # 1. 停该平台全部在听房间（profile 单实例独占）
+        stopped: list[str] = []
+        for key, info in list(getattr(bridge, "_rooms", {}).items()):
+            if not key.startswith(f"{platform}:"):
+                continue
+            if info.get("status") != "running":
+                continue
+            rid = info.get("room_id", "")
+            try:
+                await bridge.stop_room(platform, rid)
+                stopped.append(rid)
+            except Exception as e:  # noqa: BLE001  单房间停止失败不阻断
+                logger.warning(f"[relogin] {key} stop failed: {e}")
 
-    # 2. 关发送会话（存在才关；双载体平台才有常驻会话）
-    if platform in DUAL_CARRIER_PLATFORMS:
-        send_refresh = await _close_send_session(platform)
-    else:
-        send_refresh = "not_applicable"
+        # 2. 关发送会话（存在才关；双载体平台才有常驻会话）
+        if platform in DUAL_CARRIER_PLATFORMS:
+            send_refresh = await _close_send_session(platform)
+        else:
+            send_refresh = "not_applicable"
 
-    # 3. 清载体（预定清理子集；双载体发送侧不预清）——FS 阻塞操作 to_thread
-    subset = RELOGIN_CLEAN_SUBSETS.get(platform, PLATFORM_LOGIN_CARRIERS[platform])
-    carriers_expected = list(subset)
-    deleted = await asyncio.to_thread(clear_login_state, platform, cookie_dir, subset) \
-        if subset else []
-    # 差集（Eng CEO F-A：基准=预定清理子集∩实际存在路径；rmtree ignore_errors
-    # 已尽力——deleted 与期望差集仅记录告警，真失败由登录流程暴露）
-    missing = [c for c in carriers_expected if c not in deleted]
-    if missing:
-        logger.warning(f"[relogin] {platform} 预定清理子集存在但未删除: {missing}"
-                       "（可能文件本不存在或句柄延迟释放——Windows 常态）")
-    logger.info(f"[relogin] {platform} 载体已清: {deleted}（stopped={stopped}，"
-                f"send_refresh={send_refresh}）")
+        # 3. 清载体（预定清理子集；双载体发送侧不预清）——FS 阻塞操作 to_thread
+        subset = RELOGIN_CLEAN_SUBSETS.get(platform, PLATFORM_LOGIN_CARRIERS[platform])
+        carriers_expected = list(subset)
+        deleted = await asyncio.to_thread(clear_login_state, platform, cookie_dir, subset) \
+            if subset else []
+        # 差集（Eng CEO F-A：基准=预定清理子集∩实际存在路径；rmtree ignore_errors
+        # 已尽力——deleted 与期望差集仅记录告警，真失败由登录流程暴露）
+        missing = [c for c in carriers_expected if c not in deleted]
+        if missing:
+            logger.warning(f"[relogin] {platform} 预定清理子集存在但未删除: {missing}"
+                           "（可能文件本不存在或句柄延迟释放——Windows 常态）")
+        logger.info(f"[relogin] {platform} 载体已清: {deleted}（stopped={stopped}，"
+                    f"send_refresh={send_refresh}）")
 
-    # 4. 建记录 + 后台触发路由登录闭环
-    kind = {"douyin": "profile_login", "huya": "takeover"}.get(platform, "login_gate")
-    login_flows = [{"side": "send" if platform in DUAL_CARRIER_PLATFORMS else "listen",
-                    "kind": kind, "triggered": True, "reused_existing": False}]
-    if platform not in DUAL_CARRIER_PLATFORMS:
-        login_flows.insert(0, {"side": "listen", "kind": "login_gate",
-                               "triggered": True, "reused_existing": False})
-    rec = REGISTRY.create(platform, room_id, stopped, deleted, carriers_expected,
-                          send_refresh, login_flows)
-    # supersede 停房集合转移（Eng 发现4）：旧记录未完成恢复的房间并入新恢复判定
-    if old_id:
-        old_rec = REGISTRY.get(old_id)
-        if old_rec:
-            REGISTRY.transfer_recovery(old_rec, rec)
-    REGISTRY.bind_active(platform, rec["relogin_id"])
+        # 4. 建记录 + 后台触发路由登录闭环
+        kind = {"douyin": "profile_login", "huya": "takeover"}.get(platform, "login_gate")
+        login_flows = [{"side": "send" if platform in DUAL_CARRIER_PLATFORMS else "listen",
+                        "kind": kind, "triggered": True, "reused_existing": False}]
+        rec = REGISTRY.create(platform, room_id, stopped, deleted, carriers_expected,
+                              send_refresh, login_flows)
+        # supersede 停房集合转移（Eng 发现4）：旧记录未完成恢复的房间并入新恢复判定
+        if old_id:
+            old_rec = REGISTRY.get(old_id)
+            if old_rec:
+                REGISTRY.transfer_recovery(old_rec, rec)
+        REGISTRY.bind_active(platform, rec["relogin_id"])
 
-    task = asyncio.create_task(_orchestrate(rec, bridge, platform, room_id, cookie_dir),
-                               name=f"relogin-{platform}")
-    _active_tasks[platform] = task
-    # 把 superseded 旧记录指向新记录
-    if old_id:
-        REGISTRY.mark_superseded(old_id, by_id=rec["relogin_id"])
+        task = asyncio.create_task(_orchestrate(rec, bridge, platform, room_id, cookie_dir),
+                                   name=f"relogin-{platform}")
+        _active_tasks[platform] = task
+        # 把 superseded 旧记录指向新记录
+        if old_id:
+            REGISTRY.mark_superseded(old_id, by_id=rec["relogin_id"])
 
     note = RELOGIN_NOTES.get(platform, "")
+    # ship 对抗终审F3：回执内层容器 deepcopy——list(...) 只浅拷贝容器，元素 dict
+    # 与注册表同对象；F23 原地改 rec["login_flows"] 元素会穿透持有同步回执的调用方
     return {
         "success": True,
         "relogin_id": rec["relogin_id"],
         "platform": platform,
-        "rooms_stopped": rec["rooms_stopped"],
-        "carriers_cleared": rec["carriers_cleared"],
+        "rooms_stopped": copy.deepcopy(rec["rooms_stopped"]),
+        "carriers_cleared": copy.deepcopy(rec["carriers_cleared"]),
         "send_refresh": rec["send_refresh"],
-        "login_flows": rec["login_flows"],
+        "login_flows": copy.deepcopy(rec["login_flows"]),
         "status_url": f"/api/relogin/status?id={rec['relogin_id']}",
         "msg": "会话刷新编排已启动——请完成登录窗口，恢复进度轮询 status 端点"
                + (f"（{note}）" if note else ""),
@@ -631,8 +662,12 @@ _active_tasks: dict[str, asyncio.Task] = {}
 
 
 def get_relogin_status(relogin_id: str) -> Optional[dict]:
-    """异步段回执（status 端点处理体）；未知 id → None（路由层 404）"""
+    """异步段回执（status 端点处理体）；未知 id → None（路由层 404）
+
+    深拷贝隔离（ship 对抗F9）：嵌套 rooms/login_flows/interruption_window 与
+    注册表共享引用会让调用方改动穿透注册表——契约面一律 deepcopy。
+    """
     rec = REGISTRY.get(relogin_id)
     if rec is None:
         return None
-    return dict(rec)
+    return copy.deepcopy(rec)

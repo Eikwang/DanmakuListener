@@ -161,7 +161,8 @@ class DanmakuBridge:
             on_status=lambda s: status_cb(s),
         )
         if result.get("status") != "ok" or result.get("export") != "ok":
-            detail = "登录未完成" if result.get("status") != "ok" else                 "登录成功但监听 cookie 导出失败（重跑登录即可，发送侧不受影响）"
+            detail = ("登录未完成" if result.get("status") != "ok"
+                      else "登录成功但监听 cookie 导出失败（重跑登录即可，发送侧不受影响）")
             await self._broadcast_system_status(room_key, f"{detail}——抖音礼物监听需要登录态，请重试")
             self._rooms[room_key]["status"] = "login_failed"
             return

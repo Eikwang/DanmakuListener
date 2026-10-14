@@ -63,67 +63,6 @@ def load_login_cookies(cookie_path: str = DEFAULT_COOKIE_FILE) -> Dict[str, str]
         return {}
 
 
-async def run_login_flow(
-    room_id: str = "",
-    cookie_path: str = DEFAULT_COOKIE_FILE,
-    headless: bool = False,
-    timeout: float = DEFAULT_TIMEOUT,
-    on_status: Optional[Callable[[str], Any]] = None,
-) -> Dict[str, Any]:
-    """受控浏览器登录流程（阻塞直到登录成功/超时/用户关闭）
-
-    Returns:
-        {"status": "ok"|"timeout_or_closed", "cookies": {name: value}}
-    """
-    from playwright.async_api import async_playwright
-
-    os.makedirs(os.path.dirname(cookie_path) or ".", exist_ok=True)
-
-    def notify(status: str) -> None:
-        if on_status:
-            try:
-                result = on_status(status)
-                if asyncio.iscoroutine(result):
-                    asyncio.ensure_future(result)
-            except Exception as e:  # noqa: BLE001
-                logger.debug(f"login status callback error: {e}")
-
-    async with async_playwright() as pw:
-        browser = await pw.chromium.launch(headless=headless)
-        try:
-            context = await browser.new_context(viewport={"width": 1280, "height": 800})
-            page = await context.new_page()
-            notify("login_page_opened")
-            await page.goto(LOGIN_PAGE_URL, wait_until="domcontentloaded")
-
-            deadline = time.monotonic() + timeout
-            logged_in = False
-            while time.monotonic() < deadline:
-                cookies = await context.cookies()
-                names = {c["name"] for c in cookies}
-                if LOGIN_MARKER_COOKIES & names:
-                    logged_in = True
-                    break
-                if page.is_closed():
-                    break
-                await asyncio.sleep(2)
-
-            if not logged_in:
-                notify("login_timeout_or_closed")
-                return {"status": "timeout_or_closed", "cookies": {}}
-
-            # 登录成功：保存 cookie 列表 + 提取字典
-            cookies = [c for c in await context.cookies() if c.get("value")]
-            with open(cookie_path, "w", encoding="utf-8") as fh:
-                json.dump(cookies, fh, ensure_ascii=False)
-            cookie_dict = {c["name"]: c["value"] for c in cookies}
-            notify("login_ok")
-            logger.info(f"[douyin] login flow OK ({len(cookie_dict)} cookies saved)")
-            return {"status": "ok", "cookies": cookie_dict}
-        finally:
-            await browser.close()
-
-
 # ============ AutoDanmu profile 登录闭环（2026-10-07——cookie 文件注入被
 # bd_ticket_guard 指纹绑定拒绝；persistent profile 指纹匹配才能建立网页登录态） ============
 
@@ -136,13 +75,19 @@ def has_profile_login(profile_dir: str = PROFILE_DIR) -> bool:
     from pathlib import Path
 
     d = Path(profile_dir)
-    return (d / "Default" / "Network" / "Cookies").is_file() or            (d / "Default" / "Cookies").is_file()
+    return ((d / "Default" / "Network" / "Cookies").is_file()
+            or (d / "Default" / "Cookies").is_file())
 
 
-#: 监听侧 cookie 域白名单（Eng 发现11：douyin.com 系；排除式→白名单式）
-_DOUYIN_COOKIE_DOMAIN_SUFFIXES = ("douyin.com", ".douyin.com", "douyincom")
+#: 监听侧 cookie 域白名单（Eng 发现11：douyin.com 系；排除式→白名单式。
+#: F7 段匹配=全等或 endswith("." + d)——子域与带前导点 ".douyin.com" 形态由
+#: endswith 覆盖；伪后缀域（notdouyin.com）与旧误收的 "douyincom" 不再命中）
+_DOUYIN_COOKIE_DOMAIN_SUFFIXES = ("douyin.com",)
+#: 会话级身份 cookie 排除约定（协议侧 room_init 同款排除——engines/protocol/
+#: douyin.py 懒 import 本常量；2026-10-14 F13 双点维护单源）
+DOUYIN_SESSION_COOKIE_NAMES = ("ttwid", "msToken")
 #: 监听注入约定排除项（douyin.py:124-128——白名单之上的额外排除）
-_DOUYIN_COOKIE_EXCLUDE_NAMES = {"ttwid", "msToken"}
+_DOUYIN_COOKIE_EXCLUDE_NAMES = set(DOUYIN_SESSION_COOKIE_NAMES)
 
 
 async def _export_listen_cookies(context, export_path: str) -> str:
@@ -155,7 +100,8 @@ async def _export_listen_cookies(context, export_path: str) -> str:
         cookies = []
         for c in state.get("cookies", []):
             domain = str(c.get("domain", ""))
-            if not any(domain == d or domain.endswith(d) for d in _DOUYIN_COOKIE_DOMAIN_SUFFIXES):
+            if not any(domain == d or domain.endswith("." + d)
+                       for d in _DOUYIN_COOKIE_DOMAIN_SUFFIXES):
                 continue
             if c.get("name") in _DOUYIN_COOKIE_EXCLUDE_NAMES:
                 continue

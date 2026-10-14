@@ -23,34 +23,15 @@ from playwright.async_api import async_playwright  # 模块级：测试注入点
 
 from danmaku_listener.contract.models import SendRejectReason, SendStatus
 from danmaku_listener.senders.base import BaseSender, SendResult
+# 2026-10-14 D5 裁定单源化：STEALTH_JS 移入 senders/_stealth.py——本模块
+# re-export 保持 kuaishou_douyu.py 的 import 链不变
+from danmaku_listener.senders._stealth import STEALTH_JS
 
 PAGE_TIMEOUT_MS = 30_000
 ECHO_WAIT_S = 12.0
 
 RISK_SIGNALS = ("验证码", "滑动验证", "安全验证", "禁言", "被禁言", "操作过于频繁", "稍后再试")
 LOGIN_SIGNALS = ("需先登录", "请登录", "登录后")
-
-#: headless 反检测指纹包（虎牙 2026-10-09 对抗实验实证：风控识别 headless=new
-#: 指纹并静默吞弹幕——headed 对照可过，注入此 7 信号伪装后 headless 亦过，
-#: 即虎牙 10-10 纯后台终态方案。快手 2026-10-13 用户 headed 可见窗诊断实证
-#: 同根因。瞬态基类经此副本共享——huya.py 保留原文互不耦合）
-STEALTH_JS = """
-() => {
-    Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-    Object.defineProperty(window, 'outerWidth', {get: () => 1280});
-    Object.defineProperty(window, 'outerHeight', {get: () => 800});
-    Object.defineProperty(screen, 'availWidth', {get: () => 1280});
-    Object.defineProperty(screen, 'availHeight', {get: () => 760});
-    Object.defineProperty(screen, 'colorDepth', {get: () => 24});
-    Object.defineProperty(screen, 'pixelDepth', {get: () => 24});
-    if (!window.chrome) { window.chrome = {runtime: {}, loadTimes: () => {}, csi: () => {}}; }
-    Object.defineProperty(navigator, 'plugins', {get: () => [1,2,3,4,5]});
-    Object.defineProperty(navigator, 'languages', {get: () => ['zh-CN', 'zh', 'en']});
-    const origQuery = window.navigator.permissions.query;
-    window.navigator.permissions.query = (p) => p.name === 'notifications'
-        ? Promise.resolve({state: Notification.permission}) : origQuery(p);
-}
-"""
 
 
 class DomTransientSender(BaseSender):
@@ -160,8 +141,8 @@ class DomTransientSender(BaseSender):
                                 "确认后可手动关窗提前结束")
                     try:
                         await asyncio.sleep(self.observe_window_s)
-                    except asyncio.CancelledError:  # noqa: BLE001
-                        pass
+                    except asyncio.CancelledError:
+                        raise  # 保持取消语义（2026-10-14 ship 审查 D4：吞取消违反 asyncio 协作式取消）
                 try:
                     await context.close()
                 except Exception:  # noqa: BLE001

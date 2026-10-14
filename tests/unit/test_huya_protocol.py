@@ -222,6 +222,16 @@ async def test_engine_lifecycle_and_protocol_version(monkeypatch):
 
     monkeypatch.setattr(LOGIN_GATE, "ensure_cookie_file_login", fake_login)
 
+    # 2026-10-13 一次登录门：takeover 排在 ensure 之前——真实调用会弹可见
+    # chromium 登录窗（240s 超时，cancel 泄漏子进程挂起 pytest 退出）。
+    # 单测仿真 takeover 失败→走既有 ensure 存档窗兜底（保持原路径语义）。
+    import danmaku_listener.senders.huya as huya_sender_mod
+
+    async def fake_takeover(room_id):
+        return False
+
+    monkeypatch.setattr(huya_sender_mod, "takeover_login_and_archive", fake_takeover)
+
     await engine.start("23058")
     await asyncio.sleep(0.1)
     assert not engine._room_tasks["23058"].done() or True  # 连接失败走重连循环是合法状态
@@ -229,5 +239,172 @@ async def test_engine_lifecycle_and_protocol_version(monkeypatch):
     assert engine._stop_flags["23058"] is True
 
 
+# ---- 一次登录门（2026-10-13 用户验收裁定：存档缺失→发送侧 takeover；
+#      takeover 失败回退旧存档窗；存档有效直接跳过）----
+
+def _make_gate_engine(monkeypatch, tmp_path):
+    """登录门测试环境：cookie_dir 指向 tmp_path + ENGINE_STATUS 透出收集器"""
+    import json as _json
+    from types import SimpleNamespace
+
+    import danmaku_listener.config.settings as settings_mod
+
+    monkeypatch.setattr(settings_mod, "get_settings",
+                        lambda: SimpleNamespace(cookie_dir=str(tmp_path)))
+    engine = HuyaProtocolEngine()
+    statuses: list = []
+
+    async def _capture(msg):
+        statuses.append(msg)
+
+    engine.on_message(_capture)
+
+    def write_archive(cookies):
+        (tmp_path / "huya_login_cookies.json").write_text(
+            _json.dumps({"cookies": cookies}), encoding="utf-8")
+
+    return engine, statuses, write_archive
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cookie_name", ["yyuid", "hicl_imid", "huya_uid"])
+async def test_login_gate_valid_archive_skips_takeover(monkeypatch, tmp_path, cookie_name):
+    """存档含登录 cookie（三候选名之一且值非空）→ 跳过 takeover 一次登录门"""
+    import danmaku_listener.senders.huya as huya_sender_mod
+
+    engine, statuses, write_archive = _make_gate_engine(monkeypatch, tmp_path)
+    write_archive([{"name": cookie_name, "value": "u-123", "domain": ".huya.com"}])
+
+    takeover_calls: list = []
+
+    async def _unexpected_takeover(room_id):
+        takeover_calls.append(room_id)
+        return True
+
+    monkeypatch.setattr(huya_sender_mod, "takeover_login_and_archive",
+                        _unexpected_takeover)
+    engine._stop_flags["1"] = True  # 门走完即退出主循环（单测不触网）
+    await engine._run_room("1")
+
+    assert takeover_calls == []  # 存档有效——不触发 takeover
+    assert not any("first_login" in str(m.get("payload")) for m in statuses)
+
+
+@pytest.mark.asyncio
+async def test_login_gate_missing_archive_triggers_takeover(monkeypatch, tmp_path):
+    """存档缺失 → 触发发送侧 takeover 一次扫码（成功则旧存档窗兜底不触发）"""
+    import danmaku_listener.senders.huya as huya_sender_mod
+
+    engine, statuses, _write = _make_gate_engine(monkeypatch, tmp_path)  # 不写存档
+
+    takeover_calls: list = []
+
+    async def _takeover(room_id):
+        takeover_calls.append(room_id)
+        return True
+
+    gate_calls: list = []
+
+    async def _unexpected_gate(*args, **kwargs):
+        gate_calls.append(args)
+
+    monkeypatch.setattr(huya_sender_mod, "takeover_login_and_archive", _takeover)
+    monkeypatch.setattr(LOGIN_GATE, "ensure_cookie_file_login", _unexpected_gate)
+    engine._stop_flags["1"] = True
+    await engine._run_room("1")
+
+    assert takeover_calls == ["1"]
+    assert gate_calls == []  # takeover 成功——ensure_cookie_file_login 兜底不触发
+    assert any("first_login" in str(m.get("payload")) for m in statuses)
+
+
+@pytest.mark.asyncio
+async def test_login_gate_takeover_failure_falls_back_to_archive_window(monkeypatch, tmp_path):
+    """takeover 失败（False）→ 回退旧 ensure_cookie_file_login 存档窗兜底"""
+    import danmaku_listener.senders.huya as huya_sender_mod
+
+    engine, statuses, _write = _make_gate_engine(monkeypatch, tmp_path)
+
+    async def _takeover_fail(room_id):
+        return False
+
+    gate_calls: list = []
+
+    async def _gate(room_id, platform, login_url, cookie_path, *args, **kwargs):
+        gate_calls.append((room_id, platform, login_url, cookie_path))
+        return "logged_in"
+
+    monkeypatch.setattr(huya_sender_mod, "takeover_login_and_archive", _takeover_fail)
+    monkeypatch.setattr(LOGIN_GATE, "ensure_cookie_file_login", _gate)
+    engine._stop_flags["1"] = True
+    await engine._run_room("1")
+
+    assert gate_calls == [("1", "huya", "https://www.huya.com/",
+                           str(tmp_path / "huya_login_cookies.json"))]
+
+
 def test_protocol_version():
     assert codec.PROTOCOL_VERSION == "huya-1"
+
+
+@pytest.mark.asyncio
+async def test_login_gate_budget_exhausted_skips_takeover(monkeypatch, tmp_path):
+    """ship 对抗F5 守护：预算耗尽→takeover 与存档窗都不弹（无人值守防反复弹窗）；budget_exhausted 恰 1 条（去重）"""
+    import danmaku_listener.senders.huya as huya_sender_mod
+
+    engine, statuses, _write = _make_gate_engine(monkeypatch, tmp_path)
+    engine._login_budgets["1"] = 0
+
+    async def _unexpected_takeover(room_id):
+        raise AssertionError("预算耗尽不得触发 takeover 弹窗")
+
+    async def _unexpected_gate(*args, **kwargs):
+        raise AssertionError("预算耗尽不得触发存档窗兜底")
+
+    monkeypatch.setattr(huya_sender_mod, "takeover_login_and_archive", _unexpected_takeover)
+    monkeypatch.setattr(LOGIN_GATE, "ensure_cookie_file_login", _unexpected_gate)
+    engine._stop_flags["1"] = True
+    await engine._run_room("1")
+    await engine._run_room("1")  # 第二次重连同样不弹
+
+    exhausted = [m for m in statuses if "budget_exhausted" in str(m.get("payload"))]
+    assert len(exhausted) == 1  # _budget_warned 去重
+    assert not any("first_login" in str(m.get("payload")) for m in statuses)
+
+
+@pytest.mark.asyncio
+async def test_login_gate_budget_resets_on_restart(monkeypatch, tmp_path):
+    """ship 对抗终审F1 守护：停房重加→预算重置+warned 释放（「停止重加可重触发」承诺成立）"""
+    engine, statuses, _write = _make_gate_engine(monkeypatch, tmp_path)
+    engine._login_budgets["1"] = 0
+    engine._budget_warned.add("1")
+
+    async def _noop(room_id):
+        return None
+
+    monkeypatch.setattr(engine, "_run_room", _noop)
+    await engine.start("1")
+    try:
+        assert engine._login_budgets.get("1", LOGIN_GATE.LOGIN_BUDGET) == LOGIN_GATE.LOGIN_BUDGET
+        assert "1" not in engine._budget_warned
+        assert engine._stop_flags["1"] is False
+    finally:
+        await engine.stop("1")
+
+
+@pytest.mark.asyncio
+async def test_login_gate_takeover_success_resets_budget(monkeypatch, tmp_path):
+    """ship 对抗终审F1 守护：takeover 成功→预算清零+warned 释放（对齐 jd/taobao 先例）"""
+    import danmaku_listener.senders.huya as huya_sender_mod
+
+    engine, statuses, _write = _make_gate_engine(monkeypatch, tmp_path)
+    engine._login_budgets["1"] = 1  # 已扣过一次
+
+    async def _ok(room_id):
+        return True
+
+    monkeypatch.setattr(huya_sender_mod, "takeover_login_and_archive", _ok)
+    engine._stop_flags["1"] = True
+    await engine._run_room("1")
+    assert engine._login_budgets.get("1", LOGIN_GATE.LOGIN_BUDGET) == LOGIN_GATE.LOGIN_BUDGET
+    assert "1" not in engine._budget_warned

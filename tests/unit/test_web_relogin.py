@@ -111,6 +111,14 @@ async def _await_platform_task(platform, timeout=8.0):
 # ---- 编排同步段 + 多房间恢复（T1/T3-D 修复验证）----
 
 @pytest.mark.asyncio
+async def test_run_relogin_flow_unsupported_platform_rejects(tmp_path):
+    """unsupported 平台（无登录载体定义）→ ReloginUnsupported（v1 用例回归，
+    v2 重写时遗失；端点层据此映射 400——见 test_relogin_endpoint.py）"""
+    with pytest.raises(ReloginUnsupported):
+        await run_relogin_flow(FakeBridge(), "meituan", "1", cookie_dir=str(tmp_path))
+
+
+@pytest.mark.asyncio
 async def test_sync_payload_shape_and_multi_room_recovery(tmp_path):
     """同步段回执形状（计划 §3.1-6）+ 多房间全量恢复（D 修复）+ 终态 completed"""
     bridge = FakeBridge()
@@ -283,6 +291,56 @@ async def test_huya_takeover_fail_listen_still_recovers(tmp_path, monkeypatch):
     assert any(r["status"] == "running" for r in status["rooms"].values())
 
 
+# ---- watcher 预算超时兜底（Eng C6/R9：登录窗自身超时应判负的兜底终局）----
+
+class _FakeTime:
+    """time 桩：monotonic 首读 t0（算 deadline），次读直接越过预算
+
+    预算下限=login_timeout+30.0（硬编码缓冲），常数压缩压不进秒级——
+    以 monotonic 桩确定性越过 deadline，常数 patch 按建议形态保留作护栏。
+    """
+
+    def __init__(self):
+        self._monotonic_reads = 0
+
+    def monotonic(self):
+        self._monotonic_reads += 1
+        return 0.0 if self._monotonic_reads == 1 else 10_000.0
+
+    def time(self):
+        return 1_700_000_000.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("send_refresh,expected_state,error_fragment", [
+    ("pending", "login_required", "登录窗口超时"),     # 登录窗未出结果——兜底判 login_required
+    ("refresh_failed", "failed", "恢复超时"),          # 登录已判负/房间未回——恢复超时 failed
+])
+async def test_watch_recovery_budget_timeout_terminal(monkeypatch, send_refresh,
+                                                      expected_state, error_fragment):
+    """预算超时兜底终局：房间未回 + send_refresh 状态决定 login_required/failed"""
+    from types import SimpleNamespace
+
+    fake_time = _FakeTime()
+    monkeypatch.setattr(rl, "time", fake_time)
+    monkeypatch.setattr(rl, "LOGIN_WINDOW_TIMEOUT_S", {"huya": 0.5, "douyin": 0.5})
+    monkeypatch.setattr(rl, "RECOVERY_BUDGET_PER_ROOM_S", 0.5)
+    monkeypatch.setattr(rl, "WATCHER_POLL_S", 0.0)
+
+    rec = rl.REGISTRY.create(
+        "huya", "9", ["9"], [], [], send_refresh,
+        [{"side": "send", "kind": "takeover", "triggered": True, "reused_existing": False}])
+    bridge = SimpleNamespace(_rooms={})  # 无桥接回读——房间保持 stopped
+
+    await rl._watch_recovery(rec, bridge, "huya")
+
+    final = rl.REGISTRY.get(rec["relogin_id"])
+    assert final["state"] == expected_state
+    assert error_fragment in (final["error"] or "")
+    assert final["finished_at"] is not None
+    assert final["interruption_window"]["ended_at"] is not None
+
+
 # ---- 注册表生命周期（淘汰=404 语义）----
 
 def _mk_finished(platform="taobao", i=0):
@@ -371,3 +429,77 @@ async def test_douyin_export_failure_returns_failed(tmp_path, monkeypatch):
 
     status = await _export_listen_cookies(BoomContext(), str(tmp_path / "x.json"))
     assert status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_sync_login_flows_single_carrier_no_duplicates(tmp_path):
+    """ship 审查 T1/X3：单载体平台 login_flows 恰 1 条
+
+    v2 曾对单载体平台 insert 一条逐字节相同的重复项（set 化断言掩盖）；
+    2026-10-14 Fix-First F6 删除冗余 insert，此用例使回归可失败。
+    """
+    bridge = FakeBridge()
+    (tmp_path / "taobao_profile").mkdir()
+    result = await run_relogin_flow(bridge, "taobao", "123", cookie_dir=str(tmp_path))
+    assert len(result["login_flows"]) == 1
+    assert result["login_flows"][0] == {"side": "listen", "kind": "login_gate",
+                                        "triggered": True, "reused_existing": False}
+    await _await_platform_task("taobao")  # 收殓后台 watcher
+
+
+@pytest.mark.asyncio
+async def test_douyin_export_domain_whitelist_rejects_lookalike_suffixes(tmp_path):
+    """ship 审查 S1：段匹配防伪后缀——notdouyin.com / douyin.com.evil.net 不命中白名单"""
+    from danmaku_listener.engines.douyin_login import _export_listen_cookies
+
+    ctx = FakeContext([
+        {"name": "evil1", "value": "v1", "domain": "notdouyin.com"},
+        {"name": "evil2", "value": "v2", "domain": "douyin.com.evil.net"},
+        {"name": "sessionid", "value": "s1", "domain": "sub.douyin.com"},  # 真子域仍命中
+    ])
+    out = str(tmp_path / "douyin_cookies.json")
+    status = await _export_listen_cookies(ctx, out)
+    assert status == "ok"
+    import json as _json
+    saved = _json.load(open(out, encoding="utf-8"))
+    assert [c["name"] for c in saved] == ["sessionid"]
+
+
+@pytest.mark.asyncio
+async def test_orchestrate_crash_finishes_failed(monkeypatch, tmp_path):
+    """ship 对抗F3 守护：编排意外异常→终局 failed（防 rec 永久 recovering + fence 永久拦截）"""
+    import danmaku_listener.web.relogin as rl
+
+    bridge = FakeBridge()
+    (tmp_path / "taobao_profile").mkdir()
+
+    async def _crash_watch(*args, **kwargs):
+        raise RuntimeError("watcher crash")
+
+    monkeypatch.setattr(rl, "_watch_recovery", _crash_watch)
+    result = await run_relogin_flow(bridge, "taobao", "123", cookie_dir=str(tmp_path))
+    await _await_platform_task("taobao")
+    status = get_relogin_status(result["relogin_id"])
+    assert status["state"] == "failed"
+    assert "编排内部异常" in (status.get("error") or "")
+
+
+@pytest.mark.asyncio
+async def test_concurrent_relogin_single_orchestration(tmp_path):
+    """ship 对抗终审F5 守护：并发同平台 POST→同步段互斥（D3）→终态单活跃编排"""
+    bridge = FakeBridge()
+    (tmp_path / "taobao_profile").mkdir()
+    r1, r2 = await asyncio.gather(
+        run_relogin_flow(bridge, "taobao", "123", cookie_dir=str(tmp_path)),
+        run_relogin_flow(bridge, "taobao", "456", cookie_dir=str(tmp_path)),
+    )
+    await _await_platform_task("taobao")
+    s1 = get_relogin_status(r1["relogin_id"])
+    s2 = get_relogin_status(r2["relogin_id"])
+    # 终态收敛（无永久 recovering=双编排交叉的特征态）：串行锁下后请求 supersede
+    # 前请求；若前请求编排已在后请求进锁前快速完成（单载体直启），后者=全新重登
+    assert {s1["state"], s2["state"]} <= {"superseded", "completed"}
+    assert s2["state"] == "completed"  # 后请求总是走到自己的编排终局
+    import danmaku_listener.web.relogin as rl
+    # 恢复池单归属：终局 active 只能是后请求（r1 被 supersede）或已解绑（finish 清 active）
+    assert rl.REGISTRY.active_id("taobao") in (None, r2["relogin_id"])
