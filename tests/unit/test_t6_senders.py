@@ -107,6 +107,7 @@ class FakeContext:
         self.pages: list = []
         self.added_cookies: list = []
         self.storage_state_called = False
+        self.init_scripts: list = []  # add_init_script 反检测注入记录
 
     async def new_page(self):
         self.pages.append(self._page)
@@ -114,6 +115,9 @@ class FakeContext:
 
     async def add_cookies(self, cookies):
         self.added_cookies.extend(cookies)
+
+    async def add_init_script(self, script):
+        self.init_scripts.append(script)
 
     async def storage_state(self, path=None):
         self.storage_state_called = True
@@ -171,7 +175,6 @@ def make_settings(**overrides):
 async def test_transient_send_success(monkeypatch, sender_cls, tmp_path):
     """快手/斗鱼：凭证注入→选择器→逐键+发送→回显 SENT"""
     sender = sender_cls()
-    sender.observe_window_s = 0  # 诊断保窗仅产品观察模式；单测不测 sleep
     # 凭证文件（tmp_path 隔离——不改真实 cookie/）
     cf = tmp_path / "cred.json"
     if sender.storage_state_mode:
@@ -186,11 +189,31 @@ async def test_transient_send_success(monkeypatch, sender_cls, tmp_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("sender_cls,expect_stealth",
+                         [(KuaishouStateSender, True), (DouyuCookieSender, False)])
+async def test_stealth_script_injection(monkeypatch, sender_cls, expect_stealth, tmp_path):
+    """快手 headless=new 指纹被吞修复（2026-10-13 诊断实证）：STEALTH_JS 经
+    add_init_script 注入；斗鱼 headless 形态已通过发送验收战役——不注入零变化"""
+    sender = sender_cls()
+    cf = tmp_path / "cred.json"
+    cf.write_text(json.dumps({"cookies": [{"name": "k", "value": "v"}]}), encoding="utf-8")
+    monkeypatch.setattr(sender, "cookie_file", str(cf))
+    ctx = FakeContext(FakePage())
+    install_pw(monkeypatch, ctx)
+    result = await sender.send("12345", "[M0] t6")
+    assert result.status == SendStatus.SENT
+    if expect_stealth:
+        assert len(ctx.init_scripts) == 1
+        assert "webdriver" in ctx.init_scripts[0]
+    else:
+        assert ctx.init_scripts == []
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("sender_cls", [KuaishouStateSender, DouyuCookieSender])
 async def test_missing_credential_maps_to_login_hint(monkeypatch, sender_cls, tmp_path):
     """ENG-10 空路径：凭证文件不存在→FAIL+登录 fix_hint（不触发 playwright）"""
     sender = sender_cls()
-    sender.observe_window_s = 0
     monkeypatch.setattr(sender, "cookie_file", str(tmp_path / "nonexistent.json"))
     install_pw(monkeypatch, FakeContext(FakePage()))
     result = await sender.send("12345", "[M0] t6")
@@ -204,7 +227,6 @@ async def test_missing_credential_maps_to_login_hint(monkeypatch, sender_cls, tm
 async def test_login_signal_maps_to_login_hint(monkeypatch, sender_cls, tmp_path):
     """CEO-F8 登录路径：页面'请登录'信号→登录 fix_hint（非风控误导）"""
     sender = sender_cls()
-    sender.observe_window_s = 0
     cf = tmp_path / "cred.json"
     cf.write_text("{}", encoding="utf-8")
     monkeypatch.setattr(sender, "cookie_file", str(cf))
@@ -219,7 +241,6 @@ async def test_login_signal_maps_to_login_hint(monkeypatch, sender_cls, tmp_path
 async def test_risk_signal_maps_to_platform_rejected(monkeypatch, sender_cls, tmp_path):
     """滑块/风控感知→FAIL+勿重扫码（不误报登录）"""
     sender = sender_cls()
-    sender.observe_window_s = 0
     cf = tmp_path / "cred.json"
     cf.write_text("{}", encoding="utf-8")
     monkeypatch.setattr(sender, "cookie_file", str(cf))
@@ -260,7 +281,6 @@ async def test_storage_state_import_never_exports(monkeypatch, tmp_path):
     """事故防护：注入=只读文件+add_cookies；context.storage_state(path=)（导出）不得被调用——
     2026-10-07 实损事故回归防护（kuaishou_storage_state.json 被空 context 导出覆盖）"""
     sender = KuaishouStateSender()
-    sender.observe_window_s = 0  # 诊断保窗不进单测
     cf = tmp_path / "kuaishou_storage_state.json"
     cf.write_text(json.dumps({"cookies": [{"name": "sessionToken", "value": "v"}],
                               "origins": []}), encoding="utf-8")

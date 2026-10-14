@@ -177,17 +177,16 @@
 - **Effort**: human L / CC L | **Depends on**: 无
 - 来源: /autoplan 验收反馈（2026-10-13，用户报告）
 
-## P2: 快手发送假弹幕专项——headless 瞬态页静默吞验证（2026-10-13 验收反馈）
-- **What**: 用户报告快手发送「只在系统回显，不进直播间」——症状精确匹配虎牙
-  headless=new 指纹静默吞模式（本地回显有、服务端广播无）。需探针验证：
-  直播间开播后瞬态 headless 发送 → 监听 WS 流（或用户肉眼）确认自发声是否
-  到达；确认后修复方向=常驻会话改造（抖音 T3 先例）或 headed 形态试验。
-- **Why**: 假 SENT 回执比失败更糟（AUTOlive 以为已互动）。快手 sender
-  （DomTransientSender headless 瞬态）本次未改动——怀疑平台侧新增指纹检测。
-- **Pros**: 消除假成功回执；守住回执可信度。
-- **Cons**: 常驻化改造=senders 层结构变更；headed 试验有运营形态风险。
-- **Context**: 学习记录 huya-send-technical-difficulties-full-map 同款症状；
-  用户验收时快手 cookie/storage_state 为旧态（登录态过期也可能导致服务端
-  吞）——探针时先刷新登录态排除干扰。
-- **Effort**: human M / CC M（探针先行） | **Depends on**: 用户直播间开播配合
+## P2✅: 快手发送假弹幕专项——headless=new 指纹静默吞（2026-10-13 诊断结案）
+- **诊断结论**（2026-10-14 用户 headed 可见窗观察实证）：登录态正常、弹幕
+  真实进直播间——根因=headless=new 指纹被快手风控静默吞（虎牙 10-09 同款），
+  非 profile 错误、非登录态过期。期间前端「发送超时」=诊断保窗 90s 的预期
+  副作用（sleep 在回执路径上，前端 60s AbortController 先触发），非回显判定
+  缺陷。
+- **修复**：虎牙纯后台终态同款 STEALTH_JS 7 信号伪装——瞬态基类新增
+  `stealth_script` 类属性（add_init_script 注入），KuaishouStateSender 启用；
+  斗鱼形态零变化（已通过发送验收战役）。
+- **待验收**：用户重启服务实发快手弹幕——回执 SENT（无超时/UNKNOWN）且弹幕
+  进直播间=结案；若伪装仍被吞，备选=瞬态 headed（force_headed=True，每发必
+  弹窗，仅应急）或常驻会话改造（抖音 T3 先例）。
 - 来源: /autoplan 验收反馈（2026-10-13，用户报告）

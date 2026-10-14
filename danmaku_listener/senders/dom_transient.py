@@ -30,6 +30,28 @@ ECHO_WAIT_S = 12.0
 RISK_SIGNALS = ("验证码", "滑动验证", "安全验证", "禁言", "被禁言", "操作过于频繁", "稍后再试")
 LOGIN_SIGNALS = ("需先登录", "请登录", "登录后")
 
+#: headless 反检测指纹包（虎牙 2026-10-09 对抗实验实证：风控识别 headless=new
+#: 指纹并静默吞弹幕——headed 对照可过，注入此 7 信号伪装后 headless 亦过，
+#: 即虎牙 10-10 纯后台终态方案。快手 2026-10-13 用户 headed 可见窗诊断实证
+#: 同根因。瞬态基类经此副本共享——huya.py 保留原文互不耦合）
+STEALTH_JS = """
+() => {
+    Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+    Object.defineProperty(window, 'outerWidth', {get: () => 1280});
+    Object.defineProperty(window, 'outerHeight', {get: () => 800});
+    Object.defineProperty(screen, 'availWidth', {get: () => 1280});
+    Object.defineProperty(screen, 'availHeight', {get: () => 760});
+    Object.defineProperty(screen, 'colorDepth', {get: () => 24});
+    Object.defineProperty(screen, 'pixelDepth', {get: () => 24});
+    if (!window.chrome) { window.chrome = {runtime: {}, loadTimes: () => {}, csi: () => {}}; }
+    Object.defineProperty(navigator, 'plugins', {get: () => [1,2,3,4,5]});
+    Object.defineProperty(navigator, 'languages', {get: () => ['zh-CN', 'zh', 'en']});
+    const origQuery = window.navigator.permissions.query;
+    window.navigator.permissions.query = (p) => p.name === 'notifications'
+        ? Promise.resolve({state: Notification.permission}) : origQuery(p);
+}
+"""
+
 
 class DomTransientSender(BaseSender):
     """瞬态注入 DOM 发送基类（快手=storage_state；斗鱼=cookie 文件——构造参数差异化）"""
@@ -42,12 +64,15 @@ class DomTransientSender(BaseSender):
     cookie_file: str = ""                # 凭证文件路径（子类定）
     storage_state_mode: bool = False     # True=playwright storage_state 注入；False=cookie 数组注入
     home_url: str = ""                   # 注入后先访问的域首页（cookie 作用域激活）
-    # 诊断观察模式（2026-10-13 快手假弹幕取证——用户指令）：force_headed=True
-    # 去掉 --headless=new flag（真 headed 可见窗——headless=new 指纹=虎牙实证
-    # 的静默吞弹幕同款嫌疑）；observe_window_s>0=回执后保窗 N 秒供肉眼确认
-    # 「弹幕是否真进直播间」（手动关窗或超时）。
+    # 通用诊断/对抗开关（瞬态基类，默认全关）：
+    # force_headed=True 去掉 --headless=new（真 headed 可见窗——取证专用，
+    #   自动发送场景不得长期启用）；observe_window_s>0=回执后保窗 N 秒供肉眼
+    #   核验（sleep 在回执路径上——回执会延迟 N 秒返回，前端 60s 超时先触发）；
+    # stealth_script 非空=add_init_script 反检测伪装注入（headless=new 指纹
+    #   被平台风控静默吞弹幕的解法——虎牙/快手实证同根因）
     force_headed: bool = False
     observe_window_s: int = 0
+    stealth_script: str | None = None
 
     async def send(self, room_id: str, content: str) -> SendResult:
         if not self.room_url_template:
@@ -62,14 +87,13 @@ class DomTransientSender(BaseSender):
                            "--disable-setuid-sandbox", "--hide-crash-restore-bubble"]
             if not self.force_headed:
                 launch_args.append("--headless=new")
-            elif self.observe_window_s > 0:
-                logger.info(f"[{self.platform}] 诊断观察模式：真 headed 可见窗，"
-                            f"回执后保窗 {self.observe_window_s}s——肉眼确认弹幕是否进直播间")
             context = await pw.chromium.launch_persistent_context(
                 self._temp_profile_dir(), headless=False,
                 user_agent=self._ua(), viewport={"width": 1280, "height": 800},
                 args=launch_args)
             try:
+                if self.stealth_script:
+                    await context.add_init_script(f"({self.stealth_script})()")
                 if not await self._inject_credentials(context):
                     return SendResult(SendStatus.FAILED, SendRejectReason.PLATFORM_REJECTED.value,
                                       detail=f"凭证文件不存在或损坏: {self.cookie_file}",
