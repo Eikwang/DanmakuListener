@@ -9,7 +9,7 @@ import json
 import pytest
 
 from danmaku_listener.config.settings import Settings
-from danmaku_listener.contract.models import SendStatus, UnifiedMessage
+from danmaku_listener.contract.models import SendRejectReason, SendStatus, UnifiedMessage
 from danmaku_listener.senders.audit import SendAuditLog
 from danmaku_listener.senders.base import BaseSender, SendResult
 from danmaku_listener.senders.guard import SendGuard
@@ -142,3 +142,57 @@ async def test_fence_exception_still_occupies_dedup_window(tmp_path):
     payload = UnifiedMessage.from_wire(second).payload
     assert payload.reason_code == "DUPLICATE"
     assert "对账" in (payload.fix_hint or "")
+
+
+# ---- 重登 fence 扩面（2026-10-13 S4 附带/E7）----
+
+@pytest.mark.asyncio
+async def test_relogin_fence_rejects_listened_room(tmp_path, monkeypatch):
+    """平台活跃 relogin + 房间在听 → RELOGIN_IN_PROGRESS 拒绝 + 可辨识字段"""
+    pipe = make_pipeline(tmp_path, OkSender())
+    monkeypatch.setattr(pipe, "_get_active_relogin",
+                        lambda p: {"relogin_id": "rid-1", "state": "recovering"})
+    wire = await pipe.handle_request("taobao", "1", "r-rl1", "hello", source="rest")
+    assert wire["payload"]["reason_code"] == SendRejectReason.RELOGIN_IN_PROGRESS.value
+    assert wire["relogin_in_progress"] is True
+    assert wire["relogin_id"] == "rid-1"
+    assert wire["retry_after_s"] == 30
+
+
+@pytest.mark.asyncio
+async def test_relogin_fence_not_listened_carries_fields(tmp_path, monkeypatch):
+    """未监听 + 活跃 relogin → ROOM_NOT_LISTENED 携 relogin 字段（计划 §3.1-6）"""
+    from danmaku_listener.senders.pipeline import DanmuCommandPipeline
+    from danmaku_listener.senders.registry import SenderRegistry
+    from danmaku_listener.senders.audit import SendAuditLog
+    from danmaku_listener.senders.guard import SendGuard
+    from danmaku_listener.config.settings import Settings
+
+    settings = Settings(
+        send_enabled_platforms="taobao", send_dry_run=False,
+        send_min_interval_seconds=0.0, send_jitter_seconds=0.0,
+        send_circuit_threshold=5, send_dedup_window_seconds=300,
+        send_max_length=100, send_rate_key="platform",
+        send_audit_file=str(tmp_path / "audit.jsonl"),
+        send_idempotency_index=str(tmp_path / "idem.json"))
+    reg = SenderRegistry(room_checker=lambda p, r: False)
+    reg.register(OkSender())
+    audit = SendAuditLog(str(tmp_path / "audit.jsonl"), str(tmp_path / "idem.json"))
+    pipe = DanmuCommandPipeline(registry=reg, guard=None, audit=audit,
+                                broadcaster=lambda w: None, auth_configured=True)
+    pipe._guard = SendGuard(settings, blocked_keywords=[])
+    monkeypatch.setattr(pipe, "_get_active_relogin",
+                        lambda p: {"relogin_id": "rid-2", "state": "recovering"})
+    wire = await pipe.handle_request("taobao", "1", "r-rl2", "hello", source="rest")
+    assert wire["payload"]["reason_code"] == SendRejectReason.ROOM_NOT_LISTENED.value
+    assert wire["relogin_in_progress"] is True
+    assert wire["relogin_id"] == "rid-2"
+
+
+@pytest.mark.asyncio
+async def test_no_active_relogin_no_extra_fields(tmp_path):
+    """无活跃重登 → 无附加字段（回归：正常发送不受影响）"""
+    pipe = make_pipeline(tmp_path, OkSender())
+    wire = await pipe.handle_request("taobao", "1", "r-rl3", "hello", source="rest")
+    assert wire["payload"]["status"] == "sent"
+    assert "relogin_in_progress" not in wire

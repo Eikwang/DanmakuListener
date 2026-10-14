@@ -4,7 +4,7 @@
 
 ## Testing
 
-- 运行命令：`python -m pytest tests/ -q`（pytest；测试目录 tests/unit/，全量 ~650 用例 / ~80s）
+- 运行命令：`python -m pytest tests/ -q`（pytest；测试目录 tests/unit/，全量 ~737 用例 / ~100s）
 - 前端对账测试：`node --test "tests/js/*.test.mjs"`（Node ≥21，内置 runner 零依赖；6 用例）
 - 修复 bug 时写回归测试；新增行为配行为测试；提交不得使既有测试失败
 

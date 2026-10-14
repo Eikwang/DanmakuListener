@@ -145,3 +145,66 @@
 - **Context**: 发送矩阵见 docs/testing/m0-send-probe-cards.md（pdd/美团无行）；受控页面组接线模式见 senders/wiring.py EngineHookSender 循环；重启条件=客户对 pdd/美团发声有实际需求，或 AUTOlive 自动发声场景铺开到这两平台。
 - **Effort**: human S / CC M（探针判定+接线+回归）| **Depends on**: 无（E5 模式已验证）
 - 来源: /plan-ceo-review CEO-4 范围裁定（2026-10-08，defer 决策——验收战役交付物 3）
+
+## P3: bridge.start_room 重登 fence 扩面（ship 对抗 F6，2026-10-14 defer）
+- **What**: 重登编排进行中（登录窗开着/profile 被占）时，webui 手动启动同平台房间会撞 douyin profile SingletonLock→login_failed。修法候选：bridge.start_room 检查 get_active_relogin(platform) 活跃时拒绝或排队；或 run_profile_login_flow 模块级 asyncio.Lock。
+- **Why**: fence 目前只拦发送管线不拦 bridge 启动路径；低危高困扰（用户点启动报 login_failed 但看不到原因）。
+- **Effort**: human S / CC S | **Depends on**: 无
+- 来源: /ship v0.8.0 对抗审查 F6 + Red Team F7（同源，INVESTIGATE defer）
+
+## P3: reused_existing 判定改 baseline 差分（ship 对抗 F7，2026-10-14 defer）
+- **What**: douyin_login.py 的 reused_existing 预检在 goto 前判定——过期残留 sessionid 也标 True，用户实际重扫后回执仍标「复用旧态」（AUTOlive 语义失真）。修法：套用 login_takeover 的 baseline 差分先例（登录名 cookie 新出现/值变化才判复用）。
+- **Why**: 回执语义精度；功能无损。
+- **Effort**: human S / CC S | **Depends on**: 无
+- 来源: /ship v0.8.0 对抗审查 F7（低危 defer）
+
+## P3: senders 公开访问器（peek_send_session/get_session 收口）
+- **What**: web/relogin.py 跨模块访问 senders 私有符号（mod._session、_get_session）——senders 内部重构改名会静默破坏 relogin（运行时才炸）。senders 层暴露公开访问器，relogin 只依赖公开面。
+- **Why**: 维护性（import 边界已有注释，但无机制防漂移）。
+- **Effort**: human S / CC S | **Depends on**: 无
+- 来源: /ship v0.8.0 maintainability F14（advisory defer）
+
+## P3: 抖音监听侧 cookie 读通式重导出（Eng-E4，2026-10-13）
+- **What**: 监听引擎启动/重连前，若发送侧 douyin_profile 会话存活，从 profile context 读通式重导出 douyin_cookies.json（域白名单过滤），消除「重登时刻单向快照」的监听侧陈旧窗口。
+- **Why**: 重登导出发生在登录落地时刻，此后发送侧自然续期/轮换 cookie 时监听侧文件陈旧（sessionid 为长身份 cookie，窗口可接受但非零）。
+- **Pros**: 监听侧礼物事件登录态与发送侧持续同步；与登录健康度面板（S8）共用载体探测。
+- **Cons**: 引擎启动路径增加一次 profile context 探测（发送会话可能被拉起）；与 ResidentSendSession 生命周期耦合。
+- **Context**: /autoplan 2026-10-13 重登会话刷新计划的 S2 显式假设（sessionid 长生命周期）；native CEO 发现 2 登记。起点=engines/protocol/douyin.py cookie 加载处+senders/douyin.py _get_session 探测。
+- **Effort**: human S / CC S | **Depends on**: 本计划 S2 落地（导出过滤函数复用）
+- 来源: /autoplan CEO 双声部发现2 + Eng E4（自动写入）
+
+## P1: 斗鱼监听专项——入口迁移 12601→8501 + TLS 指纹反爬（2026-10-13 验收实证）
+- **What**: 斗鱼弹幕入口已从 danmuproxy.douyu.com:12601（明文 TCP/WSS）迁移到
+  wss://danmuproxy.douyu.com:8501/，且新入口带 TLS 指纹校验（python ssl 握手
+  直接 SSLV3_ALERT_HANDSHAKE_FAILURE，网页版 Chromium 正常收帧 25s/45 帧）。
+  引擎传输层需改造：playwright 受控页 WS 桥接（风控最稳，抓 8501 帧验 STT
+  载荷兼容性）或 curl_cffi TLS 指纹伪装（保持协议直连）。载荷格式是否仍为
+  明文 STT 需桥接后验证。
+- **Why**: 验收实证三房间（301049/7877/9999）明文 TCP 与 WSS 均被服务器断开
+  （0 包+EOF）；网页版正常——平台侧变更，10-09 验收时尚正常。用户报告「斗鱼
+  可以发送弹幕但不能监听」（发送走浏览器不受影响）。
+- **Pros**: 恢复斗鱼监听（12 平台矩阵完整性）。
+- **Cons**: playwright 桥接=受控页面模式（内存/部署形态回归 ADR 预算）；指纹
+  伪装=curl_cffi 新依赖+军备风险。
+- **Context**: /autoplan 会话刷新计划验收期发现；与虎牙「检测在会话/环境信誉
+  层」同族（风控在传输层而非载荷层）。证据：本机三房间+不存在房间一致拒绝。
+  **补充（2026-10-13 晚）**：用户重启服务后斗鱼恢复——引擎带存档登录态的
+  loginreq 可过，纯游客 username@=visitor 被拒 → 根因修正为「游客 loginreq
+  被平台拒绝，登录态 loginreq 仍可用」；降级为观察项（存档过期即复发，
+  症状=监听零消息而发送正常——发送走浏览器不受影响）。
+- **Effort**: human L / CC L | **Depends on**: 无
+- 来源: /autoplan 验收反馈（2026-10-13，用户报告）
+
+## P2✅: 快手发送假弹幕专项——headless=new 指纹静默吞（2026-10-13 诊断结案）
+- **诊断结论**（2026-10-14 用户 headed 可见窗观察实证）：登录态正常、弹幕
+  真实进直播间——根因=headless=new 指纹被快手风控静默吞（虎牙 10-09 同款），
+  非 profile 错误、非登录态过期。期间前端「发送超时」=诊断保窗 90s 的预期
+  副作用（sleep 在回执路径上，前端 60s AbortController 先触发），非回显判定
+  缺陷。
+- **修复**：虎牙纯后台终态同款 STEALTH_JS 7 信号伪装——瞬态基类新增
+  `stealth_script` 类属性（add_init_script 注入），KuaishouStateSender 启用；
+  斗鱼形态零变化（已通过发送验收战役）。
+- **待验收**：用户重启服务实发快手弹幕——回执 SENT（无超时/UNKNOWN）且弹幕
+  进直播间=结案；若伪装仍被吞，备选=瞬态 headed（force_headed=True，每发必
+  弹窗，仅应急）或常驻会话改造（抖音 T3 先例）。
+- 来源: /autoplan 验收反馈（2026-10-13，用户报告）

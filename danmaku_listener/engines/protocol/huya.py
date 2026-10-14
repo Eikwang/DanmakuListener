@@ -22,6 +22,7 @@ from danmaku_listener.engines import login_gate as LOGIN_GATE
 from danmaku_listener.engines.base import BaseEngine
 from danmaku_listener.engines.protocol import huya_codec as codec
 from danmaku_listener.engines.protocol.huya_tars import TarsError
+from danmaku_listener.engines.send_login import HUYA_COOKIE_NAMES  # ship 对抗F8：存档判定与 takeover 同名单源
 
 PROTOCOL_VERSION = codec.PROTOCOL_VERSION
 HEARTBEAT_INITIAL_DELAY = 15.0
@@ -54,6 +55,11 @@ class HuyaProtocolEngine(BaseEngine):
     async def start(self, room_id: str) -> None:
         if room_id in self._room_tasks and not self._room_tasks[room_id].done():
             return
+        # ship 对抗终审F1：重新添加=新登录机会（对齐 jd/taobao/xiaohongshu 的
+        # 「成功清零+budget_warned 释放」先例）——否则预算耗尽文案承诺的
+        # 「停止重加可重触发」落空，引擎级缓存单例下永久游客模式
+        self._login_budgets.pop(room_id, None)
+        self._budget_warned.discard(room_id)
         self._stop_flags[room_id] = False
         self._room_tasks[room_id] = asyncio.create_task(self._run_room(room_id), name=f"huya-room-{room_id}")
 
@@ -112,16 +118,53 @@ class HuyaProtocolEngine(BaseEngine):
         # 判定→弹窗→存档。诚实边界：登录态不进当前 Tars 协议连接（协议无注入路径）。
         try:
             from danmaku_listener.config.settings import get_settings
+            import json as _json
             import os as _os
             cookie_path = _os.path.join(get_settings().cookie_dir,
                                         f"{self.platform}_login_cookies.json")
-            outcome = await LOGIN_GATE.ensure_cookie_file_login(
-                room_id, self.platform, "https://www.huya.com/",
-                cookie_path,
-                self._stop_flags, self._login_budgets, self._budget_warned,
-                lambda detail: self._emit_system_status(room_id, detail))
-            if outcome == "stopped":
-                return
+            # 一次登录门（2026-10-13 用户验收裁定）：存档缺失→发送侧 takeover
+            # 一次扫码（登录态入发送 profile+快照+同步写监听存档）——替代旧
+            # 非持久存档窗两段式。takeover 失败回退旧存档窗兜底。
+            archived = False
+            if _os.path.isfile(cookie_path):
+                try:
+                    with open(cookie_path, encoding="utf-8") as fh:
+                        _cookies = _json.load(fh).get("cookies", [])
+                    archived = any(c.get("name") in HUYA_COOKIE_NAMES
+                                   and c.get("value") for c in _cookies)
+                except Exception:  # noqa: BLE001
+                    archived = False
+            if not archived:
+                # ship 对抗F5：takeover 弹窗同样受登录预算约束（LOGIN_BUDGET=2）
+                # ——无人值守下存档持续缺失时不按重连频率反复弹可见窗
+                budget = self._login_budgets.get(room_id, LOGIN_GATE.LOGIN_BUDGET)
+                if budget <= 0:
+                    if room_id not in self._budget_warned:
+                        self._budget_warned.add(room_id)
+                        await self._emit_system_status(
+                            room_id, f"{LOGIN_GATE.LOGIN_EVENT_BUDGET_EXHAUSTED}: "
+                            "登录未完成——已按游客模式继续；停止该房间后重新添加可再次触发登录窗口")
+                else:
+                    self._login_budgets[room_id] = budget - 1
+                    from danmaku_listener.senders.huya import takeover_login_and_archive
+                    await self._emit_system_status(
+                        room_id, f"{LOGIN_GATE.LOGIN_EVENT_FIRST_LOGIN}: 虎牙登录——"
+                        "已弹出浏览器，一次扫码同时开通监听存档与弹幕发送")
+                    if await takeover_login_and_archive(room_id):
+                        await self._emit_system_status(room_id, "登录成功——监听存档与发送登录态已同步")
+                        # ship 对抗终审F1：成功清零对齐 jd/taobao 先例（下次失效重新计预算）
+                        self._login_budgets.pop(room_id, None)
+                        self._budget_warned.discard(room_id)
+                    else:
+                        outcome = await LOGIN_GATE.ensure_cookie_file_login(
+                            room_id, self.platform, "https://www.huya.com/",
+                            cookie_path,
+                            self._stop_flags, self._login_budgets, self._budget_warned,
+                            lambda detail: self._emit_system_status(room_id, detail))
+                        if outcome == "stopped":
+                            return
+            else:
+                await self._emit_system_status(room_id, "登录存档有效——跳过登录门")
         except asyncio.CancelledError:
             raise
         except Exception as e:  # noqa: BLE001  登录门槛故障不阻塞监听（降级游客）

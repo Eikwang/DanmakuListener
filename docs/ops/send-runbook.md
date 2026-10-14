@@ -25,6 +25,7 @@
 | CIRCUIT_OPEN | 连续 N 次失败熔断 | **人工重开**：排查平台侧（禁言/登录态/风控）后 enable |
 | RATE_COOLDOWN | T4 DOM 兜底滑块冷却期（含剩余秒数） | 冷却结束后自动恢复；勿反复重试撞墙 |
 | ROOM_NOT_LISTENED | 目标房间未监听 | 先在控制台添加并启动该房间 |
+| RELOGIN_IN_PROGRESS（或 ROOM_NOT_LISTENED 携 `relogin_in_progress` extra） | 该平台重登编排进行中（v0.8.0 fence——回执附 relogin_id/retry_after_s: 30） | 按 retry_after_s 退避重试；重登终局后重发 |
 | DUPLICATE | 同内容去重窗口内（上次尝试可能未出结果——影子症状） | **先对账**：按 request_id 查 `GET /api/send-results` 确认上次尝试无结果后再退避重试（CEO-8 勿盲目重试） |
 | RATE_LIMITED / TOO_LONG / KEYWORD_BLOCKED | 守卫命中（拒绝不排队） | AUTOlive 退避重试；调 send_min_interval / send_max_length / 关键词表 |
 | FAILED（detail 含 RuntimeError/Target closed，taobao） | sender 级 E5 隔离 catch：launch/浏览器层异常（profile 冲突等） | 查服务日志 stage= 行定位；确认无其他浏览器占用 cookie/taobao_profile 后重试；持续失败跑探针 |
@@ -64,7 +65,9 @@ token 复用 localStorage `send_token`（首次发送 prompt 一次）。验收�
 - **合规（ADR-002）**：验收发送仅限**自运营/受托直播间**（发声主场景约束；
   礼物发送始终禁止）；测试房间与账号由运营方确认后使用
 - **时序避让**：确认该平台监听**无登录/重登动作进行中**（可见登录窗口 240s
-  预算期间 profile 锁被占用，发送 3s 即回 busy——非发送缺陷）；收到 busy
+  预算期间 profile 锁被占用，发送 3s 即回 busy；webui 重登编排期间发送被
+  fence 结构化拒绝——ROOM_NOT_LISTENED/RELOGIN_IN_PROGRESS 附 relogin_id/
+  retry_after_s: 30（v0.8.0 起）。均非发送缺陷）；收到 busy/重登类
   回执先查监听日志再重试
 
 1. **dry-run 模式**（send_dry_run=true）：房间行输入→发送→「○ dry-run 已记录（未实发）」（非成功语义）

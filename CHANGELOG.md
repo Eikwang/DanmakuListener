@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.8.0 (2026-10-14)
+
+重登会话刷新编排——「一次登录落实监听+发送」收官（12 平台会话拓扑审查实证：双载体仅抖音/虎牙）+ 验收反馈四项修复。
+
+### 新增
+- **重登会话刷新编排（web/relogin.py 重写）**：异步两段式回执——POST /api/relogin 同步段即时事实 + GET /api/relogin/status 异步段五终态状态机（recovering→completed|login_required|failed|superseded，同源鉴权+404 playbook 文案）；ReloginRegistry 内存注册表（supersede cancel+join、恢复集合转移、部分成功语义、早停判定、GC 上限 10/3600s）；per-platform asyncio.Lock 串行
+- **抖音单窗双喂**：profile 持久登录→context.storage_state() 域白名单导出（douyin.com 系，排除 ttwid/msToken）→喂监听 cookie 文件——添加平台未登录时一次扫码即双态齐；两窗降级测试开关 DANMU_RELOGIN_FORCE_TWO_WINDOW 可反证
+- **虎牙一次登录**：takeover 可见窗扫码成功即同步导出监听存档（export_huya_archive，login_gate 同格式）——引擎存档门见存档即过，不再二次弹窗
+- **发送 fence 扩面**：未监听 OR 平台 relogin 进行中→RELOGIN_IN_PROGRESS 新拒绝码（SendRejectReason additive）+ REST wire extra 字段（WS 契约不动）
+
+### 修复
+- **快手发送假弹幕（验收反馈）**：用户 headed 可见窗诊断实证——登录态正常、弹幕真实进直播间，根因=headless=new 指纹被快手风控静默吞（虎牙 10-09 同款第二例）。修复=STEALTH_JS 7 信号伪装泛化为 DomTransientSender.stealth_script（add_init_script 注入），快手启用、斗鱼零变化；诊断保窗机制保留为通用开关（force_headed/observe_window_s 默认关）
+- **京东登录窗弹旧直播间页（验收反馈）**：登录窗恒 context.new_page() + 关闭 persistent profile 恢复的遗留标签页——弹窗即所填房间对应页面
+- **B 站监听凭证兜底**：cookie_file txt 不存在时回退 bilibili_storage_state.json（文件组双凭证形态）
+- **持锁 rmtree 静默失败根因修复**：ResidentSendSession idle 1800s 持 profile 锁=重登清理静默失败根因——supersede cancel+join（15s 预算）+ 差集基准（预定清理子集∩实际存在）+ 宽限重试
+- **斗鱼监听零消息根因修正**（登记为观察项）：非入口迁移——游客 loginreq（username@=visitor*）被平台拒、带存档登录态可用；存档过期即复发（症状=监听零消息而发送正常）
+- **虎牙 sender 异常围栏**：takeover/会话层异常隔离转结构化回执（不再 500 穿透）
+
+### ship 发布审查加固（三轮审查：6 specialist → 9 项对抗 → 终审，34 项修复 + 32 个新测试）
+
+- **并发防护**：run_relogin_flow 同步段 per-platform 互斥（_RELOGIN_SYNC_LOCKS）——并发/快速连发 POST 同平台不再产生双编排（双扫码窗/双 watcher 交叉）；supersede join 改 asyncio.wait 消除原 wait_for 超时挂死面
+- **取消语义**：dom_transient 诊断保窗与 takeover_login_and_archive 的 CancelledError 全部 re-raise+就地回收（防可见窗进程泄漏→SingletonLock 连锁失败）；supersede 兜底 close 改重新 peek（懒创建会话关得到）
+- **故障链防护**：login_takeover 期间刷新 _last_activity（防空闲看门狗误杀登录窗）；takeover launch 前清残留 Chromium；_orchestrate 顶层异常兜底终局化（防 rec 永久 recovering→fence 永久拦截该平台发送）；watcher 恢复判定值域扩 login_failed/login_required（登录失败房间不再白等满预算误报「恢复超时」）；虎牙登录门 takeover 接入预算记账（LOGIN_BUDGET，无人值守防反复弹窗）+ 停房重加/登录成功重置预算
+- **安全加固**：cookie 域白名单改段匹配（douyin/huya，防 notdouyin.com/evil-huya.com 类伪后缀域 cookie 混入监听注入集）
+- **契约修正**：单载体平台 login_flows 回执去重（原恒带逐字节重复条目）；同步段/status 回执 deepcopy 隔离注册表内层引用
+- **结构精简（净 -130 行）**：STEALTH_JS 单源化（senders/_stealth.py，推翻双副本互不耦合决策）；房间恢复循环/内联 _recover_rooms helper；_require_bearer 鉴权 helper 收敛 4 处；HUYA_COOKIE_NAMES/DOUYIN_SESSION_COOKIE_NAMES/HUYA_TAKEOVER_PARAMS 常量单源化；死代码清理（run_login_flow 59 行等）
+- **测试基线 706→737**：虎牙一次登录门全链路 9 用例、relogin 端点 HTTP 契约 6 用例、watcher 超时/预算耗尽/编排兜底/并发收敛等守护用例；修复 lifecycle 测试真实弹窗卡死（补 takeover 仿真）
+
+### 文档
+- docs/integration/session-topology.md：12 平台会话拓扑总表（载体分组/触发回路契约/curl 样例/五终态判定表）
+- docs/integration/autolive-merge-v0.7.0.md §4.4 重写（重登两段式契约）
+
+### 验收
+- 用户实测全通过（2026-10-13/14）：抖音/虎牙一次登录、京东房间对应登录页、斗鱼监听+发送、快手监听+发送（STEALTH_JS 修复后）
+- 测试基线 691→706+（relogin 编排 19 用例重写、fence +3、stealth 参数化 +2、事故防护等）
+
 ## v0.7.0 (2026-10-10)
 
 弹幕发送多平台验收收官（10/12 平台全通；拼多多/美团 WEB 端未开放发送入口 N/A）+ 无感后台化架构批。核心资产：F1 登录态快照/恢复（login_state_store 共享层）、F2 发送/监听 profile 互斥、F3 WS 帧服务端回环判定、F4 自发声回环——贯穿小红书/虎牙/京东三平台修复。

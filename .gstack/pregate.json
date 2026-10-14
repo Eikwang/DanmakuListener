@@ -1,0 +1,31 @@
+{
+  "$schema": "https://github.com/garrytan/gstack/docs/pregate.md#pregate-v1",
+  "runner": "python -m pytest {files} -q",
+  "dependencies": {
+    "danmaku_listener/__init__.py": [],
+    "danmaku_listener/contract/models.py": ["tests/unit/test_contract_models.py", "tests/unit/test_contract_command.py"],
+    "danmaku_listener/engines/douyin_login.py": ["tests/unit/test_web_relogin.py", "tests/unit/test_web_bridge.py", "tests/unit/test_room_registry.py"],
+    "danmaku_listener/engines/protocol/controlled_base.py": ["tests/unit/test_jd_send_flow.py", "tests/unit/test_web_relogin.py"],
+    "danmaku_listener/engines/protocol/huya.py": ["tests/unit/test_huya_protocol.py"],
+    "danmaku_listener/engines/protocol/douyin.py": ["tests/unit/test_douyin_protocol.py", "tests/unit/test_douyin_protocols.py"],
+    "danmaku_listener/engines/send_login.py": ["tests/unit/test_huya_protocol.py", "tests/unit/test_huya_send_archive.py"],
+    "danmaku_listener/engines/registry.py": ["tests/unit/test_registry.py"],
+    "danmaku_listener/senders/_stealth.py": ["tests/unit/test_t6_senders.py"],
+    "danmaku_listener/senders/resident_session.py": ["tests/unit/test_resident_session.py", "tests/unit/test_huya_send_archive.py"],
+    "danmaku_listener/senders/dom_transient.py": ["tests/unit/test_t6_senders.py"],
+    "danmaku_listener/senders/huya.py": ["tests/unit/test_t6_senders.py"],
+    "danmaku_listener/senders/kuaishou_douyu.py": ["tests/unit/test_t6_senders.py"],
+    "danmaku_listener/senders/pipeline.py": ["tests/unit/test_send_pipeline.py", "tests/unit/test_send_pipeline_fence.py"],
+    "CHANGELOG.md": [],
+    "TODOS.md": [],
+    "CLAUDE.md": [],
+    "docs/ops/send-runbook.md": [],
+    "VERSION": [],
+    "pyproject.toml": [],
+    "docs/integration/session-topology.md": [],
+    "docs/integration/autolive-merge-v0.7.0.md": [],
+    "cookie/.gitkeep": [],
+    ".gstack/.gitignore": [],
+    ".gstack/pregate.json": []
+  }
+}

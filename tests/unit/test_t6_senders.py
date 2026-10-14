@@ -107,6 +107,7 @@ class FakeContext:
         self.pages: list = []
         self.added_cookies: list = []
         self.storage_state_called = False
+        self.init_scripts: list = []  # add_init_script 反检测注入记录
 
     async def new_page(self):
         self.pages.append(self._page)
@@ -114,6 +115,9 @@ class FakeContext:
 
     async def add_cookies(self, cookies):
         self.added_cookies.extend(cookies)
+
+    async def add_init_script(self, script):
+        self.init_scripts.append(script)
 
     async def storage_state(self, path=None):
         self.storage_state_called = True
@@ -182,6 +186,27 @@ async def test_transient_send_success(monkeypatch, sender_cls, tmp_path):
     result = await sender.send("12345", "[M0] t6")
     assert result.status == SendStatus.SENT
     assert result.sent_at is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sender_cls,expect_stealth",
+                         [(KuaishouStateSender, True), (DouyuCookieSender, False)])
+async def test_stealth_script_injection(monkeypatch, sender_cls, expect_stealth, tmp_path):
+    """快手 headless=new 指纹被吞修复（2026-10-13 诊断实证）：STEALTH_JS 经
+    add_init_script 注入；斗鱼 headless 形态已通过发送验收战役——不注入零变化"""
+    sender = sender_cls()
+    cf = tmp_path / "cred.json"
+    cf.write_text(json.dumps({"cookies": [{"name": "k", "value": "v"}]}), encoding="utf-8")
+    monkeypatch.setattr(sender, "cookie_file", str(cf))
+    ctx = FakeContext(FakePage())
+    install_pw(monkeypatch, ctx)
+    result = await sender.send("12345", "[M0] t6")
+    assert result.status == SendStatus.SENT
+    if expect_stealth:
+        assert len(ctx.init_scripts) == 1
+        assert "webdriver" in ctx.init_scripts[0]
+    else:
+        assert ctx.init_scripts == []
 
 
 @pytest.mark.asyncio
