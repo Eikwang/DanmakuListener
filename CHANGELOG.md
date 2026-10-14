@@ -18,6 +18,16 @@
 - **斗鱼监听零消息根因修正**（登记为观察项）：非入口迁移——游客 loginreq（username@=visitor*）被平台拒、带存档登录态可用；存档过期即复发（症状=监听零消息而发送正常）
 - **虎牙 sender 异常围栏**：takeover/会话层异常隔离转结构化回执（不再 500 穿透）
 
+### ship 发布审查加固（三轮审查：6 specialist → 9 项对抗 → 终审，34 项修复 + 32 个新测试）
+
+- **并发防护**：run_relogin_flow 同步段 per-platform 互斥（_RELOGIN_SYNC_LOCKS）——并发/快速连发 POST 同平台不再产生双编排（双扫码窗/双 watcher 交叉）；supersede join 改 asyncio.wait 消除原 wait_for 超时挂死面
+- **取消语义**：dom_transient 诊断保窗与 takeover_login_and_archive 的 CancelledError 全部 re-raise+就地回收（防可见窗进程泄漏→SingletonLock 连锁失败）；supersede 兜底 close 改重新 peek（懒创建会话关得到）
+- **故障链防护**：login_takeover 期间刷新 _last_activity（防空闲看门狗误杀登录窗）；takeover launch 前清残留 Chromium；_orchestrate 顶层异常兜底终局化（防 rec 永久 recovering→fence 永久拦截该平台发送）；watcher 恢复判定值域扩 login_failed/login_required（登录失败房间不再白等满预算误报「恢复超时」）；虎牙登录门 takeover 接入预算记账（LOGIN_BUDGET，无人值守防反复弹窗）+ 停房重加/登录成功重置预算
+- **安全加固**：cookie 域白名单改段匹配（douyin/huya，防 notdouyin.com/evil-huya.com 类伪后缀域 cookie 混入监听注入集）
+- **契约修正**：单载体平台 login_flows 回执去重（原恒带逐字节重复条目）；同步段/status 回执 deepcopy 隔离注册表内层引用
+- **结构精简（净 -130 行）**：STEALTH_JS 单源化（senders/_stealth.py，推翻双副本互不耦合决策）；房间恢复循环/内联 _recover_rooms helper；_require_bearer 鉴权 helper 收敛 4 处；HUYA_COOKIE_NAMES/DOUYIN_SESSION_COOKIE_NAMES/HUYA_TAKEOVER_PARAMS 常量单源化；死代码清理（run_login_flow 59 行等）
+- **测试基线 706→737**：虎牙一次登录门全链路 9 用例、relogin 端点 HTTP 契约 6 用例、watcher 超时/预算耗尽/编排兜底/并发收敛等守护用例；修复 lifecycle 测试真实弹窗卡死（补 takeover 仿真）
+
 ### 文档
 - docs/integration/session-topology.md：12 平台会话拓扑总表（载体分组/触发回路契约/curl 样例/五终态判定表）
 - docs/integration/autolive-merge-v0.7.0.md §4.4 重写（重登两段式契约）

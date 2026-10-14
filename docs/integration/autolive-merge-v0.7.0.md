@@ -138,7 +138,7 @@ python -m danmaku_listener serve --web     （AUTOlive 根；或沿用 start-ser
 |---|---|---|---|
 | 抖音 | profile 登录窗 ×1（单窗双喂） | 登录落地+导出成功后 | 自动 |
 | 虎牙 | 发送登录窗 ×1（takeover） | takeover 成功后 | 触发即直启（匿名可听） |
-| 其余 8 平台 | 监听登录窗 ×1（既有登录门） | 同载体自动 | 登录后自动 |
+| 其余 9 平台 | 监听登录窗 ×1（既有登录门） | 同载体自动 | 登录后自动 |
 | 抖音（降级开关 `DANMU_RELOGIN_FORCE_TWO_WINDOW=1`） | 监听窗+发送窗 ×2 串行 | profile 窗成功后 | 监听窗完成后 |
 
 **AUTOlive 触发回路**：侦测 NEEDS_LOGIN（SYSTEM_STATUS 词表）或发送拒绝携

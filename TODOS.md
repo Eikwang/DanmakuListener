@@ -146,6 +146,24 @@
 - **Effort**: human S / CC M（探针判定+接线+回归）| **Depends on**: 无（E5 模式已验证）
 - 来源: /plan-ceo-review CEO-4 范围裁定（2026-10-08，defer 决策——验收战役交付物 3）
 
+## P3: bridge.start_room 重登 fence 扩面（ship 对抗 F6，2026-10-14 defer）
+- **What**: 重登编排进行中（登录窗开着/profile 被占）时，webui 手动启动同平台房间会撞 douyin profile SingletonLock→login_failed。修法候选：bridge.start_room 检查 get_active_relogin(platform) 活跃时拒绝或排队；或 run_profile_login_flow 模块级 asyncio.Lock。
+- **Why**: fence 目前只拦发送管线不拦 bridge 启动路径；低危高困扰（用户点启动报 login_failed 但看不到原因）。
+- **Effort**: human S / CC S | **Depends on**: 无
+- 来源: /ship v0.8.0 对抗审查 F6 + Red Team F7（同源，INVESTIGATE defer）
+
+## P3: reused_existing 判定改 baseline 差分（ship 对抗 F7，2026-10-14 defer）
+- **What**: douyin_login.py 的 reused_existing 预检在 goto 前判定——过期残留 sessionid 也标 True，用户实际重扫后回执仍标「复用旧态」（AUTOlive 语义失真）。修法：套用 login_takeover 的 baseline 差分先例（登录名 cookie 新出现/值变化才判复用）。
+- **Why**: 回执语义精度；功能无损。
+- **Effort**: human S / CC S | **Depends on**: 无
+- 来源: /ship v0.8.0 对抗审查 F7（低危 defer）
+
+## P3: senders 公开访问器（peek_send_session/get_session 收口）
+- **What**: web/relogin.py 跨模块访问 senders 私有符号（mod._session、_get_session）——senders 内部重构改名会静默破坏 relogin（运行时才炸）。senders 层暴露公开访问器，relogin 只依赖公开面。
+- **Why**: 维护性（import 边界已有注释，但无机制防漂移）。
+- **Effort**: human S / CC S | **Depends on**: 无
+- 来源: /ship v0.8.0 maintainability F14（advisory defer）
+
 ## P3: 抖音监听侧 cookie 读通式重导出（Eng-E4，2026-10-13）
 - **What**: 监听引擎启动/重连前，若发送侧 douyin_profile 会话存活，从 profile context 读通式重导出 douyin_cookies.json（域白名单过滤），消除「重登时刻单向快照」的监听侧陈旧窗口。
 - **Why**: 重登导出发生在登录落地时刻，此后发送侧自然续期/轮换 cookie 时监听侧文件陈旧（sessionid 为长身份 cookie，窗口可接受但非零）。
