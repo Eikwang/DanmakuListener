@@ -85,7 +85,8 @@ def test_map_gift():
     mapped = codec.map_upstream_message("GIFT", data, 1, 1700000000)
     assert mapped["type"] == "GIFT"
     assert mapped["payload"]["gift_count"] == 5
-    assert mapped["payload"]["gift_value"] == pytest.approx(1.0)
+    # 元口径（2026-10-22 replay G2）：gift_value=price×0.001×num=元·总价
+    assert mapped["payload"]["gift_value"] == pytest.approx(5.0)
 
 
 def test_map_live_and_preparing():

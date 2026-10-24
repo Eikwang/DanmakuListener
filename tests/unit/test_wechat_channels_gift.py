@@ -59,9 +59,9 @@ async def test_gift_20122_20078_paths_no_nameerror():
     assert "GIFT" in types and "LIKE" in types and "SOCIAL" in types
 
     gift = next(m for m in got if m["type"] == "GIFT")
-    # 玫瑰在价格表 → gift_name 反查命中；gift_value = 单价×数量
+    # 玫瑰在价格表 → gift_name 反查命中；元口径（replay G4）：gift_value=表单价(元)×数量
     assert gift["payload"]["gift_name"] == "玫瑰"
-    assert gift["payload"]["gift_value"] == 1 * 2
+    assert gift["payload"]["gift_value"] == 0.1 * 2
     assert gift["payload"]["gift_count"] == 2
     assert gift["platform"] == "wechat_channels"
 
